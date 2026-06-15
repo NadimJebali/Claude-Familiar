@@ -1,0 +1,5 @@
+# The mascot widget uses only the Python standard library (tkinter).
+# No external dependencies required.
+#
+# Dev/test:
+pytest

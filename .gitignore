@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+*.tmp
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Local Claude Code / machine-specific config
+.claude/
+
+# Empty asset placeholders keep the dir; ignore generated art
+assets/states/*.png
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
