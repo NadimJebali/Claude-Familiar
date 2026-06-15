@@ -78,11 +78,11 @@ _FACES = {
         "..oOOOOOOOOOOo..",
     ],
     "dizzy": [
-        "..oOkOkOOkOkOo..",   # x-eyes
+        "..oOkOkOOkOkOo..",   # x-eyes (full 3x3 X per eye)
         "..oOOkOOOOkOOo..",
-        "..oOOOOOOOOOOo..",
-        "..oOmOmOmOmOOo..",   # wavy mouth
-        "..oOOmOmOmOOOo..",
+        "..oOkOkOOkOkOo..",
+        "..oOOmmmmmmOOo..",   # straight mouth
+        "..oOOOOOOmmOOo..",   # drool
     ],
 }
 
