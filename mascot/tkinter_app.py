@@ -43,14 +43,6 @@ STATE_CAPTIONS = {
     "dizzy": "whoa…",
 }
 
-SUBAGENT_LETTERS = {
-    "code-reviewer": "R",
-    "tdd-guide": "T",
-    "security-reviewer": "S",
-    "architect": "A",
-    "code-simplifier": "C",
-}
-
 # --- card geometry / palette ----------------------------------------------
 CARD_W = 158
 CARD_H = 196
@@ -71,9 +63,9 @@ INFO_Y = 178            # model · session duration
 
 LABEL_FG = "#8b8fa3"
 INFO_FG = "#6b6f82"
-BADGE_FILL = "#9f7aea"
-BADGE_R = 9
-BADGE_GAP = 24
+BADGE_GAP = 26          # spacing between sub-agent mini-mascots
+MINI_PIXEL_PX = 1       # pixel size for a mini sub-agent (pixel art) -> ~16px
+MINI_SMOOTH_R = 7       # body radius for a mini sub-agent (smooth art)
 
 # Animation
 BOB_AMPLITUDE = 4
@@ -300,17 +292,18 @@ class MascotWindow:
         return "   ·   ".join(parts)
 
     def _draw_badges(self, c: tk.Canvas) -> None:
+        """Draw each sub-agent as a small version of the mascot (purple sparkle)."""
         subs = (self.state.get("subagents") or [])[:4]
         if not subs:
             return
+        module = _ART.get(config.ART_STYLE, sprite_pixel)
+        size = MINI_PIXEL_PX if config.ART_STYLE == "pixel" else MINI_SMOOTH_R
+        accent = _hex(config.SUBAGENT_COLOR)
         total = (len(subs) - 1) * BADGE_GAP
         x0 = CREATURE_CX - total / 2
-        for i, sub in enumerate(subs):
+        for i in range(len(subs)):
             x = x0 + i * BADGE_GAP
-            letter = SUBAGENT_LETTERS.get(sub.get("type", "?"), "?")
-            c.create_oval(x - BADGE_R, BADGE_Y - BADGE_R, x + BADGE_R, BADGE_Y + BADGE_R,
-                          fill=BADGE_FILL, outline="")
-            c.create_text(x, BADGE_Y, text=letter, font=("Segoe UI", 8, "bold"), fill="#ffffff")
+            module.draw_creature(c, x, BADGE_Y, "working", accent, size, tag="subagent")
 
     # --- positioning ------------------------------------------------------
     def _place_initial(self, index: int) -> None:
