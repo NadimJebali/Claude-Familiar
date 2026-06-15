@@ -21,6 +21,10 @@ WINDOW_SPACING = 8             # gap between stacked per-session mascots
 
 VALID_STATES = ("idle", "thinking", "working", "waiting", "sleeping")
 
+# Mascot art style: "pixel" (Claude-style blocky creature) or "smooth" (the
+# original vector blob, kept on the side). Swap to change the character.
+ART_STYLE = "pixel"
+
 # Per-state accent colors (R, G, B).
 STATE_COLORS = {
     "idle":     (120, 144, 168),

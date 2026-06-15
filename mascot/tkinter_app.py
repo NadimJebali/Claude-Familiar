@@ -12,7 +12,26 @@ import tkinter as tk
 from pathlib import Path
 from typing import Any
 
-from . import config, sprite, state_store
+from . import config, sprite_pixel, sprite_smooth, state_store
+
+# Mascot art modules, selectable via config.ART_STYLE. The smooth blob is kept
+# on the side; the pixel creature is the default.
+_ART = {"pixel": sprite_pixel, "smooth": sprite_smooth}
+
+
+def _draw_creature(c, cx, cy, state, accent) -> None:
+    """Draw the mascot using the configured art style."""
+    _ART.get(config.ART_STYLE, sprite_pixel).draw_creature(c, cx, cy, state, accent)
+
+
+def round_rect(c, x1, y1, x2, y2, r, **kw) -> int:
+    """A rounded rectangle as a smoothed polygon (canvas util, not art)."""
+    pts = [
+        x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
+        x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
+        x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
+    ]
+    return c.create_polygon(pts, smooth=True, **kw)
 
 
 STATE_CAPTIONS = {
@@ -43,7 +62,6 @@ PANEL_RADIUS = 20
 
 CREATURE_CX = CARD_W // 2
 CREATURE_CY = 64
-CREATURE_R = 30
 
 CAPTION_Y = 116
 BADGE_Y = 140
@@ -205,14 +223,14 @@ class MascotWindow:
         accent = _accent(self._effective_state)
 
         # rounded panel + accent border (the border pulses while waiting)
-        sprite.round_rect(c, PANEL_MARGIN, PANEL_MARGIN, CARD_W - PANEL_MARGIN,
-                          CARD_H - PANEL_MARGIN, PANEL_RADIUS, fill=PANEL_FILL, outline="")
-        self._border_id = sprite.round_rect(
+        round_rect(c, PANEL_MARGIN, PANEL_MARGIN, CARD_W - PANEL_MARGIN,
+                   CARD_H - PANEL_MARGIN, PANEL_RADIUS, fill=PANEL_FILL, outline="")
+        self._border_id = round_rect(
             c, PANEL_MARGIN, PANEL_MARGIN, CARD_W - PANEL_MARGIN, CARD_H - PANEL_MARGIN,
             PANEL_RADIUS, fill="", outline=accent, width=2,
         )
 
-        sprite.draw_creature(c, CREATURE_CX, CREATURE_CY, self._effective_state, accent, CREATURE_R)
+        _draw_creature(c, CREATURE_CX, CREATURE_CY, self._effective_state, accent)
         self._bob_y = 0.0
 
         c.create_text(CREATURE_CX, CAPTION_Y,

@@ -6,14 +6,24 @@ driven entirely by Claude Code's [hooks](https://docs.anthropic.com/en/docs/clau
 
 One mascot per Claude session. Sub-agents show up as little badges underneath.
 
-The mascot is an **original character drawn entirely with vector primitives** on
-a Tkinter canvas — no image files, no GPU, no dependencies. Its face changes per
-state, and the antenna bulb glows in that state's accent color:
+The mascot is a **pixel-art creature** styled after Claude's blocky terminal
+mascot — drawn cell-by-cell on a Tkinter canvas, no image files, no GPU, no
+dependencies. Its face changes per state, with a sparkle that glows in the
+state's accent color:
 
 ```
 idle (calm) · thinking (looking up) · working (focused) ·
 waiting (wide-eyed) · sleeping (zzz) · dizzy (shake easter egg)
 ```
+
+Two art styles ship in the box, selectable via `ART_STYLE` in
+`mascot/config.py`:
+
+- `"pixel"` (default) — the Claude-style blocky creature (`mascot/sprite_pixel.py`)
+- `"smooth"` — an original rounded vector character (`mascot/sprite_smooth.py`)
+
+The pixel faces are plain 16×16 ASCII grids in `sprite_pixel.py` — edit a grid,
+see the change.
 
 ## What it does
 
@@ -124,7 +134,8 @@ Claude Code session ──hooks──▶ emit.py ──atomic write──▶ ~/.
   state.
 - **`mascot/tkinter_app.py`** polls the state directory every second and
   creates/destroys one native Tkinter window per active session. Each card is a
-  single Canvas; the mascot is drawn by **`mascot/sprite.py`** (vector art).
+  single Canvas; the mascot is drawn by **`mascot/sprite_pixel.py`** (or
+  `sprite_smooth.py`, per `config.ART_STYLE`).
 
 State files live in `~/.claude/mascot/state/`. Each carries a heartbeat (`ts`)
 and the owning `claude.exe` PID so stale/closed sessions get cleaned up.
@@ -135,7 +146,8 @@ and the owning `claude.exe` PID so stale/closed sessions get cleaned up.
 claude-mascot/
   mascot/
     tkinter_app.py    # MascotManager (one Tk root) + per-session windows + speech bubble
-    sprite.py         # custom mascot character drawn on the Canvas (vector art)
+    sprite_pixel.py   # Claude-style pixel-art creature (default art)
+    sprite_smooth.py  # original rounded vector character (kept on the side)
     state_store.py    # read state dir, staleness + dead-PID pruning
     proc.py           # is the owning claude.exe still alive?
     config.py         # paths, timeouts, sizes, colors
