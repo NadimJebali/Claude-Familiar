@@ -52,6 +52,20 @@ Hooks just write a small JSON state file; the widget polls and renders it.
 
 ## Install
 
+**One-click (recommended):**
+
+```bash
+python install.py          # or double-click install.bat
+```
+
+This installs the Claude Code hooks and opens the **settings panel**, where you
+can pick the mascot art, toggle the transparent floating card, enable
+run-at-login, and launch the widget. Reopen it any time with `settings.bat` or
+`python -m mascot.control_panel`. Settings live in
+`~/.claude/mascot/settings.json`.
+
+**Manual (hooks only):**
+
 ```bash
 # 1. (optional) install dev/test deps
 pip install -r requirements.txt
