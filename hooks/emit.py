@@ -74,6 +74,9 @@ def update_state(
     # Key-presence (not truthiness) so a None result isn't re-detected every hook.
     if "owner_pid" not in nxt:
         nxt["owner_pid"] = find_owner_pid()
+    # Stamp the session's start time once, so the widget can show its duration.
+    if "started" not in nxt:
+        nxt["started"] = now
     write_state_atomic(path, nxt)
     return nxt
 

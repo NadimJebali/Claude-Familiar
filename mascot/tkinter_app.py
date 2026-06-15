@@ -53,7 +53,7 @@ SUBAGENT_LETTERS = {
 
 # --- card geometry / palette ----------------------------------------------
 CARD_W = 158
-CARD_H = 182
+CARD_H = 196
 WIN_BG = "#101117"          # window backdrop (blends with the panel's corners)
 PANEL_FILL = "#1d1f29"
 PANEL_EDGE = "#2a2d3b"      # resting border color
@@ -63,11 +63,13 @@ PANEL_RADIUS = 20
 CREATURE_CX = CARD_W // 2
 CREATURE_CY = 64
 
-CAPTION_Y = 116
-BADGE_Y = 140
-LABEL_Y = CARD_H - 14
+CAPTION_Y = 114
+BADGE_Y = 136
+LABEL_Y = 160
+INFO_Y = 178            # model · session duration
 
 LABEL_FG = "#8b8fa3"
+INFO_FG = "#6b6f82"
 BADGE_FILL = "#9f7aea"
 BADGE_R = 9
 BADGE_GAP = 24
@@ -103,6 +105,29 @@ def _lerp(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[i
 
 def _accent(state: str) -> str:
     return _hex(config.STATE_COLORS.get(state, config.STATE_COLORS["idle"]))
+
+
+def _short_model(model: str) -> str:
+    """A compact, friendly model name (e.g. 'claude-opus-4-8' -> 'Opus')."""
+    if not model:
+        return ""
+    low = model.lower()
+    for name in ("opus", "sonnet", "haiku", "fable"):
+        if name in low:
+            return name.capitalize()
+    return model.replace("claude-", "")[:14]
+
+
+def _format_duration(seconds: float) -> str:
+    """Human-friendly elapsed time: '45s', '12m', '1h 3m'."""
+    s = int(max(0, seconds))
+    if s < 60:
+        return f"{s}s"
+    m, s = divmod(s, 60)
+    if m < 60:
+        return f"{m}m"
+    h, m = divmod(m, 60)
+    return f"{h}h {m}m"
 
 
 def _render_sig(state: dict[str, Any], effective_state: str) -> tuple:
@@ -191,6 +216,9 @@ class MascotWindow:
 
         # canvas item ids we animate / restyle in place
         self._border_id: int | None = None
+        self._info_id: int | None = None
+        self._info_text_val = ""
+        self._started = state.get("started")
         self._bob_y = 0.0
 
         # IMPORTANT: extra windows must be Toplevel, not Tk(). Only one Tk root.
@@ -244,7 +272,22 @@ class MascotWindow:
         c.create_text(CREATURE_CX, LABEL_Y, text=label_text,
                       font=("Segoe UI", 7), fill=LABEL_FG, width=CARD_W - 16)
 
+        # model · session duration (duration ticks live in _animate)
+        self._info_text_val = self._info_line(time.time())
+        self._info_id = c.create_text(CREATURE_CX, INFO_Y, text=self._info_text_val,
+                                      font=("Segoe UI", 7), fill=INFO_FG)
+
         self._sig = _render_sig(self.state, self._effective_state)
+
+    def _info_line(self, now: float) -> str:
+        """'<model> · <duration>' — either part omitted if unknown."""
+        parts = []
+        model = _short_model(self.state.get("model", ""))
+        if model:
+            parts.append(model)
+        if self._started:
+            parts.append(_format_duration(now - self._started))
+        return "   ·   ".join(parts)
 
     def _draw_badges(self, c: tk.Canvas) -> None:
         subs = (self.state.get("subagents") or [])[:4]
@@ -328,6 +371,8 @@ class MascotWindow:
         if now is None:
             now = time.time()
         self.state = state
+        if state.get("started"):
+            self._started = state["started"]
 
         raw = state.get("state", "idle")
         if raw == "idle":
@@ -396,6 +441,13 @@ class MascotWindow:
                     t = (math.sin(phase) + 1) / 2
                     color = _hex(_lerp((42, 45, 59), config.STATE_COLORS["waiting"], t))
                     self.canvas.itemconfig(self._border_id, outline=color)
+
+            # Tick the live session-duration text (cheap: only on change).
+            if self._info_id is not None:
+                new_info = self._info_line(now)
+                if new_info != self._info_text_val:
+                    self.canvas.itemconfig(self._info_id, text=new_info)
+                    self._info_text_val = new_info
 
             if self._bubble is not None:
                 self._reposition_bubble()
