@@ -55,6 +55,7 @@ SUBAGENT_LETTERS = {
 CARD_W = 158
 CARD_H = 196
 WIN_BG = "#101117"          # window backdrop (blends with the panel's corners)
+CHROMA = "#ff00ff"          # chroma key -> transparent when TRANSPARENT_BG (unused elsewhere)
 PANEL_FILL = "#1d1f29"
 PANEL_EDGE = "#2a2d3b"      # resting border color
 PANEL_MARGIN = 7
@@ -222,16 +223,25 @@ class MascotWindow:
         self._bob_y = 0.0
 
         # IMPORTANT: extra windows must be Toplevel, not Tk(). Only one Tk root.
+        # Outside the rounded panel is painted with this bg; when transparency is
+        # on it's the chroma key, so only the rounded card shows.
+        win_bg = CHROMA if config.TRANSPARENT_BG else WIN_BG
+
         self.root = tk.Toplevel(manager_root)
         self.root.title(f"Mascot - {session_id[:8]}")
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
-        self.root.configure(bg=WIN_BG)
+        self.root.configure(bg=win_bg)
+        if config.TRANSPARENT_BG:
+            try:
+                self.root.attributes("-transparentcolor", CHROMA)
+            except tk.TclError:
+                pass  # fall back to an opaque backdrop if unsupported
         self.root.geometry(f"{CARD_W}x{CARD_H}")
 
         self.canvas = tk.Canvas(
             self.root, width=CARD_W, height=CARD_H,
-            bg=WIN_BG, highlightthickness=0, bd=0,
+            bg=win_bg, highlightthickness=0, bd=0,
         )
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Button-1>", self._on_drag_start)

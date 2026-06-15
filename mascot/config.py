@@ -25,6 +25,11 @@ VALID_STATES = ("idle", "thinking", "working", "waiting", "sleeping")
 # original vector blob, kept on the side). Swap to change the character.
 ART_STYLE = "pixel"
 
+# Float the rounded card with a transparent window background (the square corners
+# show the desktop). Set False if your Windows setup renders transparent
+# overrideredirect windows oddly (then the card sits on a solid dark backdrop).
+TRANSPARENT_BG = True
+
 # Per-state accent colors (R, G, B).
 STATE_COLORS = {
     "idle":     (120, 144, 168),
