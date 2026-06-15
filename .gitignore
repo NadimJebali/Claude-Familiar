@@ -15,9 +15,6 @@ env/
 # Local Claude Code / machine-specific config
 .claude/
 
-# Empty asset placeholders keep the dir; ignore generated art
-assets/states/*.png
-
 # OS
 Thumbs.db
 desktop.ini

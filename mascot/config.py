@@ -28,6 +28,7 @@ STATE_COLORS = {
     "working":  (72, 187, 120),
     "waiting":  (237, 137, 54),
     "sleeping": (90, 103, 158),
+    "dizzy":    (167, 139, 250),
 }
 
 SUBAGENT_COLOR = (159, 122, 234)

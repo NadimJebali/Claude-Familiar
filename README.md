@@ -6,8 +6,13 @@ driven entirely by Claude Code's [hooks](https://docs.anthropic.com/en/docs/clau
 
 One mascot per Claude session. Sub-agents show up as little badges underneath.
 
+The mascot is an **original character drawn entirely with vector primitives** on
+a Tkinter canvas — no image files, no GPU, no dependencies. Its face changes per
+state, and the antenna bulb glows in that state's accent color:
+
 ```
-😴 idle      🤔 thinking    ⚙️ working    ⏳ waiting    💤 sleeping
+idle (calm) · thinking (looking up) · working (focused) ·
+waiting (wide-eyed) · sleeping (zzz) · dizzy (shake easter egg)
 ```
 
 ## What it does
@@ -118,7 +123,8 @@ Claude Code session ──hooks──▶ emit.py ──atomic write──▶ ~/.
   a pure function (the unit-tested core) that maps each hook event to the next
   state.
 - **`mascot/tkinter_app.py`** polls the state directory every second and
-  creates/destroys one native Tkinter window per active session.
+  creates/destroys one native Tkinter window per active session. Each card is a
+  single Canvas; the mascot is drawn by **`mascot/sprite.py`** (vector art).
 
 State files live in `~/.claude/mascot/state/`. Each carries a heartbeat (`ts`)
 and the owning `claude.exe` PID so stale/closed sessions get cleaned up.
@@ -129,6 +135,7 @@ and the owning `claude.exe` PID so stale/closed sessions get cleaned up.
 claude-mascot/
   mascot/
     tkinter_app.py    # MascotManager (one Tk root) + per-session windows + speech bubble
+    sprite.py         # custom mascot character drawn on the Canvas (vector art)
     state_store.py    # read state dir, staleness + dead-PID pruning
     proc.py           # is the owning claude.exe still alive?
     config.py         # paths, timeouts, sizes, colors
