@@ -132,6 +132,18 @@ def test_usage_limit_reset_message_goes_dead_and_keeps_bubble():
     assert out["notify"]["message"] == "Your limit will reset at 3pm"
 
 
+def test_session_limit_notification_goes_dead():
+    # "You have hit your session limit" ends the session just like a usage limit.
+    payload = {
+        "session_id": SID,
+        "message": "You have hit your session limit",
+        "notification_type": "usage_limit",
+    }
+    out = compute_next_state(base(), "Notification", payload)
+    assert out["state"] == "dead"
+    assert out["notify"]["message"] == "You have hit your session limit"
+
+
 def test_usage_limit_revives_on_next_prompt():
     dead = compute_next_state(
         base(), "Notification", {"session_id": SID, "message": "Claude usage limit reached"}

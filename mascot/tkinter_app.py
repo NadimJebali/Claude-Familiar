@@ -7,6 +7,7 @@ an emoji or image asset. Run with: python run_mascot.py  (or: python -m mascot)
 from __future__ import annotations
 
 import math
+import random
 import sys
 import time
 import tkinter as tk
@@ -132,6 +133,17 @@ SHAKE_MIN_DIST = 7
 SHAKE_WINDOW_S = 0.7
 SHAKE_REVERSALS = 4
 DIZZY_DURATION_S = 2.0
+
+# Attention shake: while a permission/attention prompt sits unanswered, the whole
+# card starts to shake after WAITING_SHAKE_AFTER_S, then grows steadily more
+# frantic the longer it's ignored, reaching full aggression WAITING_SHAKE_RAMP_S
+# later. Amplitude scales with the widget size; frequency does not (it's a rate).
+WAITING_SHAKE_AFTER_S = 30.0
+WAITING_SHAKE_RAMP_S = 60.0
+WAITING_SHAKE_AMP_MIN = _s(2)    # px of sway when the shake first kicks in
+WAITING_SHAKE_AMP_MAX = _s(16)   # px of sway at full aggression
+WAITING_SHAKE_FREQ_MIN = 4.0     # sways/sec when gentle
+WAITING_SHAKE_FREQ_MAX = 11.0    # sways/sec when frantic
 
 
 def _hex(rgb: tuple[int, int, int]) -> str:
@@ -259,9 +271,14 @@ class MascotWindow:
         self._last_shake_pos: tuple[int, int] | None = None
         self._last_move: tuple[int, int] | None = None
         self._reversals: list[float] = []
+        # Attention-shake bookkeeping: when the current "waiting" began, and the
+        # window offset we've currently applied (so we can shake relative to wherever
+        # the card rests — and settle it back — without drifting).
+        self._shake_offset: tuple[int, int] = (0, 0)
 
         raw = state.get("state", "idle")
         self._idle_since: float | None = time.time() if raw == "idle" else None
+        self._waiting_since: float | None = time.time() if raw == "waiting" else None
         self._effective_state = self._compute_effective_state(time.time())
         self._anim_t0 = time.time()
 
@@ -297,6 +314,7 @@ class MascotWindow:
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Button-1>", self._on_drag_start)
         self.canvas.bind("<B1-Motion>", self._on_drag_motion)
+        self.canvas.bind("<ButtonRelease-1>", self._on_drag_end)
 
         self._place_initial(index)
         self._render()
@@ -374,6 +392,9 @@ class MascotWindow:
 
     # --- drag -------------------------------------------------------------
     def _on_drag_start(self, event: tk.Event) -> None:
+        # Undo any active attention-shake first so the grab point maps to the
+        # card's true resting position (no jump as the shake is removed).
+        self._reset_shake_offset()
         self._drag_offset = (event.x_root - self.root.winfo_x(),
                              event.y_root - self.root.winfo_y())
         self._last_shake_pos = None
@@ -386,6 +407,9 @@ class MascotWindow:
             y = event.y_root - self._drag_offset[1]
             self.root.geometry(f"+{x}+{y}")
             self._track_shake(event.x_root, event.y_root)
+
+    def _on_drag_end(self, _event: tk.Event) -> None:
+        self._drag_offset = None
 
     def _track_shake(self, x_root: int, y_root: int) -> None:
         """Count rapid direction reversals on any axis; enough -> go dizzy."""
@@ -442,6 +466,13 @@ class MascotWindow:
                 self._idle_since = now
         else:
             self._idle_since = None
+
+        # Track how long an attention prompt has gone unanswered (drives the shake).
+        if raw == "waiting":
+            if self._waiting_since is None:
+                self._waiting_since = now
+        else:
+            self._waiting_since = None
 
         self._refresh_render(now)
         self._sync_bubble(state.get("notify"))
@@ -513,12 +544,56 @@ class MascotWindow:
                     self.canvas.itemconfig(self._info_id, text=new_info)
                     self._info_text_val = new_info
 
+            # Shake the whole card when a prompt has been ignored too long. Done
+            # before the bubble reposition so the speech bubble shakes along too.
+            self._apply_attention_shake(now)
+
             if self._bubble is not None:
                 self._reposition_bubble()
         except tk.TclError:
             return
 
         self.root.after(config.ANIM_INTERVAL_MS, self._animate)
+
+    # --- attention shake --------------------------------------------------
+    def _apply_attention_shake(self, now: float) -> None:
+        """Jostle the card while a prompt sits unanswered; the longer it's been
+        ignored, the wider and faster the shake — up to a frantic maximum."""
+        if self._drag_offset is not None:
+            return  # the user is holding it; don't fight the drag
+        waiting = (self.state.get("state", "idle") == "waiting"
+                   and self._waiting_since is not None)
+        elapsed = (now - self._waiting_since) if waiting else 0.0
+        if not waiting or elapsed < WAITING_SHAKE_AFTER_S:
+            self._reset_shake_offset()  # settle back to rest
+            return
+
+        intensity = min(1.0, (elapsed - WAITING_SHAKE_AFTER_S) / WAITING_SHAKE_RAMP_S)
+        amp = WAITING_SHAKE_AMP_MIN + (WAITING_SHAKE_AMP_MAX - WAITING_SHAKE_AMP_MIN) * intensity
+        freq = WAITING_SHAKE_FREQ_MIN + (WAITING_SHAKE_FREQ_MAX - WAITING_SHAKE_FREQ_MIN) * intensity
+        phase = (now - self._anim_t0) * freq * 2 * math.pi
+        # A steady horizontal sway, plus a jitter that grows with intensity so it
+        # reads as a gentle wobble at first and a violent buzz once ignored a while.
+        ox = amp * math.sin(phase) + random.uniform(-1.0, 1.0) * amp * 0.5 * intensity
+        oy = random.uniform(-1.0, 1.0) * amp * 0.6
+        self._set_shake_offset(round(ox), round(oy))
+
+    def _set_shake_offset(self, ox: int, oy: int) -> None:
+        """Move the window to its rest position plus (ox, oy). Works as a delta on
+        the current geometry so a concurrent drag/reposition is respected."""
+        if (ox, oy) == self._shake_offset:
+            return
+        try:
+            x = self.root.winfo_x() + (ox - self._shake_offset[0])
+            y = self.root.winfo_y() + (oy - self._shake_offset[1])
+            self.root.geometry(f"+{x}+{y}")
+        except tk.TclError:
+            return
+        self._shake_offset = (ox, oy)
+
+    def _reset_shake_offset(self) -> None:
+        """Return the card to its true resting position (zero shake)."""
+        self._set_shake_offset(0, 0)
 
     def close(self) -> None:
         self._alive = False

@@ -31,13 +31,15 @@ def _is_idle_reminder(message: str) -> bool:
 
 
 # Claude Code fires a Notification when usage is exhausted (e.g. "Claude usage
-# limit reached · your limit will reset at 3pm"). That puts the session out of
-# commission, so the mascot becomes a gravestone ("dead") and keeps the bubble
-# so the user can read the reset time. Note: a transient "rate limit" (429
-# backoff) is recoverable and intentionally NOT matched here — only exhaustion
-# that ends the session should tombstone the mascot.
+# limit reached · your limit will reset at 3pm", or "You have hit your session
+# limit"). That puts the session out of commission, so the mascot becomes a
+# gravestone ("dead") and keeps the bubble so the user can read the reset time.
+# Note: a transient "rate limit" (429 backoff) is recoverable and intentionally
+# NOT matched here — only exhaustion that ends the session should tombstone the
+# mascot.
 _USAGE_LIMIT_HINTS = (
     "usage limit",
+    "session limit",
     "limit reached",
     "limit will reset",
     "reached your usage",

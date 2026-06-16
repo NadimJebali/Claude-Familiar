@@ -13,7 +13,8 @@ state's accent color:
 
 ```
 idle (calm) · thinking (looking up) · working (focused) ·
-waiting (wide-eyed) · sleeping (zzz) · dizzy (shake easter egg)
+waiting (wide-eyed) · sleeping (zzz) · dizzy (shake easter egg) ·
+dead (gravestone, when usage runs out)
 ```
 
 Two art styles ship in the box, selectable via `ART_STYLE` in
@@ -40,6 +41,12 @@ see the change.
   straight from the pixel mascot, so the taskbar matches the card on screen.
 - **Permission speech bubble.** When Claude needs you (e.g. a permission prompt),
   a comic-style speech bubble pops up over the mascot with the message.
+- **Impatient shake.** If a permission/attention prompt goes unanswered for 30s,
+  the card starts to shake — and the longer you ignore it, the more frantic it
+  gets, until you respond.
+- **Gravestone.** When the session runs out of usage (a usage- or session-limit
+  notification), the mascot becomes a 🪦 and keeps the message so you can read the
+  reset time. It revives on your next prompt.
 - **Shake-to-dizzy.** Grab a card and shake it — the mascot gets dizzy (😵‍💫).
 - **Self-cleaning.** Closing a terminal removes its mascot immediately; crashed
   sessions are pruned by a heartbeat timeout.
