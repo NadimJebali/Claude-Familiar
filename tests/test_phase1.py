@@ -95,6 +95,22 @@ def test_notification_captures_permission_message():
     }
 
 
+def test_idle_reminder_notification_does_not_wake_to_waiting():
+    # Claude Code's ~60s "waiting for your input" nudge must not flip a dozing
+    # mascot into the attention-grabbing waiting state.
+    payload = {"session_id": SID, "message": "Claude is waiting for your input"}
+    out = compute_next_state(base(), "Notification", payload)
+    assert out["state"] == "idle"
+    assert out["notify"] is None
+
+
+def test_permission_notification_still_waits():
+    payload = {"session_id": SID, "message": "Claude needs your permission to use Bash"}
+    out = compute_next_state(base(), "Notification", payload)
+    assert out["state"] == "waiting"
+    assert out["notify"]["message"] == "Claude needs your permission to use Bash"
+
+
 def test_notify_is_cleared_by_next_forward_event():
     waiting = compute_next_state(
         base(), "Notification",

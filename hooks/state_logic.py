@@ -17,6 +17,19 @@ from typing import Any
 VALID_STATES = {"idle", "thinking", "working", "waiting", "sleeping"}
 AGENT_TOOL = "Agent"
 
+# Claude Code fires a Notification both for real permission/attention prompts
+# ("Claude needs your permission to use Bash") AND as a plain idle reminder
+# ("Claude is waiting for your input") after ~60s of inactivity. The idle nudge
+# is not a request for the user, so it must not wake a dozing mascot into the
+# attention-grabbing "waiting" state.
+_IDLE_NOTIFICATION_HINTS = ("waiting for your input",)
+
+
+def _is_idle_reminder(message: str) -> bool:
+    """True for the periodic "Claude is waiting for your input" idle nudge."""
+    msg = (message or "").lower()
+    return any(hint in msg for hint in _IDLE_NOTIFICATION_HINTS)
+
 
 def default_state(session_id: str, cwd: str = "", model: str = "") -> dict[str, Any]:
     """A fresh mascot state for a session."""
@@ -90,11 +103,17 @@ def compute_next_state(
         nxt["state"] = "working"
 
     elif event == "Notification":
-        nxt["state"] = "waiting"
-        nxt["notify"] = {
-            "message": payload.get("message", ""),
-            "type": payload.get("notification_type", ""),
-        }
+        message = payload.get("message", "")
+        if _is_idle_reminder(message):
+            # Just an idle nudge — leave the mascot as-is (dozing), no bubble.
+            nxt["state"] = "idle"
+            nxt["notify"] = None
+        else:
+            nxt["state"] = "waiting"
+            nxt["notify"] = {
+                "message": message,
+                "type": payload.get("notification_type", ""),
+            }
 
     elif event == "Stop":
         nxt["state"] = "idle"
