@@ -25,12 +25,16 @@ def build(name: str, exec_cmd: str, *, comment: str = "", icon: str = "",
     return "\n".join(lines)
 
 
-def write(path: Path, **kwargs) -> bool:
-    """Write a ``.desktop`` file (marked executable) and report success."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(build(**kwargs), encoding="utf-8")
+def write(dest: Path, **kwargs) -> bool:
+    """Write a ``.desktop`` file (marked executable) and report success.
+
+    ``dest`` is the destination file; any ``path=`` in ``kwargs`` is the
+    launcher's working directory and is forwarded to :func:`build`.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(build(**kwargs), encoding="utf-8")
     try:
-        path.chmod(0o755)  # GNOME/KDE expect launchers to be executable
+        dest.chmod(0o755)  # GNOME/KDE expect launchers to be executable
     except OSError:
         pass
-    return path.exists()
+    return dest.exists()

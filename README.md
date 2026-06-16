@@ -219,6 +219,14 @@ Covers the state machine and the emit read-modify-write path (GUI excluded).
   session crashed hard it's pruned within the staleness timeout (~5 min).
 - **Wrong Python gets used by hooks.** Re-run the install script *with the Python
   you want* — it records `sys.executable` at install time.
+- **Desktop icon says "Untrusted" (Linux/GNOME).** GNOME marks newly created
+  `.desktop` launchers untrusted until you allow them. Click the icon and choose
+  **Allow Launching**, or mark it trusted from a terminal:
+  `gio set ~/Desktop/claude-familiar.desktop metadata::trusted true`
+  (the application-menu entry doesn't need this).
+- **"Transparent card" does nothing on Linux.** Chroma-key transparency
+  (`-transparentcolor`) is a Windows-only Tk feature; on X11/Wayland the card is
+  always opaque regardless of the setting. Leave the toggle off on Linux.
 
 ## Uninstall
 
