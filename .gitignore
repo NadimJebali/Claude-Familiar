@@ -15,6 +15,9 @@ env/
 # Local Claude Code / machine-specific config
 .claude/
 
+# Generated app icon (derived from mascot/sprite_pixel.py)
+assets/
+
 # OS
 Thumbs.db
 desktop.ini

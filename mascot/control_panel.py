@@ -15,7 +15,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
-from . import autostart, settings as settings_mod, sprite_pixel, sprite_smooth
+from . import autostart, icon, settings as settings_mod, sprite_pixel, sprite_smooth
 from .tkinter_app import _accent, round_rect
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -57,8 +57,10 @@ class ControlPanel:
         self.root.title("Claude Familiar — Settings")
         self.root.configure(bg=BG)
         self.root.resizable(False, False)
+        icon.apply(self.root)
 
         self.style_var = tk.StringVar(value=s["art_style"])
+        self.size_var = tk.StringVar(value=s["widget_size"])
         self.transp_var = tk.BooleanVar(value=s["transparent_bg"])
         self.startup_var = tk.BooleanVar(value=autostart.is_enabled())
         self.status = tk.StringVar(value="")
@@ -87,6 +89,17 @@ class ControlPanel:
         self.preview = tk.Canvas(style_box, width=PREVIEW_W, height=PREVIEW_H,
                                  bg=BG, highlightthickness=0)
         self.preview.pack(side="right", padx=8, pady=8)
+
+        # Size
+        size_box = tk.LabelFrame(self.root, text="Widget size", bg=BG, fg=MUTED,
+                                 font=("Segoe UI", 9))
+        size_box.pack(fill="x", **pad)
+        size_row = tk.Frame(size_box, bg=BG)
+        size_row.pack(anchor="w", padx=8, pady=4)
+        for label, val in (("Small", "small"), ("Medium", "medium"), ("Large", "large")):
+            tk.Radiobutton(size_row, text=label, value=val, variable=self.size_var,
+                           bg=BG, fg=FG, selectcolor=BG, activebackground=BG,
+                           activeforeground=FG, font=("Segoe UI", 9)).pack(side="left", padx=(0, 12))
 
         # Appearance
         appearance = tk.LabelFrame(self.root, text="Appearance", bg=BG, fg=MUTED,
@@ -156,11 +169,12 @@ class ControlPanel:
     def _save(self) -> None:
         settings_mod.save_settings({
             "art_style": self.style_var.get(),
+            "widget_size": self.size_var.get(),
             "transparent_bg": bool(self.transp_var.get()),
         })
         autostart.set_enabled(bool(self.startup_var.get()))
         self.startup_var.set(autostart.is_enabled())
-        self.status.set("Saved. Restart the widget for art/transparency changes to take effect.")
+        self.status.set("Saved. Restart the widget for art/size/transparency changes to take effect.")
 
     def _launch(self) -> None:
         try:

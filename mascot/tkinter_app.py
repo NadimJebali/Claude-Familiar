@@ -1,8 +1,8 @@
 """Tkinter mascot widget.
 
 One window per Claude session. Native, built-in tkinter only — no external deps.
-The mascot is a custom character drawn on a Canvas (see `sprite.py`), not an
-emoji or image asset. Run with: python run_mascot.py  (or: python -m mascot)
+The mascot is a custom character drawn on a Canvas (see `sprite_pixel.py`), not
+an emoji or image asset. Run with: python run_mascot.py  (or: python -m mascot)
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import tkinter as tk
 from pathlib import Path
 from typing import Any
 
-from . import config, sprite_pixel, sprite_smooth, state_store
+from . import config, icon, sprite_pixel, sprite_smooth, state_store
 
 # Mascot art modules, selectable via config.ART_STYLE. The smooth blob is kept
 # on the side; the pixel creature is the default.
@@ -20,8 +20,9 @@ _ART = {"pixel": sprite_pixel, "smooth": sprite_smooth}
 
 
 def _draw_creature(c, cx, cy, state, accent) -> None:
-    """Draw the mascot using the configured art style."""
-    _ART.get(config.ART_STYLE, sprite_pixel).draw_creature(c, cx, cy, state, accent)
+    """Draw the mascot using the configured art style, scaled to the widget size."""
+    size = CREATURE_PX if config.ART_STYLE == "pixel" else CREATURE_R
+    _ART.get(config.ART_STYLE, sprite_pixel).draw_creature(c, cx, cy, state, accent, size)
 
 
 def round_rect(c, x1, y1, x2, y2, r, **kw) -> int:
@@ -44,38 +45,60 @@ STATE_CAPTIONS = {
 }
 
 # --- card geometry / palette ----------------------------------------------
-CARD_W = 158
-CARD_H = 196
+# Every measurement below is authored at the "small" size, then multiplied by
+# config.UI_SCALE so "medium"/"large" scale the whole card uniformly.
+_SCALE = config.UI_SCALE
+
+
+def _s(value: float) -> int:
+    """Scale a base (small-size) measurement by the configured widget size."""
+    return max(1, round(value * _SCALE))
+
+
+def _font(size: int, *opts: str) -> tuple:
+    """A Segoe UI font tuple whose point size tracks the widget size."""
+    return ("Segoe UI", _s(size), *opts)
+
+
+CARD_W = _s(158)
+CARD_H = _s(196)
 WIN_BG = "#101117"          # window backdrop (blends with the panel's corners)
 CHROMA = "#ff00ff"          # chroma key -> transparent when TRANSPARENT_BG (unused elsewhere)
 PANEL_FILL = "#1d1f29"
 PANEL_EDGE = "#2a2d3b"      # resting border color
-PANEL_MARGIN = 7
-PANEL_RADIUS = 20
+PANEL_MARGIN = _s(7)
+PANEL_RADIUS = _s(20)
 
 CREATURE_CX = CARD_W // 2
-CREATURE_CY = 64
+CREATURE_CY = _s(64)
+CREATURE_PX = _s(5)         # pixel size of the main creature (pixel art)
+CREATURE_R = _s(30)         # body radius of the main creature (smooth art)
 
-CAPTION_Y = 114
-BADGE_Y = 136
-LABEL_Y = 160
-INFO_Y = 178            # model · session duration
+CAPTION_Y = _s(114)
+BADGE_Y = _s(136)
+LABEL_Y = _s(160)
+INFO_Y = _s(178)            # model · session duration
+
+CAPTION_FONT = _font(9, "bold")
+LABEL_FONT = _font(7)
+INFO_FONT = _font(7)
 
 LABEL_FG = "#8b8fa3"
 INFO_FG = "#6b6f82"
-BADGE_GAP = 26          # spacing between sub-agent mini-mascots
-MINI_PIXEL_PX = 1       # pixel size for a mini sub-agent (pixel art) -> ~16px
-MINI_SMOOTH_R = 7       # body radius for a mini sub-agent (smooth art)
+BADGE_GAP = _s(26)          # spacing between sub-agent mini-mascots
+MINI_PIXEL_PX = _s(1)       # pixel size for a mini sub-agent (pixel art) -> ~16px
+MINI_SMOOTH_R = _s(7)       # body radius for a mini sub-agent (smooth art)
 
 # Animation
-BOB_AMPLITUDE = 4
+BOB_AMPLITUDE = _s(4)
 BOB_PERIOD_S = 2.0
 PULSE_PERIOD_S = 1.2
 
 # Comic speech bubble (shown above the card while Claude needs the user).
-BUBBLE_W = 196
-BUBBLE_PAD = 10
-BUBBLE_GAP = 6
+BUBBLE_W = _s(196)
+BUBBLE_PAD = _s(10)
+BUBBLE_GAP = _s(6)
+BUBBLE_FONT = _font(9)
 BUBBLE_FILL = "#fdf6e3"
 BUBBLE_TEXT = "#1c1e26"
 BUBBLE_MAX_CHARS = 160
@@ -150,7 +173,7 @@ class BubbleWindow:
             self.top,
             bg=BUBBLE_FILL,
             fg=BUBBLE_TEXT,
-            font=("Segoe UI", 9),
+            font=BUBBLE_FONT,
             justify="center",
             wraplength=BUBBLE_W - 2 * BUBBLE_PAD,
             padx=BUBBLE_PAD,
@@ -265,19 +288,19 @@ class MascotWindow:
 
         c.create_text(CREATURE_CX, CAPTION_Y,
                       text=STATE_CAPTIONS.get(self._effective_state, "—"),
-                      font=("Segoe UI", 9, "bold"), fill=accent)
+                      font=CAPTION_FONT, fill=accent)
 
         self._draw_badges(c)
 
         cwd = self.state.get("cwd", "")
         label_text = Path(cwd).name if cwd else self.session_id[:8]
         c.create_text(CREATURE_CX, LABEL_Y, text=label_text,
-                      font=("Segoe UI", 7), fill=LABEL_FG, width=CARD_W - 16)
+                      font=LABEL_FONT, fill=LABEL_FG, width=CARD_W - 16)
 
         # model · session duration (duration ticks live in _animate)
         self._info_text_val = self._info_line(time.time())
         self._info_id = c.create_text(CREATURE_CX, INFO_Y, text=self._info_text_val,
-                                      font=("Segoe UI", 7), fill=INFO_FG)
+                                      font=INFO_FONT, fill=INFO_FG)
 
         self._sig = _render_sig(self.state, self._effective_state)
 
@@ -475,6 +498,7 @@ class MascotManager:
         self.root = tk.Tk()
         self.root.withdraw()  # hidden controller window
         self.root.title("Mascot Manager")
+        icon.apply(self.root)  # mascot icon for the taskbar / any child windows
 
         config.STATE_DIR.mkdir(parents=True, exist_ok=True)
         print("[mascot] state dir:", config.STATE_DIR)

@@ -31,6 +31,11 @@ VALID_STATES = ("idle", "thinking", "working", "waiting", "sleeping")
 ART_STYLE = _S["art_style"]
 TRANSPARENT_BG = _S["transparent_bg"]
 
+# Widget size: scales the whole card (geometry, creature, fonts). "small" is the
+# original size; "medium"/"large" are uniform multiples of it.
+WIDGET_SIZE = _S["widget_size"]
+UI_SCALE = {"small": 1.0, "medium": 1.3, "large": 1.6}.get(WIDGET_SIZE, 1.0)
+
 # Per-state accent colors (R, G, B).
 STATE_COLORS = {
     "idle":     (120, 144, 168),

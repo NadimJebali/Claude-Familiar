@@ -16,6 +16,7 @@ DEFAULTS: dict[str, Any] = {
     "art_style": "pixel",        # "pixel" | "smooth"
     "transparent_bg": True,      # float the rounded card
     "sleep_after_idle_s": 30,    # idle this long -> sleeping sprite
+    "widget_size": "small",      # "small" | "medium" | "large"
 }
 
 

@@ -34,6 +34,10 @@ see the change.
 - **Sub-agent badges.** When Claude spawns a sub-agent (the `Agent` tool), a small
   badge appears under the mascot and disappears when it finishes.
 - **Sleeping.** After 30s idle the mascot dozes off (💤).
+- **Resizable.** Pick **small / medium / large** in the settings panel — the whole
+  card (creature, text, badges) scales uniformly.
+- **Mascot app icon.** Windows shortcuts and the running app use an icon rendered
+  straight from the pixel mascot, so the taskbar matches the card on screen.
 - **Permission speech bubble.** When Claude needs you (e.g. a permission prompt),
   a comic-style speech bubble pops up over the mascot with the message.
 - **Shake-to-dizzy.** Grab a card and shake it — the mascot gets dizzy (😵‍💫).
@@ -59,10 +63,10 @@ python install.py          # or double-click install.bat
 ```
 
 This installs the Claude Code hooks and opens the **settings panel**, where you
-can pick the mascot art, toggle the transparent floating card, enable
-run-at-login, and launch the widget. Reopen it any time with `settings.bat` or
-`python -m mascot.control_panel`. Settings live in
-`~/.claude/mascot/settings.json`.
+can pick the mascot art, choose the **widget size** (small / medium / large),
+toggle the transparent floating card, enable run-at-login, and launch the widget.
+Reopen it any time with `settings.bat` or `python -m mascot.control_panel`.
+Settings live in `~/.claude/mascot/settings.json`.
 
 **Manual (hooks only):**
 
@@ -162,9 +166,13 @@ claude-mascot/
     tkinter_app.py    # MascotManager (one Tk root) + per-session windows + speech bubble
     sprite_pixel.py   # Claude-style pixel-art creature (default art)
     sprite_smooth.py  # original rounded vector character (kept on the side)
+    icon.py           # app icon (.ico + iconphoto) rendered from the pixel mascot
+    control_panel.py  # settings panel: art, size, transparency, autostart, hooks
+    settings.py       # load/save ~/.claude/mascot/settings.json
+    autostart.py      # create/remove the run-at-login shortcut (Windows)
     state_store.py    # read state dir, staleness + dead-PID pruning
     proc.py           # is the owning claude.exe still alive?
-    config.py         # paths, timeouts, sizes, colors
+    config.py         # paths, timeouts, sizes (UI_SCALE), colors
     __main__.py       # python -m mascot
   hooks/
     emit.py           # invoked by every hook; stdin JSON -> atomic state update
@@ -173,11 +181,16 @@ claude-mascot/
   scripts/
     install_hooks.py  # install/uninstall hooks in ~/.claude/settings.json
   tests/              # pytest suite for state_logic + emit
+  install.py          # one-click installer (install.bat wraps it)
+  settings.bat        # open the settings / control panel
   run_mascot.py       # entry point
   run_mascot.bat      # double-click launcher
   demo.py             # preview with fake sessions
   docs/PLAN.md        # design notes & phase tracker
 ```
+
+The app icon (`assets/claude_familiar.ico`) is generated from the pixel mascot on
+install (and whenever autostart is enabled), so it is not checked into the repo.
 
 ## Tests
 

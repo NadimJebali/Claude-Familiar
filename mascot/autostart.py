@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from . import icon
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RUN_SCRIPT = PROJECT_ROOT / "run_mascot.py"
 
@@ -32,12 +34,14 @@ def is_enabled() -> bool:
 def enable() -> bool:
     """Create the Startup shortcut. Returns True if it now exists."""
     _STARTUP.mkdir(parents=True, exist_ok=True)
+    ico = icon.ensure_ico()  # mascot icon for the shortcut
     ps = (
         "$ws = New-Object -ComObject WScript.Shell; "
         f"$s = $ws.CreateShortcut('{SHORTCUT}'); "
         f"$s.TargetPath = '{_pythonw()}'; "
         f"$s.Arguments = '\"{RUN_SCRIPT}\"'; "
         f"$s.WorkingDirectory = '{PROJECT_ROOT}'; "
+        f"$s.IconLocation = '{ico}'; "
         "$s.WindowStyle = 7; $s.Save()"
     )
     subprocess.run(

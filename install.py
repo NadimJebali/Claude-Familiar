@@ -16,6 +16,10 @@ ROOT = Path(__file__).resolve().parent
 
 
 def main() -> None:
+    print("Generating the mascot app icon...")
+    subprocess.run([sys.executable, "-c",
+                    "from mascot import icon; print(icon.ensure_ico())"],
+                   cwd=str(ROOT), check=False)
     print("Installing Claude Familiar hooks...")
     subprocess.run([sys.executable, str(ROOT / "scripts" / "install_hooks.py")], check=False)
     print("\nOpening the settings panel...")
