@@ -5,12 +5,13 @@ hooks/proc.py). The widget uses `pid_alive()` to drop a mascot the moment that
 process is gone — which happens when the terminal is closed and `SessionEnd`
 never fired.
 
-Stdlib only (ctypes). On non-Windows, or on any uncertainty, returns True so we
-never prune a session we can't positively confirm is dead — the staleness
-timeout remains the backstop.
+Stdlib only (ctypes on Windows, ``os.kill``/``/proc`` on POSIX). On any
+uncertainty we return True so we never prune a session we can't positively
+confirm is dead — the staleness timeout remains the backstop.
 """
 from __future__ import annotations
 
+import os
 import sys
 from typing import Any
 
@@ -21,12 +22,14 @@ _ERROR_ACCESS_DENIED = 5        # process exists, we just can't sync on it
 
 def pid_alive(pid: Any) -> bool:
     """True if `pid` names a running process (or we can't tell)."""
-    if not pid or sys.platform != "win32":
+    if not pid:
         return True
     try:
         pid = int(pid)
     except (TypeError, ValueError):
         return True
+    if sys.platform != "win32":
+        return _pid_alive_posix(pid)
     try:
         import ctypes
 
@@ -41,3 +44,16 @@ def pid_alive(pid: Any) -> bool:
             kernel32.CloseHandle(handle)
     except Exception:
         return True  # never prune on an unexpected error
+
+
+def _pid_alive_posix(pid: int) -> bool:
+    """True if `pid` is a live process on Linux/macOS (or we can't tell)."""
+    try:
+        os.kill(pid, 0)        # signal 0: existence check, sends nothing
+        return True
+    except ProcessLookupError:
+        return False           # definitively gone
+    except PermissionError:
+        return True            # exists, owned by another user
+    except OSError:
+        return True            # unexpected — keep the mascot

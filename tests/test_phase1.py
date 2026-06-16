@@ -111,6 +111,45 @@ def test_permission_notification_still_waits():
     assert out["notify"]["message"] == "Claude needs your permission to use Bash"
 
 
+def test_usage_limit_notification_goes_dead_and_keeps_bubble():
+    payload = {
+        "session_id": SID,
+        "message": "Claude usage limit reached",
+        "notification_type": "usage_limit",
+    }
+    out = compute_next_state(base(), "Notification", payload)
+    assert out["state"] == "dead"
+    assert out["notify"] == {
+        "message": "Claude usage limit reached",
+        "type": "usage_limit",
+    }
+
+
+def test_usage_limit_reset_message_goes_dead_and_keeps_bubble():
+    payload = {"session_id": SID, "message": "Your limit will reset at 3pm"}
+    out = compute_next_state(base(), "Notification", payload)
+    assert out["state"] == "dead"
+    assert out["notify"]["message"] == "Your limit will reset at 3pm"
+
+
+def test_usage_limit_revives_on_next_prompt():
+    dead = compute_next_state(
+        base(), "Notification", {"session_id": SID, "message": "Claude usage limit reached"}
+    )
+    assert dead["state"] == "dead"
+    # Once usage resets and the user submits again, the gravestone comes back to life.
+    revived = compute_next_state(dead, "UserPromptSubmit", {"session_id": SID})
+    assert revived["state"] == "thinking"
+
+
+def test_transient_rate_limit_does_not_go_dead():
+    # A recoverable 429 backoff is an attention notification, not session death.
+    payload = {"session_id": SID, "message": "API rate limit hit, retrying"}
+    out = compute_next_state(base(), "Notification", payload)
+    assert out["state"] == "waiting"
+    assert out["state"] != "dead"
+
+
 def test_notify_is_cleared_by_next_forward_event():
     waiting = compute_next_state(
         base(), "Notification",
@@ -169,3 +208,46 @@ def test_session_end_deletes_file(tmp_path):
 def test_missing_session_id_is_noop(tmp_path):
     assert emit.update_state(tmp_path, "Stop", {}, now=1.0) is None
     assert list(tmp_path.iterdir()) == []
+
+
+# --- cross-platform support (Linux port) ----------------------------------
+
+def test_parse_proc_stat_handles_comm_with_spaces_and_parens():
+    import proc as hooks_proc  # noqa: PLC0415  (hooks dir already on sys.path)
+    # Real /proc/<pid>/stat: comm is parenthesized and may contain ')' and spaces.
+    line = "4242 (claude) S 4200 4242 4200 0 -1 4194304 100 0"
+    assert hooks_proc._parse_stat(line) == (4200, "claude")
+    weird = "10 (weird ) name) S 7 10 7 0 -1 0 0"
+    assert hooks_proc._parse_stat(weird) == (7, "weird ) name")
+
+
+def test_linux_owner_matcher_accepts_claude_comm():
+    import proc as hooks_proc  # noqa: PLC0415
+    assert hooks_proc._is_owner_linux("claude")
+    assert hooks_proc._is_owner_linux("claude-code")
+    assert not hooks_proc._is_owner_linux("bash")
+
+
+def test_pid_alive_true_for_self_and_safe_on_unknown():
+    import os
+    from mascot import proc as mascot_proc
+    assert mascot_proc.pid_alive(os.getpid()) is True
+    assert mascot_proc.pid_alive(None) is True          # unknown owner -> keep
+    assert mascot_proc.pid_alive("not-an-int") is True  # unparseable -> keep
+
+
+def test_png_icon_has_valid_signature_and_chunks():
+    from mascot import icon
+    data = icon._png_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    assert b"IHDR" in data[:30] and data[-8:-4] == b"IEND"
+
+
+def test_desktop_entry_contains_required_keys():
+    from mascot import desktop_entry
+    text = desktop_entry.build("Claude Familiar", '"/usr/bin/python3" -m mascot.control_panel',
+                               icon="/x/icon.png", path="/x", comment="hi")
+    assert text.startswith("[Desktop Entry]")
+    for key in ("Type=Application", "Name=Claude Familiar", "Exec=", "Icon=/x/icon.png",
+                "Path=/x", "Terminal=false"):
+        assert key in text

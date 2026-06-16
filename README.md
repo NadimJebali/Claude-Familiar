@@ -1,6 +1,6 @@
 # Claude Familiar 🐾
 
-A little desktop **familiar** for Claude Code on Windows. It floats a mascot card
+A little desktop **familiar** for Claude Code on Windows and Linux. It floats a mascot card
 on your screen and changes its face to reflect what Claude is doing **live** —
 driven entirely by Claude Code's [hooks](https://docs.anthropic.com/en/docs/claude-code/hooks).
 
@@ -49,8 +49,11 @@ Hooks just write a small JSON state file; the widget polls and renders it.
 
 ## Requirements
 
-- **Windows** (tested on Windows 11 Pro)
-- **Python 3.11+** with Tkinter (bundled with the standard python.org installer)
+- **Windows** (tested on Windows 11 Pro) or **Linux** (X11; freedesktop `.desktop`
+  launchers). On Linux the floating card is opaque — X11 Tk has no chroma-key
+  transparency — so leave the "transparent card" option off there.
+- **Python 3.11+** with Tkinter (bundled with the standard python.org installer;
+  on Debian/Ubuntu install `python3-tk`)
 - No external dependencies — the widget is pure standard library.
   `pytest` is only needed to run the tests.
 
@@ -62,10 +65,10 @@ Hooks just write a small JSON state file; the widget polls and renders it.
 python install.py          # or double-click install.bat
 ```
 
-This installs Claude Familiar as a real Windows app: it installs the Claude Code
-hooks, adds **Start-menu and desktop shortcuts** (so you can launch it from the
-Start menu / Windows search with the mascot icon, just like any other app), and
-opens the **settings panel**. There you can pick the mascot art, choose the
+This installs Claude Familiar as a real desktop app: it installs the Claude Code
+hooks, adds **application-menu and desktop shortcuts** (Start-menu `.lnk` files on
+Windows, freedesktop `.desktop` entries on Linux — so you can launch it with the
+mascot icon, just like any other app), and opens the **settings panel**. There you can pick the mascot art, choose the
 **widget size** (small / medium / large), toggle the transparent floating card,
 add/remove the app shortcuts, enable run-at-login, and launch the widget.
 Reopen it any time with `settings.bat` or `python -m mascot.control_panel`.
@@ -169,19 +172,21 @@ claude-mascot/
     tkinter_app.py    # MascotManager (one Tk root) + per-session windows + speech bubble
     sprite_pixel.py   # Claude-style pixel-art creature (default art)
     sprite_smooth.py  # original rounded vector character (kept on the side)
-    icon.py           # app icon (.ico + iconphoto) rendered from the pixel mascot
+    icon.py           # app icon (.ico/.png + iconphoto) rendered from the pixel mascot
     control_panel.py  # settings panel: art, size, transparency, install, autostart, hooks
     settings.py       # load/save ~/.claude/mascot/settings.json
-    shortcuts.py      # create/remove Start-menu + desktop .lnk shortcuts (Windows)
-    autostart.py      # create/remove the run-at-login shortcut (Windows)
+    osplatform.py     # IS_WINDOWS / IS_LINUX / IS_MACOS detection
+    desktop_entry.py  # write freedesktop .desktop launchers (Linux)
+    shortcuts.py      # app shortcuts: .lnk (Windows) / .desktop (Linux)
+    autostart.py      # run-at-login entry: Startup .lnk (Windows) / XDG autostart (Linux)
     state_store.py    # read state dir, staleness + dead-PID pruning
-    proc.py           # is the owning claude.exe still alive?
+    proc.py           # is the owning claude process still alive? (kernel32 / os.kill)
     config.py         # paths, timeouts, sizes (UI_SCALE), colors
     __main__.py       # python -m mascot
   hooks/
     emit.py           # invoked by every hook; stdin JSON -> atomic state update
     state_logic.py    # compute_next_state (pure, tested)
-    proc.py           # find owning claude.exe PID via process ancestry
+    proc.py           # find owning Claude PID via process ancestry (Toolhelp / /proc)
   scripts/
     install_hooks.py  # install/uninstall hooks in ~/.claude/settings.json
   tests/              # pytest suite for state_logic + emit

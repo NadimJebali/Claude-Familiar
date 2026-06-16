@@ -7,6 +7,7 @@ an emoji or image asset. Run with: python run_mascot.py  (or: python -m mascot)
 from __future__ import annotations
 
 import math
+import sys
 import time
 import tkinter as tk
 from pathlib import Path
@@ -19,8 +20,27 @@ from . import config, icon, sprite_pixel, sprite_smooth, state_store
 _ART = {"pixel": sprite_pixel, "smooth": sprite_smooth}
 
 
+def _draw_gravestone(c, cx, cy) -> None:
+    """A simple tombstone, drawn with canvas primitives (art-style independent)."""
+    hw = _s(24)
+    top = cy - _s(34)
+    bottom = cy + _s(28)
+    # grassy mound at the base
+    c.create_oval(cx - _s(34), bottom - _s(5), cx + _s(34), bottom + _s(9),
+                  fill=GRAVE_GROUND, outline="", tags="creature")
+    # rounded-top stone tablet
+    round_rect(c, cx - hw, top, cx + hw, bottom, _s(16),
+               fill=GRAVESTONE_FILL, outline=GRAVESTONE_EDGE, width=_s(2), tags="creature")
+    # engraved RIP
+    c.create_text(cx, cy - _s(2), text="R.I.P", fill=GRAVESTONE_ENGRAVE,
+                  font=_font(10, "bold"), tags="creature")
+
+
 def _draw_creature(c, cx, cy, state, accent) -> None:
     """Draw the mascot using the configured art style, scaled to the widget size."""
+    if state == "dead":
+        _draw_gravestone(c, cx, cy)
+        return
     size = CREATURE_PX if config.ART_STYLE == "pixel" else CREATURE_R
     _ART.get(config.ART_STYLE, sprite_pixel).draw_creature(c, cx, cy, state, accent, size)
 
@@ -42,6 +62,7 @@ STATE_CAPTIONS = {
     "waiting": "needs you!",
     "sleeping": "zzz…",
     "dizzy": "whoa…",
+    "dead": "out of usage",
 }
 
 # --- card geometry / palette ----------------------------------------------
@@ -64,6 +85,9 @@ CARD_W = _s(158)
 CARD_H = _s(196)
 WIN_BG = "#101117"          # window backdrop (blends with the panel's corners)
 CHROMA = "#ff00ff"          # chroma key -> transparent when TRANSPARENT_BG (unused elsewhere)
+# Chroma-key transparency (-transparentcolor) is a Windows-only Tk feature; on
+# X11/macOS it raises TclError, so we fall back to an opaque card there.
+_SUPPORTS_CHROMA = sys.platform == "win32"
 PANEL_FILL = "#1d1f29"
 PANEL_EDGE = "#2a2d3b"      # resting border color
 PANEL_MARGIN = _s(7)
@@ -117,6 +141,17 @@ def _hex(rgb: tuple[int, int, int]) -> str:
 
 def _lerp(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[int, int, int]:
     return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))  # type: ignore[return-value]
+
+
+# Gravestone palette derived from the shared "dead" state color so it tracks
+# config.STATE_COLORS; edge/engrave are progressively darker shades of it. The
+# grassy mound is its own hue (not a state color).
+_BLACK = (0, 0, 0)
+_GRAVE_BASE = config.STATE_COLORS["dead"]
+GRAVESTONE_FILL = _hex(_GRAVE_BASE)
+GRAVESTONE_EDGE = _hex(_lerp(_GRAVE_BASE, _BLACK, 0.35))
+GRAVESTONE_ENGRAVE = _hex(_lerp(_GRAVE_BASE, _BLACK, 0.6))
+GRAVE_GROUND = "#39473b"
 
 
 def _accent(state: str) -> str:
@@ -240,14 +275,15 @@ class MascotWindow:
         # IMPORTANT: extra windows must be Toplevel, not Tk(). Only one Tk root.
         # Outside the rounded panel is painted with this bg; when transparency is
         # on it's the chroma key, so only the rounded card shows.
-        win_bg = CHROMA if config.TRANSPARENT_BG else WIN_BG
+        use_chroma = config.TRANSPARENT_BG and _SUPPORTS_CHROMA
+        win_bg = CHROMA if use_chroma else WIN_BG
 
         self.root = tk.Toplevel(manager_root)
         self.root.title(f"Mascot - {session_id[:8]}")
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         self.root.configure(bg=win_bg)
-        if config.TRANSPARENT_BG:
+        if use_chroma:
             try:
                 self.root.attributes("-transparentcolor", CHROMA)
             except tk.TclError:
@@ -457,6 +493,8 @@ class MascotWindow:
             # Subtle vertical float — move the whole creature group.
             phase = (elapsed / BOB_PERIOD_S) * 2 * math.pi
             target = -(math.sin(phase) + 1) / 2 * BOB_AMPLITUDE  # 0..-amplitude
+            if self._effective_state == "dead":
+                target = 0.0  # a gravestone sits still; it does not float
             self.canvas.move("creature", 0, target - self._bob_y)
             self._bob_y = target
 

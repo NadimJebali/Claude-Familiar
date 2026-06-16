@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""One-step installer for Claude Familiar.
+"""One-step installer for Claude Familiar (Windows + Linux).
 
-Installs Claude Familiar as a real Windows app: generates the mascot icon,
-installs the Claude Code hooks, creates Start-menu + desktop shortcuts (so you
-can launch it from the Start menu / search like any other application), then
-opens the settings/control panel.
+Installs Claude Familiar as a real desktop app: generates the mascot icon,
+installs the Claude Code hooks, creates application-menu + desktop shortcuts (so
+you can launch it like any other application), then opens the settings panel.
 
     python install.py
 """
@@ -16,17 +15,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
+_IS_WINDOWS = sys.platform == "win32"
+_MENU = "Start menu" if _IS_WINDOWS else "application menu"
+
 
 def main() -> None:
     print("Generating the mascot app icon...")
     subprocess.run([sys.executable, "-c",
-                    "from mascot import icon; print(icon.ensure_ico())"],
+                    "from mascot import icon; print(icon.ensure_app_icon())"],
                    cwd=str(ROOT), check=False)
 
     print("Installing Claude Familiar hooks...")
     subprocess.run([sys.executable, str(ROOT / "scripts" / "install_hooks.py")], check=False)
 
-    print("Adding Claude Familiar to the Start menu and desktop...")
+    print(f"Adding Claude Familiar to the {_MENU} and desktop...")
     result = subprocess.run(
         [sys.executable, "-c",
          "from mascot import shortcuts; "
@@ -39,7 +41,7 @@ def main() -> None:
     if result.returncode != 0 and result.stderr.strip():
         print(f"  (could not create shortcuts: {result.stderr.strip()})")
 
-    print("\nClaude Familiar is installed. Look for it in the Start menu / on your desktop.")
+    print(f"\nClaude Familiar is installed. Look for it in the {_MENU} / on your desktop.")
     print("Opening the settings panel...")
     subprocess.run([sys.executable, "-m", "mascot.control_panel"], cwd=str(ROOT), check=False)
 

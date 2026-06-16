@@ -145,6 +145,16 @@ class ControlPanel:
         ttk.Button(actions, text="Launch widget", command=self._launch).pack(side="left", padx=6)
         ttk.Button(actions, text="Close", command=self.root.destroy).pack(side="right")
 
+        # Danger zone — full uninstall / reset to original
+        danger = tk.LabelFrame(self.root, text="Danger zone", bg=BG, fg="#e06c75",
+                               font=("Segoe UI", 9))
+        danger.pack(fill="x", **pad)
+        tk.Label(danger, text="Remove hooks, shortcuts, settings & icon — reset to original.",
+                 bg=BG, fg=MUTED, font=("Segoe UI", 8), justify="left").pack(
+            side="left", padx=8, pady=6)
+        ttk.Button(danger, text="Uninstall", command=self._uninstall).pack(
+            side="right", padx=8, pady=6)
+
         tk.Label(self.root, textvariable=self.status, bg=BG, fg=MUTED,
                  font=("Segoe UI", 8), wraplength=340, justify="left").pack(
             anchor="w", padx=12, pady=(0, 10))
@@ -209,6 +219,25 @@ class ControlPanel:
             self.status.set("Widget launched.")
         except OSError as exc:
             self.status.set(f"Could not launch widget: {exc}")
+
+    def _uninstall(self) -> None:
+        from tkinter import messagebox
+        from . import uninstall as uninstall_mod
+        if not messagebox.askyesno(
+            "Uninstall Claude Familiar",
+            "This removes the Claude Code hooks, Start-menu/desktop and run-at-login "
+            "shortcuts, your saved settings and session state, and the generated app "
+            "icon — resetting everything to its original form.\n\nContinue?",
+            icon="warning", parent=self.root,
+        ):
+            return
+        actions = uninstall_mod.full_uninstall()
+        messagebox.showinfo(
+            "Claude Familiar uninstalled",
+            "Done:\n\n" + "\n".join(f"• {a}" for a in actions),
+            parent=self.root,
+        )
+        self.root.destroy()
 
     def run(self) -> None:
         self.root.mainloop()

@@ -23,8 +23,6 @@ LABEL_HEIGHT = 16
 WINDOW_MARGIN = 12             # gap from screen edge
 WINDOW_SPACING = 8             # gap between stacked per-session mascots
 
-VALID_STATES = ("idle", "thinking", "working", "waiting", "sleeping")
-
 # Mascot art style ("pixel" / "smooth") and transparent floating card. Both are
 # user-configurable via the settings panel (mascot/control_panel.py); change
 # them there, or edit ~/.claude/mascot/settings.json directly.
@@ -44,6 +42,7 @@ STATE_COLORS = {
     "waiting":  (237, 137, 54),
     "sleeping": (90, 103, 158),
     "dizzy":    (167, 139, 250),
+    "dead":     (122, 128, 144),
 }
 
 SUBAGENT_COLOR = (159, 122, 234)

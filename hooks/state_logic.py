@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from typing import Any
 
-VALID_STATES = {"idle", "thinking", "working", "waiting", "sleeping"}
 AGENT_TOOL = "Agent"
 
 # Claude Code fires a Notification both for real permission/attention prompts
@@ -29,6 +28,26 @@ def _is_idle_reminder(message: str) -> bool:
     """True for the periodic "Claude is waiting for your input" idle nudge."""
     msg = (message or "").lower()
     return any(hint in msg for hint in _IDLE_NOTIFICATION_HINTS)
+
+
+# Claude Code fires a Notification when usage is exhausted (e.g. "Claude usage
+# limit reached · your limit will reset at 3pm"). That puts the session out of
+# commission, so the mascot becomes a gravestone ("dead") and keeps the bubble
+# so the user can read the reset time. Note: a transient "rate limit" (429
+# backoff) is recoverable and intentionally NOT matched here — only exhaustion
+# that ends the session should tombstone the mascot.
+_USAGE_LIMIT_HINTS = (
+    "usage limit",
+    "limit reached",
+    "limit will reset",
+    "reached your usage",
+)
+
+
+def _is_usage_limit(message: str) -> bool:
+    """True when the notification reports an exhausted usage limit."""
+    msg = (message or "").lower()
+    return any(hint in msg for hint in _USAGE_LIMIT_HINTS)
 
 
 def default_state(session_id: str, cwd: str = "", model: str = "") -> dict[str, Any]:
@@ -104,7 +123,15 @@ def compute_next_state(
 
     elif event == "Notification":
         message = payload.get("message", "")
-        if _is_idle_reminder(message):
+        if _is_usage_limit(message):
+            # Out of usage — the session is done; show a gravestone and keep the
+            # bubble so the reset-time message stays visible.
+            nxt["state"] = "dead"
+            nxt["notify"] = {
+                "message": message,
+                "type": payload.get("notification_type", ""),
+            }
+        elif _is_idle_reminder(message):
             # Just an idle nudge — leave the mascot as-is (dozing), no bubble.
             nxt["state"] = "idle"
             nxt["notify"] = None

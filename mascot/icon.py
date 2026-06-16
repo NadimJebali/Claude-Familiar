@@ -7,16 +7,23 @@ the app icon, so they can never drift apart. Two outputs:
     bar of the live windows).
   * ``ensure_ico`` — a Windows ``.ico`` file (for Start-up / desktop shortcuts),
     written as raw bytes so there are no external dependencies.
+  * ``ensure_png`` — a ``.png`` file for Linux ``.desktop`` launchers, likewise
+    written from scratch (zlib) with no third-party imaging library.
+
+Use ``ensure_app_icon`` to get the right file for the current platform.
 """
 from __future__ import annotations
 
 import struct
+import zlib
 import tkinter as tk
 from pathlib import Path
 
-from . import sprite_pixel
+from . import osplatform, sprite_pixel
 
-ICON_PATH = Path(__file__).resolve().parent.parent / "assets" / "claude_familiar.ico"
+_ASSETS = Path(__file__).resolve().parent.parent / "assets"
+ICON_PATH = _ASSETS / "claude_familiar.ico"
+PNG_PATH = _ASSETS / "claude_familiar.png"
 
 
 def _rgb(hex_color: str) -> tuple[int, int, int]:
@@ -101,3 +108,43 @@ def ensure_ico(path: Path = ICON_PATH) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(_ico_bytes())
     return path
+
+
+# --- .png file (for Linux .desktop launchers) ------------------------------
+def _png_chunk(tag: bytes, data: bytes) -> bytes:
+    return (struct.pack(">I", len(data)) + tag + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+
+def _png_bytes(scale: int = 8) -> bytes:
+    """A 32-bit RGBA PNG of the mascot (16*scale square), built with zlib only."""
+    rows = _pixel_rows()
+    h, w = len(rows) * scale, len(rows[0]) * scale
+
+    raw = bytearray()
+    for row in rows:
+        line = bytearray()
+        for cell in row:
+            px = bytes((0, 0, 0, 0)) if cell is None else bytes((*cell, 255))
+            line += px * scale  # horizontal scale
+        for _ in range(scale):   # vertical scale
+            raw.append(0)        # PNG filter type 0 (none) per scanline
+            raw += line
+
+    sig = b"\x89PNG\r\n\x1a\n"
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)  # 8-bit, color type 6 (RGBA)
+    return (sig + _png_chunk(b"IHDR", ihdr)
+            + _png_chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+            + _png_chunk(b"IEND", b""))
+
+
+def ensure_png(path: Path = PNG_PATH) -> Path:
+    """Write the .png (deriving it from the current sprite) and return its path."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_png_bytes())
+    return path
+
+
+def ensure_app_icon() -> Path:
+    """Write and return the app-icon file for the current OS (.ico / .png)."""
+    return ensure_ico() if osplatform.IS_WINDOWS else ensure_png()
