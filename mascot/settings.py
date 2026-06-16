@@ -17,6 +17,8 @@ DEFAULTS: dict[str, Any] = {
     "transparent_bg": True,      # float the rounded card
     "sleep_after_idle_s": 30,    # idle this long -> sleeping sprite
     "widget_size": "small",      # "small" | "medium" | "large"
+    "shake_after_s": 30,         # unanswered prompt waits this long before shaking
+    "shake_max_amp_px": 16,      # how violent: max sway (px) at full aggression
 }
 
 

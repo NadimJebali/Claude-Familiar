@@ -255,6 +255,23 @@ def test_png_icon_has_valid_signature_and_chunks():
     assert b"IHDR" in data[:30] and data[-8:-4] == b"IEND"
 
 
+# --- configurable attention shake -----------------------------------------
+
+def test_settings_defaults_include_shake_controls():
+    from mascot import settings as settings_mod
+    assert "shake_after_s" in settings_mod.DEFAULTS
+    assert "shake_max_amp_px" in settings_mod.DEFAULTS
+
+
+def test_config_clamp_handles_bounds_and_bad_values():
+    from mascot import config
+    assert config._clamp("nope", 5, 120, 30) == 30   # unparseable -> default
+    assert config._clamp(None, 5, 120, 30) == 30     # missing -> default
+    assert config._clamp(1000, 5, 120, 30) == 120    # above max -> clamped
+    assert config._clamp(1, 5, 120, 30) == 5         # below min -> clamped
+    assert config._clamp(42, 5, 120, 30) == 42       # in range -> kept
+
+
 def test_desktop_entry_contains_required_keys():
     from mascot import desktop_entry
     text = desktop_entry.build("Claude Familiar", '"/usr/bin/python3" -m mascot.control_panel',

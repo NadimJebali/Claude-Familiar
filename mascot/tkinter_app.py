@@ -14,7 +14,7 @@ import tkinter as tk
 from pathlib import Path
 from typing import Any
 
-from . import config, icon, sprite_pixel, sprite_smooth, state_store
+from . import config, icon, osplatform, sprite_pixel, sprite_smooth, state_store
 
 # Mascot art modules, selectable via config.ART_STYLE. The smooth blob is kept
 # on the side; the pixel creature is the default.
@@ -138,10 +138,10 @@ DIZZY_DURATION_S = 2.0
 # card starts to shake after WAITING_SHAKE_AFTER_S, then grows steadily more
 # frantic the longer it's ignored, reaching full aggression WAITING_SHAKE_RAMP_S
 # later. Amplitude scales with the widget size; frequency does not (it's a rate).
-WAITING_SHAKE_AFTER_S = 30.0
-WAITING_SHAKE_RAMP_S = 60.0
-WAITING_SHAKE_AMP_MIN = _s(2)    # px of sway when the shake first kicks in
-WAITING_SHAKE_AMP_MAX = _s(16)   # px of sway at full aggression
+WAITING_SHAKE_AFTER_S = config.SHAKE_AFTER_S          # configurable: delay before shaking
+WAITING_SHAKE_RAMP_S = 60.0                           # ramps to full aggression over this
+WAITING_SHAKE_AMP_MAX = _s(config.SHAKE_MAX_AMP_PX)   # configurable: how violent (max sway px)
+WAITING_SHAKE_AMP_MIN = min(_s(2), WAITING_SHAKE_AMP_MAX)  # gentle start, never wider than max
 WAITING_SHAKE_FREQ_MIN = 4.0     # sways/sec when gentle
 WAITING_SHAKE_FREQ_MAX = 11.0    # sways/sec when frantic
 
@@ -384,10 +384,20 @@ class MascotWindow:
 
     # --- positioning ------------------------------------------------------
     def _place_initial(self, index: int) -> None:
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
-        x = sw - CARD_W - 20
-        y = sh - (CARD_H + 12) * (index + 1) - 20
+        """Anchor the card to the bottom-right of the *primary* monitor's work
+        area, stacking extra sessions upward, and clamp so it can never land
+        off-screen (wrong monitor / behind the taskbar / too many stacked)."""
+        area = osplatform.primary_work_area()
+        if area is not None:
+            ax, ay, aw, ah = area
+        else:  # non-Windows / lookup failed: fall back to Tk's screen metrics
+            ax, ay = 0, 0
+            aw, ah = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+
+        x = ax + aw - CARD_W - 20
+        y = ay + ah - (CARD_H + 12) * (index + 1) - 20
+        x = max(ax, min(x, ax + aw - CARD_W))
+        y = max(ay, min(y, ay + ah - CARD_H))
         self.root.geometry(f"+{x}+{y}")
 
     # --- drag -------------------------------------------------------------

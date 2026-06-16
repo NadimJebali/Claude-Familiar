@@ -63,6 +63,8 @@ class ControlPanel:
         self.size_var = tk.StringVar(value=s["widget_size"])
         self.transp_var = tk.BooleanVar(value=s["transparent_bg"])
         self.startup_var = tk.BooleanVar(value=autostart.is_enabled())
+        self.shake_after_var = tk.IntVar(value=int(s["shake_after_s"]))
+        self.shake_amp_var = tk.IntVar(value=int(s["shake_max_amp_px"]))
         self.status = tk.StringVar(value="")
 
         self._build()
@@ -109,6 +111,36 @@ class ControlPanel:
                        variable=self.transp_var, bg=BG, fg=FG, selectcolor=BG,
                        activebackground=BG, activeforeground=FG,
                        font=("Segoe UI", 9)).pack(anchor="w", padx=8, pady=4)
+
+        # Attention shake — when an unanswered prompt starts shaking, and how hard
+        shake_box = tk.LabelFrame(self.root, text="Attention shake", bg=BG, fg=MUTED,
+                                  font=("Segoe UI", 9))
+        shake_box.pack(fill="x", **pad)
+
+        delay_row = tk.Frame(shake_box, bg=BG)
+        delay_row.pack(fill="x", padx=8, pady=(6, 2))
+        tk.Label(delay_row, text="Start shaking after", bg=BG, fg=FG,
+                 font=("Segoe UI", 9)).pack(side="left")
+        self.shake_after_label = tk.Label(delay_row, text="", bg=BG, fg=MUTED,
+                                          font=("Segoe UI", 9), width=6, anchor="e")
+        self.shake_after_label.pack(side="right")
+        ttk.Scale(delay_row, from_=5, to=120, orient="horizontal",
+                  variable=self.shake_after_var,
+                  command=lambda _v: self._refresh_shake_labels()).pack(
+            side="right", fill="x", expand=True, padx=8)
+
+        amp_row = tk.Frame(shake_box, bg=BG)
+        amp_row.pack(fill="x", padx=8, pady=(2, 6))
+        tk.Label(amp_row, text="How violent", bg=BG, fg=FG,
+                 font=("Segoe UI", 9)).pack(side="left")
+        self.shake_amp_label = tk.Label(amp_row, text="", bg=BG, fg=MUTED,
+                                        font=("Segoe UI", 9), width=8, anchor="e")
+        self.shake_amp_label.pack(side="right")
+        ttk.Scale(amp_row, from_=4, to=40, orient="horizontal",
+                  variable=self.shake_amp_var,
+                  command=lambda _v: self._refresh_shake_labels()).pack(
+            side="right", fill="x", expand=True, padx=8)
+        self._refresh_shake_labels()
 
         # Install (Start menu + desktop shortcuts)
         install_box = tk.LabelFrame(self.root, text="Install", bg=BG, fg=MUTED,
@@ -203,15 +235,26 @@ class ControlPanel:
         ok = proc.returncode == 0
         self.status.set("Hooks installed." if ok else f"Hook install failed: {proc.stderr[:200]}")
 
+    def _refresh_shake_labels(self) -> None:
+        """Keep the slider value read-outs in sync (delay in seconds; a friendly
+        word for how violent the shake gets at its peak)."""
+        self.shake_after_label.config(text=f"{self.shake_after_var.get()}s")
+        amp = self.shake_amp_var.get()
+        word = ("gentle" if amp <= 8 else "medium" if amp <= 18
+                else "rough" if amp <= 28 else "violent")
+        self.shake_amp_label.config(text=word)
+
     def _save(self) -> None:
         settings_mod.save_settings({
             "art_style": self.style_var.get(),
             "widget_size": self.size_var.get(),
             "transparent_bg": bool(self.transp_var.get()),
+            "shake_after_s": int(self.shake_after_var.get()),
+            "shake_max_amp_px": int(self.shake_amp_var.get()),
         })
         autostart.set_enabled(bool(self.startup_var.get()))
         self.startup_var.set(autostart.is_enabled())
-        self.status.set("Saved. Restart the widget for art/size/transparency changes to take effect.")
+        self.status.set("Saved. Restart the widget for these changes to take effect.")
 
     def _launch(self) -> None:
         try:

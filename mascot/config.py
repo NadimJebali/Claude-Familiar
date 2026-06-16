@@ -7,6 +7,15 @@ from .settings import load_settings
 
 _S = load_settings()
 
+
+def _clamp(value: object, lo: float, hi: float, default: float) -> float:
+    """Coerce a (possibly hand-edited) setting to a number within [lo, hi]."""
+    try:
+        num = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(hi, num))
+
 STATE_DIR = Path.home() / ".claude" / "mascot" / "state"
 
 # Timing
@@ -33,6 +42,12 @@ TRANSPARENT_BG = _S["transparent_bg"]
 # original size; "medium"/"large" are uniform multiples of it.
 WIDGET_SIZE = _S["widget_size"]
 UI_SCALE = {"small": 1.0, "medium": 1.3, "large": 1.6}.get(WIDGET_SIZE, 1.0)
+
+# Attention shake (see tkinter_app): how long an unanswered permission/attention
+# prompt waits before the card starts shaking, and how violent (wide) the sway
+# becomes at full aggression. Both are user-configurable in the settings panel.
+SHAKE_AFTER_S = _clamp(_S["shake_after_s"], 5, 600, 30)
+SHAKE_MAX_AMP_PX = int(_clamp(_S["shake_max_amp_px"], 2, 60, 16))
 
 # Per-state accent colors (R, G, B).
 STATE_COLORS = {
