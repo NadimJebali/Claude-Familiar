@@ -13,8 +13,8 @@ state's accent color:
 
 ```
 idle (calm) · thinking (looking up) · working (focused) ·
-waiting (wide-eyed) · sleeping (zzz) · dizzy (shake easter egg) ·
-dead (gravestone, when usage runs out)
+waiting (wide-eyed) · happy (celebrating / petted) · sleeping (zzz) ·
+dizzy (shake easter egg) · dead (gravestone, when usage runs out)
 ```
 
 Two art styles ship in the box, selectable via `ART_STYLE` in
@@ -34,11 +34,19 @@ see the change.
   submit a prompt, working while a tool runs, waiting when Claude needs you.
 - **Sub-agent badges.** When Claude spawns a sub-agent (the `Agent` tool), a small
   badge appears under the mascot and disappears when it finishes.
-- **Sleeping.** After 30s idle the mascot dozes off (💤).
+- **Celebrate.** When Claude finishes a turn, the mascot does a happy little hop
+  before settling back to idle.
+- **Pet it.** Click (tap) the mascot and it perks up happily with a few rising
+  pixel hearts — a hand-drawn heart sprite, no image files.
+- **Sleeping.** After a stretch of idle (90s by default, configurable) the mascot
+  dozes off (💤) — and blinks now and then until it does.
 - **Resizable.** Pick **small / medium / large** in the settings panel — the whole
   card (creature, text, badges) scales uniformly.
 - **Mascot app icon.** Windows shortcuts and the running app use an icon rendered
   straight from the pixel mascot, so the taskbar matches the card on screen.
+- **System tray (Windows).** A tray icon sits in the notification area:
+  left-click to show/hide all the cards, right-click for a menu — *Show / hide
+  cards*, *Settings…*, and *Quit*.
 - **Permission speech bubble.** When Claude needs you (e.g. a permission prompt),
   a comic-style speech bubble pops up over the mascot with the message.
 - **Impatient shake.** If a permission/attention prompt goes unanswered for 30s,
@@ -180,6 +188,8 @@ claude-mascot/
     sprite_pixel.py   # Claude-style pixel-art creature (default art)
     sprite_smooth.py  # original rounded vector character (kept on the side)
     icon.py           # app icon (.ico/.png + iconphoto) rendered from the pixel mascot
+    tray.py           # Windows system-tray icon + menu (Win32 ctypes; Windows only)
+    single_instance.py# one-widget-at-a-time guard (named mutex / flock)
     control_panel.py  # settings panel: art, size, transparency, install, autostart, hooks
     settings.py       # load/save ~/.claude/mascot/settings.json
     osplatform.py     # IS_WINDOWS / IS_LINUX / IS_MACOS detection
@@ -234,6 +244,13 @@ Covers the state machine and the emit read-modify-write path (GUI excluded).
 - **"Transparent card" does nothing on Linux.** Chroma-key transparency
   (`-transparentcolor`) is a Windows-only Tk feature; on X11/Wayland the card is
   always opaque regardless of the setting. Leave the toggle off on Linux.
+- **No system-tray icon on Linux.** The tray icon uses `Shell_NotifyIcon` via
+  Win32, so it's Windows-only; on Linux the widget runs exactly the same, just
+  without a tray icon. Open settings with `python -m mascot.control_panel` and
+  quit the widget from its launcher/process.
+- **Only one widget runs at a time.** Launching the widget again (e.g. autostart
+  plus a manual launch) is a no-op — a single-instance guard makes the second one
+  exit cleanly, so cards never appear doubled.
 
 ## Uninstall
 

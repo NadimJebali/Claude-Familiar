@@ -81,6 +81,25 @@ def update_state(
     return nxt
 
 
+def _debug_log(event: str, payload: dict[str, Any]) -> None:
+    """Opt-in: when CLAUDE_MASCOT_DEBUG is set, append a one-line record of each
+    hook event to ~/.claude/mascot/debug.log, so rare flows (e.g. a usage/session
+    limit hit) can be diagnosed from the real payloads. Best-effort and silent —
+    it must never affect the hook's exit status."""
+    if not os.environ.get("CLAUDE_MASCOT_DEBUG"):
+        return
+    try:
+        keys = ("message", "reason", "title", "notification_type", "subtype", "tool_name")
+        fields = {k: payload.get(k) for k in keys if payload.get(k) is not None}
+        line = f"{time.time():.0f}\t{event}\t{json.dumps(fields, ensure_ascii=False)}\n"
+        log = STATE_DIR.parent / "debug.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(line)
+    except Exception:
+        pass
+
+
 def main() -> None:
     event = sys.argv[1] if len(sys.argv) > 1 else "UNKNOWN"
     try:
@@ -88,6 +107,7 @@ def main() -> None:
         payload = json.loads(raw) if raw.strip() else {}
     except Exception:
         payload = {}
+    _debug_log(event, payload)
     update_state(STATE_DIR, event, payload, time.time())
 
 

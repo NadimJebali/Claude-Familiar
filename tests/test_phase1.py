@@ -162,6 +162,22 @@ def test_transient_rate_limit_does_not_go_dead():
     assert out["state"] != "dead"
 
 
+def test_stop_with_session_limit_text_tombstones():
+    # Real-world: "You've hit your session limit · resets 8:50pm". If the limit
+    # text rides on a Stop event, the mascot must die — not go calmly idle.
+    payload = {"session_id": SID, "message": "You've hit your session limit · resets 8:50pm"}
+    out = compute_next_state(base(), "Stop", payload)
+    assert out["state"] == "dead"
+    assert "session limit" in out["notify"]["message"].lower()
+
+
+def test_usage_limit_detected_in_non_message_field():
+    # The limit text may land on `reason` rather than `message`; still detect it.
+    payload = {"session_id": SID, "reason": "You have reached your usage limit"}
+    out = compute_next_state(base(), "Notification", payload)
+    assert out["state"] == "dead"
+
+
 def test_notify_is_cleared_by_next_forward_event():
     waiting = compute_next_state(
         base(), "Notification",
@@ -198,6 +214,58 @@ def test_compute_next_state_does_not_mutate_input():
                        {"session_id": SID, "tool_name": "Agent",
                         "tool_input": {}, "tool_use_id": "y"})
     assert json.dumps(start, sort_keys=True) == snapshot
+
+
+# --- session stat counters ------------------------------------------------
+
+def test_default_state_starts_counters_at_zero():
+    s = default_state(SID)
+    assert s["prompts"] == 0
+    assert s["tools_run"] == 0
+    assert s["subagents_spawned"] == 0
+
+
+def test_prompt_submit_increments_prompt_count():
+    out = compute_next_state(base(), "UserPromptSubmit", {"session_id": SID})
+    assert out["prompts"] == 1
+
+
+def test_regular_tool_increments_tools_run_only():
+    payload = {"session_id": SID, "tool_name": "Bash", "tool_input": {}}
+    out = compute_next_state(base(), "PreToolUse", payload)
+    assert out["tools_run"] == 1
+    assert out["subagents_spawned"] == 0
+
+
+def test_agent_spawn_increments_subagents_spawned_only():
+    payload = {"session_id": SID, "tool_name": "Agent", "tool_input": {}, "tool_use_id": "t1"}
+    out = compute_next_state(base(), "PreToolUse", payload)
+    assert out["subagents_spawned"] == 1
+    assert out["tools_run"] == 0
+
+
+def test_nested_tool_does_not_inflate_tools_run():
+    # A tool running inside a sub-agent (top-level agent_id) is not the visible
+    # session's work, so it must not bump the main-thread tool counter.
+    payload = {"session_id": SID, "tool_name": "Read", "agent_id": "a1", "tool_input": {}}
+    out = compute_next_state(base(), "PreToolUse", payload)
+    assert out["tools_run"] == 0
+
+
+def test_counters_accumulate_across_events():
+    s = base()
+    s = compute_next_state(s, "UserPromptSubmit", {"session_id": SID})
+    s = compute_next_state(s, "PreToolUse", {"session_id": SID, "tool_name": "Bash", "tool_input": {}})
+    s = compute_next_state(s, "PreToolUse", {"session_id": SID, "tool_name": "Read", "tool_input": {}})
+    assert (s["prompts"], s["tools_run"], s["subagents_spawned"]) == (1, 2, 0)
+
+
+def test_counters_upgrade_old_state_without_keys():
+    # State files written before this feature lack the counter keys; the next
+    # event must seed them via .get(default) rather than KeyError.
+    legacy = {"session_id": SID, "state": "idle", "subagents": []}
+    out = compute_next_state(legacy, "UserPromptSubmit", {"session_id": SID})
+    assert out["prompts"] == 1
 
 
 # --- emit (file I/O) ------------------------------------------------------

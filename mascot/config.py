@@ -55,8 +55,10 @@ STATE_COLORS = {
     "thinking": (236, 201, 75),
     "working":  (72, 187, 120),
     "waiting":  (237, 137, 54),
+    "waiting_angry": (237, 137, 54),   # same accent as waiting; only the face changes
     "sleeping": (90, 103, 158),
     "dizzy":    (167, 139, 250),
+    "happy":    (244, 114, 182),   # celebrate / petted — ties to the pink hearts
     "dead":     (122, 128, 144),
 }
 

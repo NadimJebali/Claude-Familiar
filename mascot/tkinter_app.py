@@ -8,17 +8,26 @@ from __future__ import annotations
 
 import math
 import random
+import subprocess
 import sys
 import time
 import tkinter as tk
 from pathlib import Path
 from typing import Any
 
-from . import config, icon, osplatform, sprite_pixel, sprite_smooth, state_store
+from . import config, icon, osplatform, single_instance, sprite_pixel, sprite_smooth, state_store
 
 # Mascot art modules, selectable via config.ART_STYLE. The smooth blob is kept
 # on the side; the pixel creature is the default.
 _ART = {"pixel": sprite_pixel, "smooth": sprite_smooth}
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _pythonw() -> Path:
+    """pythonw.exe (no console window) next to the running interpreter, if any."""
+    candidate = Path(sys.executable).with_name("pythonw.exe")
+    return candidate if candidate.exists() else Path(sys.executable)
 
 
 def _draw_gravestone(c, cx, cy) -> None:
@@ -58,11 +67,14 @@ def round_rect(c, x1, y1, x2, y2, r, **kw) -> int:
 
 STATE_CAPTIONS = {
     "idle": "idle",
+    "idle_blink": "idle",       # a blink is still "idle" — keep the caption steady
     "thinking": "thinking…",
     "working": "working…",
     "waiting": "needs you!",
+    "waiting_angry": "needs you!",   # angry variant once the card starts shaking
     "sleeping": "zzz…",
     "dizzy": "whoa…",
+    "happy": "yay!",
     "dead": "out of usage",
 }
 
@@ -90,6 +102,7 @@ CHROMA = "#ff00ff"          # chroma key -> transparent when TRANSPARENT_BG (unu
 # X11/macOS it raises TclError, so we fall back to an opaque card there.
 _SUPPORTS_CHROMA = sys.platform == "win32"
 PANEL_FILL = "#1d1f29"
+_PANEL_FILL_RGB = (29, 31, 41)   # PANEL_FILL as RGB, for fading heart particles
 PANEL_EDGE = "#2a2d3b"      # resting border color
 PANEL_MARGIN = _s(7)
 PANEL_RADIUS = _s(20)
@@ -128,11 +141,43 @@ BUBBLE_FILL = "#fdf6e3"
 BUBBLE_TEXT = "#1c1e26"
 BUBBLE_MAX_CHARS = 160
 
+# Stats tooltip — a small dark card shown beside the mascot on hover, surfacing
+# the session's running counters (prompts · tools · agents · uptime).
+TOOLTIP_FILL = "#252735"
+TOOLTIP_TEXT = "#cdd2e6"
+TOOLTIP_EDGE = "#3a3d4f"
+TOOLTIP_FONT = _font(7)
+TOOLTIP_PAD = _s(9)
+TOOLTIP_GAP = _s(6)
+
 # Shake-to-dizzy easter egg.
 SHAKE_MIN_DIST = 7
 SHAKE_WINDOW_S = 0.7
 SHAKE_REVERSALS = 4
 DIZZY_DURATION_S = 2.0
+
+# Celebrate (happy) reaction: brief joy when Claude finishes a turn, and when the
+# mascot is petted. A widget-side effective state, like dizzy/sleeping.
+CELEBRATE_DURATION_S = 1.5
+
+# Click-to-pet: a press+release that moves less than this (px) is a pet tap, not a
+# drag. Petting emits rising pixel hearts that fade as they climb.
+PET_TAP_MAX_DIST = 5
+HEART_PX = _s(2)                 # pixel size of a heart particle
+HEART_RISE_PX = _s(34)           # how far a heart climbs over its life
+HEART_LIFETIME_S = 0.85
+MAX_HEARTS = 6
+
+# Idle "life": occasional blink while idle, before the mascot dozes off.
+BLINK_DURATION_S = 0.12
+BLINK_MIN_GAP_S = 4.0
+BLINK_MAX_GAP_S = 7.0
+
+# Stall watchdog: a turn that ends abnormally (notably a usage/session-limit hit)
+# fires no terminating hook, so the heartbeat freezes mid-`thinking`. Rather than
+# look frozen forever, fall the *display* back to idle once thinking has gone this
+# long without any new event. Generous, so a long pure-reasoning turn isn't cut off.
+THINKING_STALL_S = 180.0
 
 # Attention shake: while a permission/attention prompt sits unanswered, the whole
 # card starts to shake after WAITING_SHAKE_AFTER_S, then grows steadily more
@@ -254,6 +299,48 @@ class BubbleWindow:
             pass
 
 
+class StatsTooltip:
+    """A small dark tooltip shown beside a card while the pointer hovers it,
+    surfacing the session's running counters. Mirrors BubbleWindow's lifecycle."""
+
+    def __init__(self, manager_root: tk.Tk, text: str) -> None:
+        self._width = 0
+        self._height = 0
+        self.top = tk.Toplevel(manager_root)
+        self.top.overrideredirect(True)
+        self.top.attributes("-topmost", True)
+        self.top.configure(bg=TOOLTIP_EDGE)  # 1px border via the padding below
+        self.label = tk.Label(
+            self.top, bg=TOOLTIP_FILL, fg=TOOLTIP_TEXT, font=TOOLTIP_FONT,
+            justify="center", padx=TOOLTIP_PAD, pady=_s(5),
+        )
+        self.label.pack(padx=1, pady=1)
+        self.set_text(text)
+
+    def set_text(self, text: str) -> None:
+        if text == self.label.cget("text"):
+            return
+        self.label.config(text=text)
+        self.top.update_idletasks()
+        self._width = self.top.winfo_reqwidth()
+        self._height = self.top.winfo_reqheight()
+
+    def place_beside(self, card_x: int, card_y: int, card_w: int, card_h: int,
+                     screen_w: int) -> None:
+        x = card_x - self._width - TOOLTIP_GAP          # prefer the left of the card
+        if x < 0:
+            x = card_x + card_w + TOOLTIP_GAP           # no room left -> go right
+        x = max(0, min(x, screen_w - self._width))
+        y = card_y + (card_h - self._height) // 2
+        self.top.geometry(f"+{x}+{y}")
+
+    def destroy(self) -> None:
+        try:
+            self.top.destroy()
+        except tk.TclError:
+            pass
+
+
 class MascotWindow:
     """One mascot window (Toplevel) per session, drawn on a single Canvas."""
 
@@ -263,18 +350,28 @@ class MascotWindow:
         self._sig: tuple | None = None
         self._drag_offset: tuple[int, int] | None = None
         self._alive = True
+        self._hidden = False
         self._manager_root = manager_root
         self._bubble: BubbleWindow | None = None
+        self._tooltip: StatsTooltip | None = None
 
         # effective-state / shake bookkeeping (must exist before first compute)
         self._dizzy_until = 0.0
+        self._celebrate_until = 0.0
+        self._blink_until = 0.0
+        self._next_blink = 0.0
+        self._hearts: list[dict[str, float]] = []
+        self._press_pos: tuple[int, int] | None = None
         self._last_shake_pos: tuple[int, int] | None = None
         self._last_move: tuple[int, int] | None = None
         self._reversals: list[float] = []
         # Attention-shake bookkeeping: when the current "waiting" began, and the
         # window offset we've currently applied (so we can shake relative to wherever
-        # the card rests — and settle it back — without drifting).
+        # the card rests — and settle it back — without drifting). The resting
+        # position is captured once when a shake begins; every frame then sets an
+        # absolute geometry of rest+offset (see _set_shake_offset for why).
         self._shake_offset: tuple[int, int] = (0, 0)
+        self._rest_pos: tuple[int, int] | None = None
 
         raw = state.get("state", "idle")
         self._idle_since: float | None = time.time() if raw == "idle" else None
@@ -315,6 +412,8 @@ class MascotWindow:
         self.canvas.bind("<Button-1>", self._on_drag_start)
         self.canvas.bind("<B1-Motion>", self._on_drag_motion)
         self.canvas.bind("<ButtonRelease-1>", self._on_drag_end)
+        self.canvas.bind("<Enter>", self._on_hover_enter)
+        self.canvas.bind("<Leave>", self._on_hover_leave)
 
         self._place_initial(index)
         self._render()
@@ -405,6 +504,8 @@ class MascotWindow:
         # Undo any active attention-shake first so the grab point maps to the
         # card's true resting position (no jump as the shake is removed).
         self._reset_shake_offset()
+        self._hide_tooltip()  # don't keep a stale tooltip floating during a drag
+        self._press_pos = (event.x_root, event.y_root)
         self._drag_offset = (event.x_root - self.root.winfo_x(),
                              event.y_root - self.root.winfo_y())
         self._last_shake_pos = None
@@ -418,8 +519,58 @@ class MascotWindow:
             self.root.geometry(f"+{x}+{y}")
             self._track_shake(event.x_root, event.y_root)
 
-    def _on_drag_end(self, _event: tk.Event) -> None:
+    def _on_drag_end(self, event: tk.Event) -> None:
+        moved = 0.0
+        if self._press_pos is not None:
+            moved = math.hypot(event.x_root - self._press_pos[0],
+                               event.y_root - self._press_pos[1])
         self._drag_offset = None
+        self._press_pos = None
+        # A tap (press+release without a real drag or shake) pets the mascot.
+        now = time.time()
+        raw = self.state.get("state", "idle")
+        if (moved < PET_TAP_MAX_DIST and now >= self._dizzy_until
+                and raw not in ("waiting", "dead")):
+            self._pet(now)
+
+    # --- pet hearts -------------------------------------------------------
+    def _pet(self, now: float) -> None:
+        """Reward a tap with a happy face and a few rising pixel hearts."""
+        self._celebrate_until = now + CELEBRATE_DURATION_S
+        self._emit_hearts(now)
+        self._refresh_render(now)
+
+    def _emit_hearts(self, now: float) -> None:
+        """Spawn a small staggered burst of hearts above the creature."""
+        for _ in range(3):
+            self._hearts.append({
+                "x": float(CREATURE_CX + random.uniform(-14, 14)),
+                "y0": float(CREATURE_CY - _s(6)),
+                "t0": now + random.uniform(0.0, 0.15),
+                "drift": random.uniform(-10.0, 10.0),
+            })
+        self._hearts = self._hearts[-MAX_HEARTS:]
+
+    def _animate_hearts(self, now: float) -> None:
+        """Move active hearts up while fading them toward the panel; drop expired."""
+        self.canvas.delete("heart")
+        if not self._hearts:
+            return
+        base = config.STATE_COLORS["happy"]
+        alive: list[dict[str, float]] = []
+        for h in self._hearts:
+            prog = (now - h["t0"]) / HEART_LIFETIME_S
+            if prog < 0.0:        # staggered start: not visible yet
+                alive.append(h)
+                continue
+            if prog >= 1.0:       # finished
+                continue
+            x = h["x"] + h["drift"] * prog
+            y = h["y0"] - prog * HEART_RISE_PX
+            color = _hex(_lerp(base, _PANEL_FILL_RGB, prog))
+            sprite_pixel.draw_heart(self.canvas, x, y, HEART_PX, color)
+            alive.append(h)
+        self._hearts = alive
 
     def _track_shake(self, x_root: int, y_root: int) -> None:
         """Count rapid direction reversals on any axis; enough -> go dizzy."""
@@ -450,27 +601,49 @@ class MascotWindow:
 
     # --- effective state --------------------------------------------------
     def _compute_effective_state(self, now: float) -> str:
-        """Effective (displayed) state. Both extra states are widget-side only:
-          - `dizzy`    while a recent shake is still in effect (top priority),
-          - `sleeping` after the raw state has been idle for SLEEP_AFTER_IDLE_S.
+        """Effective (displayed) state. These overlays are widget-side only,
+        in priority order:
+          - `dizzy`      while a recent shake is still in effect (top priority),
+          - `happy`      briefly after Claude finishes a turn, or on a pet,
+          - `sleeping`   after the raw state has been idle for SLEEP_AFTER_IDLE_S,
+          - `idle_blink` a brief blink while idle (before dozing off).
         """
         if now < self._dizzy_until:
             return "dizzy"
+        if now < self._celebrate_until:
+            return "happy"
         raw = self.state.get("state", "idle")
+        # Glare (angry face) once an unanswered prompt has waited long enough that
+        # the card starts shaking — same threshold as the attention shake.
+        if (raw == "waiting" and self._waiting_since is not None
+                and now - self._waiting_since >= WAITING_SHAKE_AFTER_S):
+            return "waiting_angry"
+        # Don't sit frozen on `thinking` if the turn died with no closing hook
+        # (e.g. a session-limit hit): after a long stale stretch, show idle.
+        ts = self.state.get("ts")
+        if raw == "thinking" and ts is not None and now - ts > THINKING_STALL_S:
+            raw = "idle"
         if raw == "idle" and self._idle_since is not None:
             if now - self._idle_since >= config.SLEEP_AFTER_IDLE_S:
                 return "sleeping"
+            if now < self._blink_until:
+                return "idle_blink"
         return raw
 
     # --- state ------------------------------------------------------------
     def update_state(self, state: dict[str, Any], now: float | None = None) -> None:
         if now is None:
             now = time.time()
+        prev_raw = self.state.get("state", "idle")
         self.state = state
         if state.get("started"):
             self._started = state["started"]
 
         raw = state.get("state", "idle")
+        # Celebrate briefly when Claude finishes an active turn (working/thinking
+        # -> idle). Not on waiting->idle (the user just answered) or dead.
+        if prev_raw in ("working", "thinking") and raw == "idle":
+            self._celebrate_until = now + CELEBRATE_DURATION_S
         if raw == "idle":
             if self._idle_since is None:
                 self._idle_since = now
@@ -495,6 +668,21 @@ class MascotWindow:
             return
         self._render()
 
+    def _schedule_blink(self, now: float) -> None:
+        """Trigger an occasional blink, but only while genuinely idle (not busy,
+        celebrating, or already dozing). The blink itself is just a brief
+        `idle_blink` effective state picked up by the next render."""
+        if (self.state.get("state", "idle") != "idle"
+                or self._effective_state not in ("idle", "idle_blink")):
+            self._next_blink = 0.0
+            return
+        if self._next_blink == 0.0:
+            self._next_blink = now + random.uniform(BLINK_MIN_GAP_S, BLINK_MAX_GAP_S)
+        elif now >= self._next_blink:
+            self._blink_until = now + BLINK_DURATION_S
+            self._next_blink = (now + BLINK_DURATION_S
+                                + random.uniform(BLINK_MIN_GAP_S, BLINK_MAX_GAP_S))
+
     # --- speech bubble ----------------------------------------------------
     def _sync_bubble(self, notify: dict[str, Any] | None) -> None:
         if notify:
@@ -502,6 +690,8 @@ class MascotWindow:
             if self._bubble is None:
                 self._bubble = BubbleWindow(self._manager_root, message)
                 self._reposition_bubble()
+                if self._hidden:                 # cards are hidden via the tray
+                    self._bubble.top.withdraw()
             else:
                 self._bubble.set_message(message)
         elif self._bubble is not None:
@@ -519,6 +709,43 @@ class MascotWindow:
         except tk.TclError:
             pass
 
+    # --- stats tooltip ----------------------------------------------------
+    def _stats_text(self, now: float) -> str:
+        st = self.state
+        prompts = st.get("prompts", 0)
+        tools = st.get("tools_run", 0)
+        agents = st.get("subagents_spawned", 0)
+        up = _format_duration(now - self._started) if self._started else "—"
+        agent_part = f"   ·   {agents} agents" if agents else ""
+        return f"{prompts} prompts   ·   {tools} tools{agent_part}\nup {up}"
+
+    def _on_hover_enter(self, _event: tk.Event) -> None:
+        text = self._stats_text(time.time())
+        if self._tooltip is None:
+            self._tooltip = StatsTooltip(self._manager_root, text)
+        else:
+            self._tooltip.set_text(text)
+        self._position_tooltip()
+
+    def _on_hover_leave(self, _event: tk.Event) -> None:
+        self._hide_tooltip()
+
+    def _hide_tooltip(self) -> None:
+        if self._tooltip is not None:
+            self._tooltip.destroy()
+            self._tooltip = None
+
+    def _position_tooltip(self) -> None:
+        if self._tooltip is None:
+            return
+        try:
+            self._tooltip.place_beside(
+                self.root.winfo_x(), self.root.winfo_y(),
+                CARD_W, CARD_H, self.root.winfo_screenwidth(),
+            )
+        except tk.TclError:
+            pass
+
     # --- animation --------------------------------------------------------
     def _animate(self) -> None:
         """Cheap ~25fps loop: bob the creature, pulse the border while waiting."""
@@ -528,16 +755,23 @@ class MascotWindow:
             now = time.time()
             elapsed = now - self._anim_t0
 
-            # Clears the dizzy face when it expires; also flips idle→sleeping.
+            # Clears the dizzy/celebrate face when it expires; flips idle→sleeping;
+            # drives the occasional idle blink.
             self._refresh_render(now)
+            self._schedule_blink(now)
 
             # Subtle vertical float — move the whole creature group.
             phase = (elapsed / BOB_PERIOD_S) * 2 * math.pi
             target = -(math.sin(phase) + 1) / 2 * BOB_AMPLITUDE  # 0..-amplitude
-            if self._effective_state == "dead":
+            if self._effective_state == "happy":
+                target = -abs(math.sin(elapsed * 9.0)) * BOB_AMPLITUDE * 2.0  # excited hop
+            elif self._effective_state == "dead":
                 target = 0.0  # a gravestone sits still; it does not float
             self.canvas.move("creature", 0, target - self._bob_y)
             self._bob_y = target
+
+            # Rising heart particles from a pet.
+            self._animate_hearts(now)
 
             # Gentle border pulse while the raw state needs the user's attention.
             if self._border_id is not None:
@@ -560,6 +794,9 @@ class MascotWindow:
 
             if self._bubble is not None:
                 self._reposition_bubble()
+            if self._tooltip is not None:        # keep counters/uptime live while hovering
+                self._tooltip.set_text(self._stats_text(now))
+                self._position_tooltip()
         except tk.TclError:
             return
 
@@ -589,27 +826,63 @@ class MascotWindow:
         self._set_shake_offset(round(ox), round(oy))
 
     def _set_shake_offset(self, ox: int, oy: int) -> None:
-        """Move the window to its rest position plus (ox, oy). Works as a delta on
-        the current geometry so a concurrent drag/reposition is respected."""
+        """Offset the card from its resting position by (ox, oy).
+
+        The rest position is captured once, the moment the shake begins, and every
+        frame then sets an *absolute* geometry of rest+(ox, oy). An earlier version
+        moved by deltas off ``winfo_x()``; because that value lags a frame behind a
+        just-applied ``geometry`` on Windows, the error accumulated on every shake
+        reversal and slowly walked a frantically shaking card clean off-screen."""
         if (ox, oy) == self._shake_offset:
             return
+        if self._rest_pos is None:        # starting to shake: remember where it rests
+            try:
+                self._rest_pos = (self.root.winfo_x(), self.root.winfo_y())
+            except tk.TclError:
+                return
         try:
-            x = self.root.winfo_x() + (ox - self._shake_offset[0])
-            y = self.root.winfo_y() + (oy - self._shake_offset[1])
-            self.root.geometry(f"+{x}+{y}")
+            self.root.geometry(f"+{self._rest_pos[0] + ox}+{self._rest_pos[1] + oy}")
         except tk.TclError:
             return
         self._shake_offset = (ox, oy)
 
     def _reset_shake_offset(self) -> None:
-        """Return the card to its true resting position (zero shake)."""
-        self._set_shake_offset(0, 0)
+        """Settle the card back onto its captured resting position (zero shake)."""
+        if self._shake_offset == (0, 0):
+            return
+        if self._rest_pos is not None:
+            try:
+                self.root.geometry(f"+{self._rest_pos[0]}+{self._rest_pos[1]}")
+            except tk.TclError:
+                pass
+        self._shake_offset = (0, 0)
+        self._rest_pos = None
+
+    def set_hidden(self, hidden: bool) -> None:
+        """Withdraw or restore this card (and its speech bubble) for the tray's
+        'show / hide cards' toggle. Windows drops the always-on-top flag when a
+        withdrawn window is shown again, so re-assert it after deiconify."""
+        self._hidden = hidden
+        try:
+            if hidden:
+                self.root.withdraw()
+                if self._bubble is not None:
+                    self._bubble.top.withdraw()
+            else:
+                self.root.deiconify()
+                self.root.attributes("-topmost", True)
+                if self._bubble is not None:
+                    self._bubble.top.deiconify()
+                    self._bubble.top.attributes("-topmost", True)
+        except tk.TclError:
+            pass
 
     def close(self) -> None:
         self._alive = False
         if self._bubble is not None:
             self._bubble.destroy()
             self._bubble = None
+        self._hide_tooltip()
         self.root.destroy()
 
 
@@ -627,6 +900,23 @@ class MascotManager:
         print("[mascot] state dir:", config.STATE_DIR)
         print("[mascot] tkinter app started")
 
+        # System-tray icon (Windows only). Best-effort: any failure leaves the
+        # widget fully working, just without a tray icon.
+        self._cards_hidden = False
+        self.tray = None
+        if osplatform.IS_WINDOWS:
+            try:
+                from .tray import SystemTray
+                self.tray = SystemTray(
+                    tooltip="Claude Familiar",
+                    on_toggle=self._on_tray_toggle,
+                    on_settings=self._on_tray_settings,
+                    on_quit=self._on_tray_quit,
+                )
+            except Exception as exc:  # noqa: BLE001 — never let the tray stop startup
+                print("[mascot] system tray unavailable:", exc)
+                self.tray = None
+
         self.root.after(500, self._refresh)
 
     def _refresh(self) -> None:
@@ -641,17 +931,56 @@ class MascotManager:
         for index, (sid, state) in enumerate(sorted(states.items())):
             win = self.windows.get(sid)
             if win is None:
-                self.windows[sid] = MascotWindow(self.root, sid, state, index)
+                win = MascotWindow(self.root, sid, state, index)
+                self.windows[sid] = win
+                if self._cards_hidden:        # honor a tray "hide" for new sessions
+                    win.set_hidden(True)
             else:
                 win.update_state(state, now)
 
         self.root.after(500, self._refresh)
 
+    # --- system-tray callbacks (run on the Tk thread) ---------------------
+    def _on_tray_toggle(self) -> None:
+        """Show / hide every card at once."""
+        self._cards_hidden = not self._cards_hidden
+        for win in self.windows.values():
+            win.set_hidden(self._cards_hidden)
+
+    def _on_tray_settings(self) -> None:
+        """Open the settings panel as its own process, like the rest of the app."""
+        try:
+            subprocess.Popen([str(_pythonw()), "-m", "mascot.control_panel"],
+                             cwd=str(PROJECT_ROOT))
+        except OSError as exc:
+            print("[mascot] could not open settings:", exc)
+
+    def _on_tray_quit(self) -> None:
+        """Close every card, drop the tray icon, and end the main loop."""
+        for win in list(self.windows.values()):
+            win.close()
+        self.windows.clear()
+        if self.tray is not None:
+            self.tray.dispose()
+            self.tray = None
+        self.root.quit()
+
     def run(self) -> None:
-        self.root.mainloop()
+        try:
+            self.root.mainloop()
+        finally:
+            if self.tray is not None:        # also covers a normal window-close exit
+                self.tray.dispose()
+                self.tray = None
 
 
 def main() -> None:
+    # Only one widget process at a time. A second one would poll the same state
+    # dir and draw a duplicate, exactly-overlapping card for every session.
+    guard = single_instance.acquire()
+    if guard is None:
+        print("[mascot] another Claude Familiar widget is already running; exiting.")
+        return
     MascotManager().run()
 
 

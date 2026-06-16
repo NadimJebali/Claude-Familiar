@@ -52,6 +52,19 @@ def _is_usage_limit(message: str) -> bool:
     return any(hint in msg for hint in _USAGE_LIMIT_HINTS)
 
 
+# Claude Code is inconsistent about where the human-readable text lands (and which
+# event carries it), so limit detection scans every plausible string field rather
+# than just `message`. Verified payloads only ever had `message`/`notification_type`;
+# the rest are defensive so a session-limit notice is caught wherever it shows up.
+_TEXT_FIELDS = ("message", "reason", "title", "body", "notification_type", "subtype")
+
+
+def _payload_text(payload: dict[str, Any]) -> str:
+    """Joined, lowercased text from a payload's human-readable fields."""
+    parts = [payload[k] for k in _TEXT_FIELDS if isinstance(payload.get(k), str)]
+    return " ".join(parts).lower()
+
+
 def default_state(session_id: str, cwd: str = "", model: str = "") -> dict[str, Any]:
     """A fresh mascot state for a session."""
     return {
@@ -62,6 +75,10 @@ def default_state(session_id: str, cwd: str = "", model: str = "") -> dict[str, 
         "tool": None,
         "subagents": [],  # list of {"id", "type", "description"}
         "notify": None,   # {"message", "type"} while Claude needs the user (e.g. permission)
+        # Lifetime-of-session counters, surfaced in the hover tooltip.
+        "prompts": 0,
+        "tools_run": 0,            # main-thread tool calls (excludes sub-agent internals)
+        "subagents_spawned": 0,
     }
 
 
@@ -100,6 +117,7 @@ def compute_next_state(
     elif event == "UserPromptSubmit":
         nxt["state"] = "thinking"
         nxt["tool"] = None
+        nxt["prompts"] = current.get("prompts", 0) + 1
 
     elif event == "PreToolUse":
         nxt["state"] = "working"
@@ -112,8 +130,13 @@ def compute_next_state(
                     "description": tool_input.get("description", ""),
                 }
             )
+            nxt["subagents_spawned"] = current.get("subagents_spawned", 0) + 1
         else:
             nxt["tool"] = payload.get("tool_name")
+            # Count main-thread tools only; a tool running inside a sub-agent
+            # carries a top-level agent_id and isn't part of the visible session.
+            if not payload.get("agent_id"):
+                nxt["tools_run"] = current.get("tools_run", 0) + 1
 
     elif event == "PostToolUse":
         if payload.get("tool_name") == AGENT_TOOL:
@@ -125,7 +148,7 @@ def compute_next_state(
 
     elif event == "Notification":
         message = payload.get("message", "")
-        if _is_usage_limit(message):
+        if _is_usage_limit(_payload_text(payload)):
             # Out of usage — the session is done; show a gravestone and keep the
             # bubble so the reset-time message stays visible.
             nxt["state"] = "dead"
@@ -145,9 +168,19 @@ def compute_next_state(
             }
 
     elif event == "Stop":
-        nxt["state"] = "idle"
         nxt["tool"] = None
         nxt["subagents"] = []
+        # A turn can end on a usage/session limit. If the limit text rides on the
+        # Stop payload, tombstone instead of going calmly idle.
+        if _is_usage_limit(_payload_text(payload)):
+            nxt["state"] = "dead"
+            nxt["notify"] = {
+                "message": payload.get("message") or payload.get("reason")
+                           or "Session limit reached",
+                "type": payload.get("notification_type", ""),
+            }
+        else:
+            nxt["state"] = "idle"
 
     # SubagentStop: intentionally a no-op (noisy; see module docstring).
     # SessionEnd: handled by emit.py (file deletion), not here.

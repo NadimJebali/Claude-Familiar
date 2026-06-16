@@ -15,7 +15,7 @@ SETTINGS_PATH = Path.home() / ".claude" / "mascot" / "settings.json"
 DEFAULTS: dict[str, Any] = {
     "art_style": "pixel",        # "pixel" | "smooth"
     "transparent_bg": True,      # float the rounded card
-    "sleep_after_idle_s": 30,    # idle this long -> sleeping sprite
+    "sleep_after_idle_s": 90,    # idle this long -> sleeping sprite (blinks until then)
     "widget_size": "small",      # "small" | "medium" | "large"
     "shake_after_s": 30,         # unanswered prompt waits this long before shaking
     "shake_max_amp_px": 16,      # how violent: max sway (px) at full aggression

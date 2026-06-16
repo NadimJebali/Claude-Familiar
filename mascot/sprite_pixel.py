@@ -70,6 +70,13 @@ _FACES = {
         "..oOOOmmmmOOOo..",   # open "oh!" mouth
         "..oOOOmmmmOOOo..",
     ],
+    "waiting_angry": [
+        "..oOkOOOOOOkOo..",   # angry: brows slant down toward the nose…
+        "..oOOkOOOOkOOo..",
+        "..oOOwkOOkwOOo..",   # …into glaring eyes
+        "..oOOmmmmmmOOo..",   # scowling, downturned mouth
+        "..oOmOOOOOOmOo..",
+    ],
     "sleeping": [
         "..oOOOOOOOOOOo..",
         "..oOkkkOOkkkOo..",   # closed eyes
@@ -83,6 +90,20 @@ _FACES = {
         "..oOkOkOOkOkOo..",
         "..oOOmmmmmmOOo..",   # straight mouth
         "..oOOOOOOmmOOo..",   # drool
+    ],
+    "happy": [
+        "..oOOOOOOOOOOo..",
+        "..oOkkOOOOkkOo..",   # joyful squint eyes
+        "..oOOOOOOOOOOo..",
+        "..oOmOOOOOOmOo..",   # smile corners turned up
+        "..oOOmmmmmmOOo..",   # big grin
+    ],
+    "idle_blink": [
+        "..oOOOOOOOOOOo..",
+        "..oOkkkOOkkkOo..",   # eyes closed for a blink
+        "..oOOOOOOOOOOo..",
+        "..oOOmOOOOmOOo..",   # (idle mouth, so it reads as "idle, blinking")
+        "..oOOmmmmmmOOo..",
     ],
 }
 
@@ -119,5 +140,36 @@ def draw_creature(
             if ch == ".":
                 continue
             color = accent if ch == "a" else COLORS[ch]
+            x = x0 + col * px
+            c.create_rectangle(x, y, x + px, y + px, fill=color, outline="", tags=tag)
+
+
+# --- pet hearts -------------------------------------------------------------
+# A small hand-drawn heart, same blocky technique as the creature (no emoji).
+# Drawn in a single flat color so it can be faded by lerping toward the panel.
+_HEART = [
+    ".OO..OO.",
+    "OOOOOOOO",
+    "OOOOOOOO",
+    "OOOOOOOO",
+    ".OOOOOO.",
+    "..OOOO..",
+    "...OO...",
+]
+_HEART_W = len(_HEART[0])
+_HEART_H = len(_HEART)
+
+
+def draw_heart(
+    c: tk.Canvas, cx: float, cy: float, px: int, color: str, tag: str = "heart",
+) -> None:
+    """Draw a small pixel heart centered at (cx, cy), one square per cell."""
+    x0 = cx - (_HEART_W * px) / 2
+    y0 = cy - (_HEART_H * px) / 2
+    for r, row in enumerate(_HEART):
+        y = y0 + r * px
+        for col, ch in enumerate(row):
+            if ch == ".":
+                continue
             x = x0 + col * px
             c.create_rectangle(x, y, x + px, y + px, fill=color, outline="", tags=tag)
