@@ -15,7 +15,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
-from . import autostart, icon, settings as settings_mod, sprite_pixel, sprite_smooth
+from . import autostart, icon, settings as settings_mod, shortcuts, sprite_pixel, sprite_smooth
 from .tkinter_app import _accent, round_rect
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -110,6 +110,16 @@ class ControlPanel:
                        activebackground=BG, activeforeground=FG,
                        font=("Segoe UI", 9)).pack(anchor="w", padx=8, pady=4)
 
+        # Install (Start menu + desktop shortcuts)
+        install_box = tk.LabelFrame(self.root, text="Install", bg=BG, fg=MUTED,
+                                    font=("Segoe UI", 9))
+        install_box.pack(fill="x", **pad)
+        self.install_label = tk.Label(install_box, text="", bg=BG, fg=FG, font=("Segoe UI", 9))
+        self.install_label.pack(side="left", padx=8, pady=6)
+        self.install_btn = ttk.Button(install_box, text="", command=self._toggle_install)
+        self.install_btn.pack(side="right", padx=8, pady=6)
+        self._refresh_install()
+
         # Startup
         startup = tk.LabelFrame(self.root, text="Startup", bg=BG, fg=MUTED,
                                 font=("Segoe UI", 9))
@@ -158,6 +168,23 @@ class ControlPanel:
             self.hooks_label.config(text="Installed ✓", fg="#5fd08a")
         else:
             self.hooks_label.config(text="Not installed", fg="#ed8936")
+
+    def _refresh_install(self) -> None:
+        if shortcuts.is_installed():
+            self.install_label.config(text="Added to Start menu ✓", fg="#5fd08a")
+            self.install_btn.config(text="Remove")
+        else:
+            self.install_label.config(text="Not in Start menu", fg="#ed8936")
+            self.install_btn.config(text="Add to Start menu")
+
+    def _toggle_install(self) -> None:
+        if shortcuts.is_installed():
+            shortcuts.uninstall_app_shortcuts()
+            self.status.set("Removed Claude Familiar shortcuts.")
+        else:
+            created = shortcuts.install_app_shortcuts()
+            self.status.set(f"Added {len(created)} shortcut(s). Find it in the Start menu / on your desktop.")
+        self._refresh_install()
 
     def _install_hooks(self) -> None:
         proc = subprocess.run([sys.executable, str(INSTALL_HOOKS)],

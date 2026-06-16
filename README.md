@@ -62,9 +62,12 @@ Hooks just write a small JSON state file; the widget polls and renders it.
 python install.py          # or double-click install.bat
 ```
 
-This installs the Claude Code hooks and opens the **settings panel**, where you
-can pick the mascot art, choose the **widget size** (small / medium / large),
-toggle the transparent floating card, enable run-at-login, and launch the widget.
+This installs Claude Familiar as a real Windows app: it installs the Claude Code
+hooks, adds **Start-menu and desktop shortcuts** (so you can launch it from the
+Start menu / Windows search with the mascot icon, just like any other app), and
+opens the **settings panel**. There you can pick the mascot art, choose the
+**widget size** (small / medium / large), toggle the transparent floating card,
+add/remove the app shortcuts, enable run-at-login, and launch the widget.
 Reopen it any time with `settings.bat` or `python -m mascot.control_panel`.
 Settings live in `~/.claude/mascot/settings.json`.
 
@@ -167,8 +170,9 @@ claude-mascot/
     sprite_pixel.py   # Claude-style pixel-art creature (default art)
     sprite_smooth.py  # original rounded vector character (kept on the side)
     icon.py           # app icon (.ico + iconphoto) rendered from the pixel mascot
-    control_panel.py  # settings panel: art, size, transparency, autostart, hooks
+    control_panel.py  # settings panel: art, size, transparency, install, autostart, hooks
     settings.py       # load/save ~/.claude/mascot/settings.json
+    shortcuts.py      # create/remove Start-menu + desktop .lnk shortcuts (Windows)
     autostart.py      # create/remove the run-at-login shortcut (Windows)
     state_store.py    # read state dir, staleness + dead-PID pruning
     proc.py           # is the owning claude.exe still alive?
@@ -215,7 +219,9 @@ Covers the state machine and the emit read-modify-write path (GUI excluded).
 
 ```bash
 python scripts/install_hooks.py --uninstall   # remove hooks
+python -c "from mascot import shortcuts; shortcuts.uninstall_app_shortcuts()"  # remove Start-menu/desktop shortcuts
 ```
 
+(You can also remove the shortcuts from the settings panel's **Install** section.)
 Then delete the project folder. Leftover state files (if any) live in
 `~/.claude/mascot/`.
