@@ -15,7 +15,7 @@ import tkinter as tk
 from pathlib import Path
 from typing import Any
 
-from . import config, effective_state, osplatform, pet_logic, sprite_pixel, sprite_smooth
+from . import config, effective_state, osplatform, pet_logic, sprite_pixel, sprite_smooth, ui_icons
 from .popups import BubbleWindow, StatsTooltip
 from .scale import font as _font, s as _s
 
@@ -96,7 +96,6 @@ _SUPPORTS_CHROMA = sys.platform == "win32"
 PANEL_FILL = "#1d1f29"
 _PANEL_FILL_RGB = (29, 31, 41)   # PANEL_FILL as RGB, for fading heart particles
 PANEL_EDGE = "#2a2d3b"      # resting border color
-PET_BTN_FG = "#d9885a"      # the on-card "open Pet window" paw button
 PANEL_MARGIN = _s(7)
 PANEL_RADIUS = _s(20)
 
@@ -345,15 +344,16 @@ class MascotWindow:
         # A small paw button that opens the Pet window (a child of the toplevel, so
         # it survives the canvas's full redraws). Only shown when wired by the manager.
         self._pet_btn: tk.Button | None = None
+        self._paw_img = None
         if on_open_pet is not None:
+            # A pixel-art paw button (bigger than the old glyph), top-left of the card.
+            self._paw_img = ui_icons.photo(self.root, "paw", px=max(2, _s(2)))
             self._pet_btn = tk.Button(
-                self.root, text="🐾", command=self._open_pet, cursor="hand2",
-                font=_font(8), bd=0, highlightthickness=0, relief="flat", takefocus=0,
-                bg=PANEL_FILL, fg=PET_BTN_FG,
-                activebackground=PANEL_EDGE, activeforeground=PET_BTN_FG,
-                padx=2, pady=0,
+                self.root, image=self._paw_img, command=self._open_pet, cursor="hand2",
+                bd=0, highlightthickness=0, relief="flat", takefocus=0,
+                bg=PANEL_FILL, activebackground=PANEL_EDGE,
             )
-            self._pet_btn.place(x=PANEL_MARGIN + _s(6), y=PANEL_MARGIN + _s(6), anchor="nw")
+            self._pet_btn.place(x=PANEL_MARGIN + _s(5), y=PANEL_MARGIN + _s(5), anchor="nw")
 
         self._place_initial(index)
         self._render()

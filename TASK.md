@@ -332,6 +332,16 @@ unaffected — it governs the *face*, not card removal. +2 tests.
   are now live:** completed turn, sub-agent finish, daily first-prompt streak, and
   petting — under the 200/day cap.
 
+#### Polish round 4: pixel-art UI icons + Pet-window glitch fix
+- **Pet-window resize glitch fixed:** the window now pins its geometry after the
+  initial build, so rebuilding the shop/inventory lists (which briefly empties their
+  frames) on a click no longer makes the window shrink-and-grow.
+- **On-card paw button** is bigger and now a **pixel-art paw** image (not a glyph).
+- **Every GUI emoji replaced with pixel art** via a new `mascot/ui_icons.py`
+  (paw / coin / check, rendered to `tk.PhotoImage`): the 🐾 in the card button, the
+  Pet-window header, and the control-panel header + "Pet" button; the 🪙 coins in
+  the Pet window; and the ✓ in the control-panel status labels.
+
 ---
 
 ## Considered & rejected

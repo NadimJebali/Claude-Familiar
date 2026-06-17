@@ -22,7 +22,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Any, Callable
 
-from . import config, item_art, pet_logic, pet_store, shop, sprite_pixel
+from . import config, item_art, pet_logic, pet_store, shop, sprite_pixel, ui_icons
 from .control_panel import (ACCENT, BG, BORDER, DANGER, FG, MUTED, OK, PANEL,
                             PANEL_HI, WARN, _apply_theme)
 from .tkinter_app import MILESTONE_LEVEL, round_rect
@@ -91,6 +91,10 @@ class PetWindow:
 
         self._build()
         self._refresh(force=True)
+        # Pin the window to its natural size so rebuilding the shop/inventory lists
+        # (which briefly empties their frames) can't make the window resize-flicker.
+        self.root.update_idletasks()
+        self.root.geometry(f"{self.root.winfo_reqwidth()}x{self.root.winfo_reqheight()}")
         self.root.after(ANIM_MS, self._animate)
         self.root.after(TICK_MS, self._tick)
 
@@ -98,9 +102,14 @@ class PetWindow:
     def _build(self) -> None:
         header = ttk.Frame(self.root)
         header.pack(fill="x", padx=16, pady=(12, 4))
+        self._paw_img = ui_icons.photo(self.root, "paw", px=2)
+        self._coin_img = ui_icons.photo(self.root, "coin", px=2)
+        ttk.Label(header, image=self._paw_img, background=BG).pack(side="left", padx=(0, 6))
         ttk.Label(header, textvariable=self.name_var, style="Header.TLabel").pack(side="left")
         ttk.Label(header, textvariable=self.coins_var, style="MutedBG.TLabel").pack(
             side="right", pady=(8, 0))
+        ttk.Label(header, image=self._coin_img, background=BG).pack(
+            side="right", padx=(0, 3), pady=(8, 0))
         ttk.Label(header, textvariable=self.level_var, style="MutedBG.TLabel").pack(
             side="right", padx=(0, 12), pady=(8, 0))
 
@@ -214,8 +223,8 @@ class PetWindow:
         self._cached_pet = pet
         level = self._level(pet)
         name = pet.get("name") or "Your Pet"
-        self.name_var.set(f"🐾  {name}")
-        self.coins_var.set(f"🪙 {pet.get('coins', 0)}")
+        self.name_var.set(name)
+        self.coins_var.set(str(pet.get("coins", 0)))
         self.level_var.set(f"Lv {level}")
         if self.name_entry.get() == "" and pet.get("name"):
             self.name_entry.insert(0, pet["name"])

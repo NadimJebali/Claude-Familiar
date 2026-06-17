@@ -18,7 +18,7 @@ from pathlib import Path
 from tkinter import ttk
 
 from . import (autostart, icon, osplatform, pet_store, settings as settings_mod,
-               shortcuts, sprite_pixel, sprite_smooth)
+               shortcuts, sprite_pixel, sprite_smooth, ui_icons)
 from .tkinter_app import _accent, round_rect
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -151,7 +151,11 @@ class ControlPanel:
     def _build(self) -> None:
         header = ttk.Frame(self.root)
         header.pack(fill="x", padx=16, pady=(12, 2))
-        ttk.Label(header, text="🐾  Claude Familiar", style="Header.TLabel").pack(side="left")
+        self._paw_img = ui_icons.photo(self.root, "paw", px=2)
+        self._paw_btn_img = ui_icons.photo(self.root, "paw", px=1)
+        self._check_img = ui_icons.photo(self.root, "check", px=1)
+        ttk.Label(header, image=self._paw_img, background=BG).pack(side="left", padx=(0, 8))
+        ttk.Label(header, text="Claude Familiar", style="Header.TLabel").pack(side="left")
         ttk.Label(header, text="settings", style="MutedBG.TLabel").pack(
             side="left", padx=(8, 0), pady=(7, 0))
 
@@ -166,7 +170,8 @@ class ControlPanel:
         ttk.Button(footer, text="Save & Apply", style="Accent.TButton",
                    command=self._save).pack(side="left")
         ttk.Button(footer, text="Launch widget", command=self._launch).pack(side="left", padx=6)
-        ttk.Button(footer, text="🐾 Pet", command=self._open_pet).pack(side="left")
+        ttk.Button(footer, text="Pet", image=self._paw_btn_img, compound="left",
+                   command=self._open_pet).pack(side="left")
         ttk.Button(footer, text="Close", command=self.root.destroy).pack(side="right")
 
         ttk.Label(self.root, textvariable=self.status, style="MutedBG.TLabel",
@@ -305,16 +310,18 @@ class ControlPanel:
     # --- actions ----------------------------------------------------------
     def _refresh_hooks(self) -> None:
         if _hooks_installed():
-            self.hooks_label.config(text="Installed ✓", foreground=OK)
+            self.hooks_label.config(text=" Installed", image=self._check_img,
+                                    compound="left", foreground=OK)
         else:
-            self.hooks_label.config(text="Not installed", foreground=WARN)
+            self.hooks_label.config(text="Not installed", image="", foreground=WARN)
 
     def _refresh_install(self) -> None:
         if shortcuts.is_installed():
-            self.install_label.config(text="Added to Start menu ✓", foreground=OK)
+            self.install_label.config(text=" Added to Start menu", image=self._check_img,
+                                      compound="left", foreground=OK)
             self.install_btn.config(text="Remove")
         else:
-            self.install_label.config(text="Not in Start menu", foreground=WARN)
+            self.install_label.config(text="Not in Start menu", image="", foreground=WARN)
             self.install_btn.config(text="Add to Start menu")
 
     def _toggle_install(self) -> None:
