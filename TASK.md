@@ -20,8 +20,11 @@ Outcome of a `/grill-me` design review of the in-flight work. **Supersedes** the
 - ✅ **#3 watchdog backstop** — implemented (TDD): `effective_state.compute` early-returns
   idle on a stall (never sleeping); `WORKING_STALL_S` raised to 270.
 - ⏳ **#4 confirm error_type map (HITL)** — needs a real limit hit + `CLAUDE_MASCOT_DEBUG`.
-- ⏳ **Stats-tooltip cut** & **home-monitor picker** — deferred: both touch GUI/Win32 that
-  can't be verified headlessly; do them in a session where the app can be launched.
+- ✅ **Home-monitor picker** (#7, 348b59e) — pure `osplatform.choose_work_area` (TDD, 5 cases)
+  + Win32 `enumerate_work_areas`, `home_monitor` setting wired through config + `_place_initial`,
+  and a Display picker on the panel. Verified live against the real dual-monitor layout.
+- ✅ **Stats-tooltip cut** (#6, 1ff5368) — `StatsTooltip` + counters + their tests removed;
+  no dangling refs; suite green; `MascotWindow` constructs/animates/drags/closes cleanly.
 
 ### Commit order (Q1)
 Split the in-flight working tree: behavior-preserving **refactor first**, then one
