@@ -180,7 +180,7 @@ never an obligation (no sickness/death — the gravestone stays for usage limits
 Filed as PRD #8 with four phased issues:
 - ✅ **#9 pet engine + persistence (pure core)** — see decision log below
 - ✅ **#10 Pet window + shop + feed/play** — see decision log below
-- ⬜ #11 status tooltip + idle-face mood (blocked by #9)
+- ✅ **#11 status tooltip + idle-face mood** — see decision log below
 - ⬜ #12 evolution stages + per-stage art (blocked by #9)
 
 #### #9 — pet engine + persistence (done, TDD)
@@ -248,6 +248,26 @@ unaffected — it governs the *face*, not card removal. +2 tests.
   key back-fill). **Tests:** +18 shop cases. GUI verified by construct->act->destroy
   smoke tests (Pet window actions; manager external-reload + in-process buy) — a
   full visual review still wants a live launch.
+
+#### #11 — status tooltip + idle-face mood (done, TDD seam + GUI)
+- **Idle-face mood (pure, tested):** `effective_state.compute` gained a `mood` arg
+  and a `_MOOD_IDLE_FACE` map. The mood face is returned **only** in the `raw ==
+  "idle"` branch, *below* the sleep/blink checks — so dozing/blinking outrank it and
+  **Claude-activity states (working/thinking/waiting/dead) structurally always win**
+  (they never reach the idle branch). Default `mood="content"` keeps old callers on
+  plain idle. +4 tests at the seam.
+- **Faces + wiring (GUI):** four idle-mood faces in `sprite_pixel`
+  (`idle_happy`/`idle_hungry`/`idle_sad`/`idle_tired`; smooth art falls back to
+  idle), `STATE_CAPTIONS` maps them all to "idle", and `config.STATE_COLORS` tints
+  them (happy = pink sparkle, the rest stay calm idle grey). The card derives mood
+  from the pet via `pet_logic.mood` in `_compute_effective_state`; the **manager
+  pushes the one global pet to every card** each poll (`MascotWindow.set_pet`).
+- **Hover tooltip revived (`popups.StatsTooltip`):** a frameless Toplevel showing
+  name, level, coins, and three need bars, driven by the pet, placed with the tested
+  `popup_place.beside` (multi-monitor safe). Shown on `<Enter>`, hidden on `<Leave>`
+  / drag / card-hide, follows the card (incl. shake) in `_animate`. Need-bar colors
+  are shared via `config.NEED_COLORS` (also used by the Pet window). GUI verified via
+  a construct→hover→leave→close smoke test.
 
 ---
 

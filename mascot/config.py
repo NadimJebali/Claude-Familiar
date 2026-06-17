@@ -65,6 +65,16 @@ STATE_COLORS = {
     "dizzy":    (167, 139, 250),
     "happy":    (244, 114, 182),   # celebrate / petted — ties to the pink hearts
     "dead":     (122, 128, 144),
+    # Idle-mood faces (pet needs): a cared-for pet sparkles pink, low needs stay
+    # the calm idle accent so the mood reads from the face, not an alarming color.
+    "idle_happy":  (244, 114, 182),
+    "idle_hungry": (120, 144, 168),
+    "idle_sad":    (120, 144, 168),
+    "idle_tired":  (120, 144, 168),
 }
 
 SUBAGENT_COLOR = (159, 122, 234)
+
+# Need-bar colors (hunger / happiness / energy), shared by the Pet window and the
+# hover tooltip so the two read consistently.
+NEED_COLORS = {"hunger": "#ed8936", "happiness": "#f472b6", "energy": "#48bb78"}

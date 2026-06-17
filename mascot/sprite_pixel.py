@@ -105,6 +105,35 @@ _FACES = {
         "..oOOmOOOOmOOo..",   # (idle mouth, so it reads as "idle, blinking")
         "..oOOmmmmmmOOo..",
     ],
+    # --- idle-mood variants (pet needs; chosen by effective_state when idle) ----
+    "idle_happy": [          # well cared-for: a content, sparkly grin
+        "..oOOOOOOOOOOo..",
+        "..oOkkOOOOkkOo..",   # happy squint
+        "..oOOOOOOOOOOo..",
+        "..oOmOOOOOOmOo..",   # corners up
+        "..oOOmmmmmmOOo..",   # gentle grin
+    ],
+    "idle_hungry": [         # droopy: pupils dropped low, small mouth
+        "..oOwwwOOwwwOo..",
+        "..oOOkOOOOkOOo..",
+        "..oOOOOOOOOOOo..",
+        "..oOOOOmmOOOOo..",
+        "..oOOOOOOOOOOo..",
+    ],
+    "idle_sad": [            # low happiness: down eyes, frown (corners down)
+        "..oOwkwOOwkwOo..",
+        "..oOwwwOOwwwOo..",
+        "..oOOOOOOOOOOo..",
+        "..oOOmmmmmmOOo..",
+        "..oOmOOOOOOmOo..",
+    ],
+    "idle_tired": [          # low energy: heavy-lidded, neutral mouth
+        "..oOOOOOOOOOOo..",
+        "..oOwkwOOwkwOo..",
+        "..oOOOOOOOOOOo..",
+        "..oOOOmmmmOOOo..",
+        "..oOOOOOOOOOOo..",
+    ],
 }
 
 

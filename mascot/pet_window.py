@@ -22,7 +22,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Any, Callable
 
-from . import pet_logic, pet_store, shop, sprite_pixel
+from . import config, pet_logic, pet_store, shop, sprite_pixel
 from .control_panel import (ACCENT, BG, BORDER, DANGER, FG, MUTED, OK, PANEL,
                             PANEL_HI, WARN, _apply_theme)
 from .tkinter_app import round_rect
@@ -37,8 +37,8 @@ PET_PX = 6                      # creature pixel size in the window
 PET_CANVAS_W, PET_CANVAS_H = 180, 150
 BAR_W, BAR_H = 150, 14
 
-# Need-bar colors (hunger / happiness / energy).
-NEED_COLORS = {"hunger": "#ed8936", "happiness": "#f472b6", "energy": "#48bb78"}
+# Need-bar colors (shared with the tooltip via config) + their display labels.
+NEED_COLORS = config.NEED_COLORS
 NEED_LABELS = {"hunger": "Hunger", "happiness": "Happy", "energy": "Energy"}
 TRACK = "#2a2d3b"
 

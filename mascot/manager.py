@@ -133,6 +133,11 @@ class MascotManager:
             # Track only live sessions, so a closed card can't fire a stale transition.
             self._pet_prev = dict(states)
 
+            # Push the latest pet to every card so its idle-face mood + hover tooltip
+            # reflect the shared pet (the pet is one global creature, all cards mirror it).
+            for win in self.windows.values():
+                win.set_pet(self.pet)
+
             if awarded or (now - self._pet_last_save >= PET_SAVE_INTERVAL_S):
                 self._save_pet(now)
         except Exception as exc:  # noqa: BLE001 — the pet must never crash the widget

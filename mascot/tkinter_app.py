@@ -15,8 +15,8 @@ import tkinter as tk
 from pathlib import Path
 from typing import Any
 
-from . import config, effective_state, osplatform, sprite_pixel, sprite_smooth
-from .popups import BubbleWindow
+from . import config, effective_state, osplatform, pet_logic, sprite_pixel, sprite_smooth
+from .popups import BubbleWindow, StatsTooltip
 from .scale import font as _font, s as _s
 
 # Mascot art modules, selectable via config.ART_STYLE. The smooth blob is kept
@@ -62,6 +62,10 @@ def round_rect(c, x1, y1, x2, y2, r, **kw) -> int:
 STATE_CAPTIONS = {
     "idle": "idle",
     "idle_blink": "idle",       # a blink is still "idle" — keep the caption steady
+    "idle_happy": "idle",       # idle-mood faces are still "idle" to the caption
+    "idle_hungry": "idle",
+    "idle_sad": "idle",
+    "idle_tired": "idle",
     "thinking": "thinking…",
     "working": "working…",
     "waiting": "needs you!",
@@ -244,6 +248,10 @@ class MascotWindow:
         self._hidden = False
         self._manager_root = manager_root
         self._bubble: BubbleWindow | None = None
+        # The global pet (pushed by the manager) drives the idle-face mood and the
+        # hover tooltip. None until the first push -> a neutral "content" mood.
+        self._pet_data: dict[str, Any] | None = None
+        self._tooltip: StatsTooltip | None = None
 
         # effective-state / shake bookkeeping (must exist before first compute)
         self._dizzy_until = 0.0
@@ -302,6 +310,8 @@ class MascotWindow:
         self.canvas.bind("<Button-1>", self._on_drag_start)
         self.canvas.bind("<B1-Motion>", self._on_drag_motion)
         self.canvas.bind("<ButtonRelease-1>", self._on_drag_end)
+        self.canvas.bind("<Enter>", self._on_enter)   # hover -> pet status tooltip
+        self.canvas.bind("<Leave>", self._on_leave)
 
         self._place_initial(index)
         self._render()
@@ -395,6 +405,7 @@ class MascotWindow:
         # Undo any active attention-shake first so the grab point maps to the
         # card's true resting position (no jump as the shake is removed).
         self._reset_shake_offset()
+        self._on_leave(event)   # hide the hover tooltip while dragging
         self._press_pos = (event.x_root, event.y_root)
         self._drag_offset = (event.x_root - self.root.winfo_x(),
                              event.y_root - self.root.winfo_y())
@@ -497,7 +508,8 @@ class MascotWindow:
     # --- effective state --------------------------------------------------
     def _compute_effective_state(self, now: float) -> str:
         """Thin wrapper over the pure effective_state.compute, fed this card's
-        live timers and the configured thresholds."""
+        live timers, the configured thresholds, and the pet's mood (idle-only)."""
+        mood = pet_logic.mood(self._pet_data) if self._pet_data else "content"
         return effective_state.compute(
             self.state.get("state", "idle"), now,
             ts=self.state.get("ts"),
@@ -510,7 +522,15 @@ class MascotWindow:
             shake_after_s=WAITING_SHAKE_AFTER_S,
             thinking_stall_s=THINKING_STALL_S,
             working_stall_s=WORKING_STALL_S,
+            mood=mood,
         )
+
+    def set_pet(self, pet: dict[str, Any]) -> None:
+        """Receive the latest global pet from the manager: drives the idle-face mood
+        and the hover tooltip. Cheap — the next animate tick picks up any mood change."""
+        self._pet_data = pet
+        if self._tooltip is not None:
+            self._tooltip.set_pet(pet)
 
     # --- state ------------------------------------------------------------
     def update_state(self, state: dict[str, Any], now: float | None = None) -> None:
@@ -599,6 +619,29 @@ class MascotWindow:
         except tk.TclError:
             pass
 
+    # --- hover tooltip (pet status) ---------------------------------------
+    def _on_enter(self, _event: tk.Event) -> None:
+        """Show the pet-status tooltip on hover (not while hidden or mid-drag)."""
+        if self._hidden or self._drag_offset is not None or self._tooltip is not None:
+            return
+        self._tooltip = StatsTooltip(self._manager_root, self._pet_data)
+        self._reposition_tooltip()
+
+    def _on_leave(self, _event: tk.Event) -> None:
+        if self._tooltip is not None:
+            self._tooltip.destroy()
+            self._tooltip = None
+
+    def _reposition_tooltip(self) -> None:
+        if self._tooltip is None:
+            return
+        try:
+            self._tooltip.place_beside(
+                self.root.winfo_x(), self.root.winfo_y(), CARD_W, CARD_H, self._card_bounds(),
+            )
+        except tk.TclError:
+            pass
+
     # --- animation --------------------------------------------------------
     def _animate(self) -> None:
         """Cheap ~25fps loop: bob the creature, pulse the border while waiting."""
@@ -647,6 +690,8 @@ class MascotWindow:
 
             if self._bubble is not None:
                 self._reposition_bubble()
+            if self._tooltip is not None:    # follow the card (incl. shake)
+                self._reposition_tooltip()
         except tk.TclError:
             return
 
@@ -713,6 +758,9 @@ class MascotWindow:
         'show / hide cards' toggle. Windows drops the always-on-top flag when a
         withdrawn window is shown again, so re-assert it after deiconify."""
         self._hidden = hidden
+        if hidden and self._tooltip is not None:   # no hover tooltip while hidden
+            self._tooltip.destroy()
+            self._tooltip = None
         try:
             if hidden:
                 self.root.withdraw()
@@ -732,4 +780,7 @@ class MascotWindow:
         if self._bubble is not None:
             self._bubble.destroy()
             self._bubble = None
+        if self._tooltip is not None:
+            self._tooltip.destroy()
+            self._tooltip = None
         self.root.destroy()

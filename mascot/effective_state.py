@@ -8,6 +8,17 @@ watchdog that falls a frozen busy state back to idle. Kept Tk-free and clock-fre
 """
 from __future__ import annotations
 
+# Pet mood (from pet_logic.mood) -> idle-face variant. Applied ONLY while the raw
+# state is idle (and not dozing/blinking), so Claude-activity states always win. A
+# face the sprite doesn't define falls back to plain "idle" at render time.
+_MOOD_IDLE_FACE = {
+    "happy": "idle_happy",     # sparkly — well cared for
+    "hungry": "idle_hungry",   # droopy
+    "sad": "idle_sad",
+    "tired": "idle_tired",     # sleepy-eyed (low energy)
+    "content": "idle",
+}
+
 
 def compute(
     raw: str,
@@ -23,6 +34,7 @@ def compute(
     shake_after_s: float,
     thinking_stall_s: float,
     working_stall_s: float,
+    mood: str = "content",
 ) -> str:
     """Return the effective state. Overlays apply in priority order:
       - `dizzy`         while a recent shake is still in effect (top priority),
@@ -52,9 +64,12 @@ def compute(
         if (raw == "thinking" and stale > thinking_stall_s) or (
                 raw == "working" and stale > working_stall_s):
             return "idle"
-    if raw == "idle" and idle_since is not None:
-        if now - idle_since >= sleep_after_idle_s:
+    if raw == "idle":
+        # The idle rhythm — dozing and the occasional blink — outranks the mood tint.
+        if idle_since is not None and now - idle_since >= sleep_after_idle_s:
             return "sleeping"
         if now < blink_until:
             return "idle_blink"
+        # Otherwise the idle face reflects the pet's mood (default: plain idle).
+        return _MOOD_IDLE_FACE.get(mood, "idle")
     return raw

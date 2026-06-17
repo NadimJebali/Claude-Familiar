@@ -550,6 +550,38 @@ def test_effective_fresh_working_passes_through():
     assert _eff("working", now=1000.0, ts=1000.0) == "working"
 
 
+def test_effective_idle_face_reflects_pet_mood():
+    # While genuinely idle (and not dozing/blinking), the idle face is tinted by the
+    # pet's mood — droopy/sad/sleepy when low, sparkly when well-cared-for.
+    assert _eff("idle", now=100.0, mood="hungry") == "idle_hungry"
+    assert _eff("idle", now=100.0, mood="sad") == "idle_sad"
+    assert _eff("idle", now=100.0, mood="tired") == "idle_tired"
+    assert _eff("idle", now=100.0, mood="happy") == "idle_happy"
+    assert _eff("idle", now=100.0, mood="content") == "idle"
+
+
+def test_effective_default_mood_is_plain_idle():
+    # No mood supplied -> plain idle face (back-compat with callers that don't pass one).
+    assert _eff("idle", now=100.0) == "idle"
+
+
+def test_effective_claude_states_always_override_mood():
+    # The contract: Claude-activity states win over pet mood on the face, so the
+    # mascot never lies about what Claude is doing.
+    assert _eff("working", now=100.0, mood="hungry") == "working"
+    assert _eff("thinking", now=100.0, mood="sad") == "thinking"
+    assert _eff("waiting", now=100.0, mood="happy") == "waiting"
+    assert _eff("dead", now=100.0, mood="hungry") == "dead"
+
+
+def test_effective_sleeping_and_blink_outrank_mood():
+    # Dozing / blinking are part of the idle rhythm and outrank the mood tint.
+    assert _eff("idle", now=1000.0, idle_since=880.0, sleep_after_idle_s=60.0,
+                mood="hungry") == "sleeping"
+    assert _eff("idle", now=1000.0, idle_since=995.0, blink_until=1001.0,
+                mood="hungry") == "idle_blink"
+
+
 def test_effective_stalled_busy_never_sleeps_with_idle_since():
     # Footgun guard: a stalled busy state must resolve to idle and NEVER sleeping,
     # even if an idle_since timer happens to be set. The watchdog early-returns idle
