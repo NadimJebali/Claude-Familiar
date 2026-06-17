@@ -181,6 +181,26 @@ Persistent leveling/evolving pet. Outline only for now.
 
 ---
 
+## Considered & rejected
+
+### Real-.exe packaging for a Task Manager identity — 2026-06-17
+Goal: make Task Manager show "Claude Familiar" + the mascot image instead of
+`pythonw.exe` + the Python icon. **Rejected** — the process name can only change by
+shipping a real executable, and every route is a bad fit:
+- **PyInstaller** does it cleanly but adds a build-time dependency + a ~10–25 MB
+  artifact, against the pure-stdlib / run-from-source ethos.
+- The dependency-free hack (copy `pythonw.exe` → `Claude Familiar.exe`, inject the
+  icon/version via the Win32 resource API) is too fragile: the copy can't locate
+  `python3X.dll` outside the Python dir, and a renamed interpreter trips antivirus.
+
+Decision: accept the `pythonw` process name. The taskbar/window icon is already the
+mascot (`iconphoto`), and `install.py` + the tray + shortcuts already deliver the
+"real installed app" feel. (A pure-stdlib `SetCurrentProcessExplicitAppUserModelID`
+taskbar-grouping polish was also on the table, but skipped.) Don't re-open without a
+new reason.
+
+---
+
 ## Validation
 ```bash
 python -m pytest -q        # state_logic counters (#4) + existing suite
