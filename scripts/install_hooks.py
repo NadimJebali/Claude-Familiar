@@ -50,6 +50,7 @@ EVENTS = (
     "PostToolUse",
     "Notification",
     "Stop",
+    "StopFailure",  # turn ended on an API error (usage/rate limit, auth, billing, ...)
     "SubagentStop",
     "SessionEnd",
 )

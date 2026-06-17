@@ -21,12 +21,22 @@ AGENT_TOOL = "Agent"
 # ("Claude is waiting for your input") after ~60s of inactivity. The idle nudge
 # is not a request for the user, so it must not wake a dozing mascot into the
 # attention-grabbing "waiting" state.
+#
+# The nudge is recognized by its notification type (which carries "idle", e.g.
+# "idle_prompt") OR, when the payload omits a type, by the message text. Matching
+# the type matters: the nudge often arrives with an empty message, and without the
+# type check it fell through to "waiting" and left the mascot stuck shaking
+# "needs you!" long after the user had already answered. A real permission prompt
+# is typed "permission" (never "idle"), so it is unaffected.
 _IDLE_NOTIFICATION_HINTS = ("waiting for your input",)
 
 
-def _is_idle_reminder(message: str) -> bool:
-    """True for the periodic "Claude is waiting for your input" idle nudge."""
-    msg = (message or "").lower()
+def _is_idle_reminder(payload: dict[str, Any]) -> bool:
+    """True for the periodic idle nudge, matched by notification type or message."""
+    ntype = (payload.get("notification_type") or payload.get("subtype") or "").lower()
+    if "idle" in ntype:
+        return True
+    msg = (payload.get("message") or "").lower()
     return any(hint in msg for hint in _IDLE_NOTIFICATION_HINTS)
 
 
@@ -63,6 +73,23 @@ def _payload_text(payload: dict[str, Any]) -> str:
     """Joined, lowercased text from a payload's human-readable fields."""
     parts = [payload[k] for k in _TEXT_FIELDS if isinstance(payload.get(k), str)]
     return " ".join(parts).lower()
+
+
+# StopFailure (fires when a turn ends on an API error) carries a structured
+# `error_type` enum. These values mean the session can't continue -> gravestone;
+# every other value (overloaded, server_error, model_not_found, invalid_request,
+# max_output_tokens, unknown) is a transient/odd turn-death -> settle to idle.
+# StopFailure carries no human text, so the death bubble uses a short fixed label
+# (the "resets at <time>" detail still rides on a Notification/Stop, when one fires).
+_DEATH_ERROR_TYPES = frozenset(
+    {"rate_limit", "billing_error", "authentication_failed", "oauth_org_not_allowed"}
+)
+_DEATH_MESSAGES = {
+    "rate_limit": "Out of usage",
+    "billing_error": "Billing problem",
+    "authentication_failed": "Auth failed",
+    "oauth_org_not_allowed": "Org not allowed",
+}
 
 
 def default_state(session_id: str, cwd: str = "", model: str = "") -> dict[str, Any]:
@@ -123,6 +150,7 @@ def compute_next_state(
         nxt["state"] = "working"
         tool_input = payload.get("tool_input") or {}
         if _is_top_level_agent_spawn(payload):
+            nxt["tool"] = None  # the sub-agent shows as its own badge, not the caption
             nxt["subagents"].append(
                 {
                     "id": payload.get("tool_use_id"),
@@ -131,12 +159,12 @@ def compute_next_state(
                 }
             )
             nxt["subagents_spawned"] = current.get("subagents_spawned", 0) + 1
-        else:
+        elif not payload.get("agent_id"):
+            # A main-thread tool: surface it in the caption and count it. A tool
+            # running INSIDE a sub-agent carries a top-level agent_id and isn't part
+            # of the visible session, so it touches neither the caption nor the count.
             nxt["tool"] = payload.get("tool_name")
-            # Count main-thread tools only; a tool running inside a sub-agent
-            # carries a top-level agent_id and isn't part of the visible session.
-            if not payload.get("agent_id"):
-                nxt["tools_run"] = current.get("tools_run", 0) + 1
+            nxt["tools_run"] = current.get("tools_run", 0) + 1
 
     elif event == "PostToolUse":
         if payload.get("tool_name") == AGENT_TOOL:
@@ -144,6 +172,11 @@ def compute_next_state(
             nxt["subagents"] = [
                 s for s in nxt["subagents"] if s.get("id") != tool_use_id
             ]
+        # A main-thread tool just finished; clear the caption tool (Claude is now
+        # reasoning between tools). Nested sub-agent completions carry an agent_id
+        # and leave the visible caption alone.
+        if not payload.get("agent_id"):
+            nxt["tool"] = None
         nxt["state"] = "working"
 
     elif event == "Notification":
@@ -156,7 +189,7 @@ def compute_next_state(
                 "message": message,
                 "type": payload.get("notification_type", ""),
             }
-        elif _is_idle_reminder(message):
+        elif _is_idle_reminder(payload):
             # Just an idle nudge — leave the mascot as-is (dozing), no bubble.
             nxt["state"] = "idle"
             nxt["notify"] = None
@@ -180,6 +213,23 @@ def compute_next_state(
                 "type": payload.get("notification_type", ""),
             }
         else:
+            nxt["state"] = "idle"
+
+    elif event == "StopFailure":
+        # The structured terminating hook for an API-error turn death. error_type
+        # is an enum; a usage/rate limit tombstones the mascot. The turn ended, so
+        # clear the active tool + sub-agent badges (mirrors Stop).
+        nxt["tool"] = None
+        nxt["subagents"] = []
+        error_type = payload.get("error_type", "")
+        if error_type in _DEATH_ERROR_TYPES:
+            nxt["state"] = "dead"
+            nxt["notify"] = {
+                "message": _DEATH_MESSAGES.get(error_type, "Session ended"),
+                "type": error_type,
+            }
+        else:
+            # Transient/odd API error: the turn ended, so settle to idle.
             nxt["state"] = "idle"
 
     # SubagentStop: intentionally a no-op (noisy; see module docstring).

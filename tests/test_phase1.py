@@ -10,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "hooks"))
 
 from state_logic import compute_next_state, default_state  # noqa: E402
 import emit  # noqa: E402
+from mascot import popup_place  # noqa: E402
+from mascot import effective_state  # noqa: E402
 
 SID = "4a6ff882-6153-4b83-bd9a-1017fdd10aee"
 
@@ -76,10 +78,23 @@ def test_post_tool_use_agent_pops_matching_subagent():
     assert out["subagents"] == []
 
 
-def test_notification_sets_waiting():
+def test_idle_prompt_notification_type_stays_idle():
+    # Claude Code's ~60s idle nudge can arrive as type "idle_prompt" with no
+    # message; it must NOT wake the mascot into the shaking "waiting" state — only
+    # a real attention/permission prompt should. (Regression: empty-message idle
+    # nudges used to fall through to "waiting" and leave the mascot stuck.)
     payload = {"session_id": SID, "notification_type": "idle_prompt"}
     out = compute_next_state(base(), "Notification", payload)
+    assert out["state"] == "idle"
+    assert out["notify"] is None
+
+
+def test_permission_notification_type_sets_waiting():
+    # A real attention prompt (typed, non-idle) still raises "waiting".
+    payload = {"session_id": SID, "message": "Approve edit?", "notification_type": "permission"}
+    out = compute_next_state(base(), "Notification", payload)
     assert out["state"] == "waiting"
+    assert out["notify"]["message"] == "Approve edit?"
 
 
 def test_notification_captures_permission_message():
@@ -176,6 +191,80 @@ def test_usage_limit_detected_in_non_message_field():
     payload = {"session_id": SID, "reason": "You have reached your usage limit"}
     out = compute_next_state(base(), "Notification", payload)
     assert out["state"] == "dead"
+
+
+# --- StopFailure (API-error turn death) -----------------------------------
+
+def test_stopfailure_rate_limit_goes_dead_with_bubble():
+    # The structured terminating hook: a usage/rate limit ends the turn with
+    # error_type "rate_limit" -> the mascot tombstones and shows a bubble.
+    payload = {"session_id": SID, "error_type": "rate_limit"}
+    out = compute_next_state(base(), "StopFailure", payload)
+    assert out["state"] == "dead"
+    assert out["notify"] is not None
+
+
+def test_stopfailure_overloaded_goes_idle_not_dead():
+    # A transient server overload ends the turn (-> idle) but is NOT session death.
+    start = base()
+    start["state"] = "working"
+    payload = {"session_id": SID, "error_type": "overloaded"}
+    out = compute_next_state(start, "StopFailure", payload)
+    assert out["state"] == "idle"
+
+
+def test_stopfailure_session_blocking_errors_go_dead():
+    # Auth/billing/org-block failures also stop the session cold -> gravestone.
+    for et in ("billing_error", "authentication_failed", "oauth_org_not_allowed"):
+        out = compute_next_state(base(), "StopFailure", {"session_id": SID, "error_type": et})
+        assert out["state"] == "dead", et
+
+
+def test_stopfailure_other_transient_errors_go_idle():
+    # The remaining non-death error_types settle to idle (the turn ended), never dead.
+    for et in ("server_error", "model_not_found", "invalid_request",
+               "max_output_tokens", "unknown"):
+        start = base()
+        start["state"] = "working"
+        out = compute_next_state(start, "StopFailure", {"session_id": SID, "error_type": et})
+        assert out["state"] == "idle", et
+
+
+def test_stopfailure_missing_error_type_goes_idle():
+    # A StopFailure with no error_type must not crash or tombstone — settle to idle.
+    start = base()
+    start["state"] = "thinking"
+    out = compute_next_state(start, "StopFailure", {"session_id": SID})
+    assert out["state"] == "idle"
+
+
+def test_stopfailure_clears_tool_and_subagents():
+    # The turn ended, so a StopFailure clears the active tool + sub-agent badges
+    # (mirrors Stop) — no stale 'Bash…' caption or lingering badges on the card.
+    start = base()
+    start["state"] = "working"
+    start["tool"] = "Bash"
+    start["subagents"] = [{"id": "x", "type": "agent", "description": ""}]
+    out = compute_next_state(start, "StopFailure", {"session_id": SID, "error_type": "overloaded"})
+    assert out["tool"] is None
+    assert out["subagents"] == []
+
+
+def test_stopfailure_death_revives_on_next_prompt():
+    # A StopFailure gravestone comes back to life on the next prompt; bubble cleared.
+    dead = compute_next_state(base(), "StopFailure", {"session_id": SID, "error_type": "rate_limit"})
+    assert dead["state"] == "dead"
+    revived = compute_next_state(dead, "UserPromptSubmit", {"session_id": SID})
+    assert revived["state"] == "thinking"
+    assert revived["notify"] is None
+
+
+def test_installer_includes_stopfailure_event():
+    # The widget can't receive StopFailure unless the installer wires the hook.
+    scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
+    sys.path.insert(0, str(scripts_dir))
+    import install_hooks  # noqa: PLC0415
+    assert "StopFailure" in install_hooks.EVENTS
 
 
 def test_notify_is_cleared_by_next_forward_event():
@@ -278,6 +367,16 @@ def test_update_state_writes_file_with_heartbeat(tmp_path):
     assert written["state"] == "working"
 
 
+def test_stopfailure_round_trips_to_dead_state_file(tmp_path):
+    # End-to-end: a StopFailure(rate_limit) hits emit and lands a 'dead' state file.
+    out = emit.update_state(
+        tmp_path, "StopFailure", {"session_id": SID, "error_type": "rate_limit"}, now=5.0
+    )
+    assert out["state"] == "dead"
+    written = json.loads((tmp_path / f"{SID}.json").read_text(encoding="utf-8"))
+    assert written["state"] == "dead"
+
+
 def test_session_end_deletes_file(tmp_path):
     emit.update_state(tmp_path, "SessionStart", {"session_id": SID}, now=1.0)
     assert (tmp_path / f"{SID}.json").exists()
@@ -348,3 +447,142 @@ def test_desktop_entry_contains_required_keys():
     for key in ("Type=Application", "Name=Claude Familiar", "Exec=", "Icon=/x/icon.png",
                 "Path=/x", "Terminal=false"):
         assert key in text
+
+
+# --- multi-monitor popup placement ----------------------------------------
+# bounds = (x, y, width, height) work area of the monitor the card sits on.
+_PRIMARY = (0, 0, 1920, 1080)
+_RIGHT = (1920, 0, 1920, 1080)        # second monitor to the right of primary
+_LEFT = (-1920, 0, 1920, 1080)        # second monitor to the left of primary
+
+
+def test_tooltip_beside_prefers_left_within_primary():
+    # Card mid-primary: tooltip sits just to its left, fully on-screen.
+    x, y = popup_place.beside(800, 500, 158, 196, 120, 40, _PRIMARY, gap=6)
+    assert x == 800 - 120 - 6
+    assert _PRIMARY[0] <= x <= _PRIMARY[0] + _PRIMARY[2] - 120
+
+
+def test_tooltip_follows_card_onto_right_monitor():
+    # Card dragged onto the right monitor: the tooltip must stay on THAT monitor,
+    # not get clamped back onto the primary (the bug being fixed).
+    x, _ = popup_place.beside(2000, 500, 158, 196, 120, 40, _RIGHT, gap=6)
+    assert x >= _RIGHT[0]                       # on the right monitor, not primary
+    assert x <= _RIGHT[0] + _RIGHT[2] - 120
+
+
+def test_tooltip_follows_card_onto_left_monitor_negative_coords():
+    # Left monitor uses negative virtual-desktop coordinates; the tooltip must
+    # clamp into that monitor's range, not snap to x=0 on the primary.
+    x, _ = popup_place.beside(-1800, 500, 158, 196, 120, 40, _LEFT, gap=6)
+    assert _LEFT[0] <= x <= _LEFT[0] + _LEFT[2] - 120
+    assert x < 0                                # stayed on the left monitor
+
+
+def test_bubble_above_centers_over_card_and_clamps_to_monitor():
+    x, y = popup_place.above(2000, 400, 158, 196, 80, _RIGHT, gap=6)
+    assert _RIGHT[0] <= x <= _RIGHT[0] + _RIGHT[2] - 196
+    assert y == 400 - 80 - 6                    # sits above the card
+
+
+def test_bubble_above_drops_below_card_when_no_room_at_monitor_top():
+    # Card hard against the monitor's top edge: the bubble can't go above, so it
+    # hugs the card top instead of rendering off-screen.
+    _, y = popup_place.above(800, 0, 158, 196, 80, _PRIMARY, gap=6)
+    assert y == 0
+
+
+# --- caption tool field (surfaced as 'Bash…' while a tool runs) ------------
+
+def test_nested_tool_does_not_set_caption_tool():
+    # A tool inside a sub-agent (top-level agent_id) isn't the visible session's
+    # work, so it must not become the main caption tool.
+    payload = {"session_id": SID, "tool_name": "Read", "agent_id": "a1", "tool_input": {}}
+    out = compute_next_state(base(), "PreToolUse", payload)
+    assert out["tool"] is None
+
+
+def test_agent_spawn_clears_caption_tool():
+    start = base()
+    start["tool"] = "Bash"
+    payload = {"session_id": SID, "tool_name": "Agent", "tool_input": {}, "tool_use_id": "t1"}
+    out = compute_next_state(start, "PreToolUse", payload)
+    assert out["tool"] is None
+
+
+def test_post_tool_use_clears_caption_tool():
+    # A finished main-thread tool clears the caption tool (Claude reasons between
+    # tools), so 'Bash…' doesn't linger after Bash returns.
+    start = base()
+    start["tool"] = "Bash"
+    out = compute_next_state(start, "PostToolUse", {"session_id": SID, "tool_name": "Bash"})
+    assert out["tool"] is None
+
+
+def test_nested_post_tool_use_keeps_caption_tool():
+    # A sub-agent's internal tool finishing must not wipe the main caption tool.
+    start = base()
+    start["tool"] = "Bash"
+    out = compute_next_state(
+        start, "PostToolUse", {"session_id": SID, "tool_name": "Read", "agent_id": "a1"})
+    assert out["tool"] == "Bash"
+
+
+# --- effective state (pure watchdog / overlay logic) ----------------------
+
+def _eff(raw, now=100.0, **over):
+    kw = dict(ts=now, dizzy_until=0.0, celebrate_until=0.0, waiting_since=None,
+              idle_since=None, blink_until=0.0, sleep_after_idle_s=60.0,
+              shake_after_s=30.0, thinking_stall_s=180.0, working_stall_s=240.0)
+    kw.update(over)
+    return effective_state.compute(raw, now, **kw)
+
+
+def test_effective_dizzy_outranks_everything():
+    assert _eff("working", now=100.0, dizzy_until=200.0) == "dizzy"
+
+
+def test_effective_happy_on_recent_celebrate():
+    assert _eff("idle", now=100.0, celebrate_until=200.0) == "happy"
+
+
+def test_effective_waiting_turns_angry_after_shake_threshold():
+    assert _eff("waiting", now=100.0, waiting_since=60.0, shake_after_s=30.0) == "waiting_angry"
+    assert _eff("waiting", now=100.0, waiting_since=80.0, shake_after_s=30.0) == "waiting"
+
+
+def test_effective_thinking_stall_falls_to_idle():
+    assert _eff("thinking", now=1000.0, ts=800.0, thinking_stall_s=180.0) == "idle"
+
+
+def test_effective_working_stall_falls_to_idle():
+    # The regression at the heart of the limit-freeze fix: a stale `working`
+    # (no closing hook) must fall back to idle, not stay frozen.
+    assert _eff("working", now=1000.0, ts=700.0, working_stall_s=240.0) == "idle"
+
+
+def test_effective_working_protected_before_stall():
+    # A long-running tool (still under the grace window) keeps showing working.
+    assert _eff("working", now=1000.0, ts=800.0, working_stall_s=240.0) == "working"
+
+
+def test_effective_idle_dozes_to_sleeping():
+    assert _eff("idle", now=1000.0, idle_since=880.0, sleep_after_idle_s=60.0) == "sleeping"
+
+
+def test_effective_idle_blink_window():
+    assert _eff("idle", now=1000.0, idle_since=995.0, blink_until=1001.0) == "idle_blink"
+
+
+def test_effective_fresh_working_passes_through():
+    assert _eff("working", now=1000.0, ts=1000.0) == "working"
+
+
+def test_effective_stalled_busy_never_sleeps_with_idle_since():
+    # Footgun guard: a stalled busy state must resolve to idle and NEVER sleeping,
+    # even if an idle_since timer happens to be set. The watchdog early-returns idle
+    # rather than rewriting raw and falling through into the idle->sleeping overlay.
+    assert _eff("working", now=1000.0, ts=700.0, working_stall_s=240.0,
+                idle_since=800.0, sleep_after_idle_s=60.0) == "idle"
+    assert _eff("thinking", now=1000.0, ts=700.0, thinking_stall_s=180.0,
+                idle_since=800.0, sleep_after_idle_s=60.0) == "idle"

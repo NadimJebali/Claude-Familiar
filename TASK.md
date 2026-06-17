@@ -8,6 +8,69 @@ Status legend: ⬜ todo · 🔄 in progress · ✅ done
 
 ---
 
+## Grill-session decisions & plan — 2026-06-17
+
+Outcome of a `/grill-me` design review of the in-flight work. **Supersedes** the
+"NEXT (needs user)" step in the session-limit bug fix below, and **reverses** feature
+#4 (stats tooltip → cut). Filed as GitHub issues #1 (PRD) and #2–#4 (slices).
+
+### Status (2026-06-17)
+- ✅ **#2 StopFailure detection** — implemented (TDD): `compute_next_state` branches on
+  `error_type` (`_DEATH_ERROR_TYPES`), installer wires `StopFailure`, emit round-trips it.
+- ✅ **#3 watchdog backstop** — implemented (TDD): `effective_state.compute` early-returns
+  idle on a stall (never sleeping); `WORKING_STALL_S` raised to 270.
+- ⏳ **#4 confirm error_type map (HITL)** — needs a real limit hit + `CLAUDE_MASCOT_DEBUG`.
+- ⏳ **Stats-tooltip cut** & **home-monitor picker** — deferred: both touch GUI/Win32 that
+  can't be verified headlessly; do them in a session where the app can be launched.
+
+### Commit order (Q1)
+Split the in-flight working tree: behavior-preserving **refactor first**, then one
+commit per feature. Strip the cut stats tooltip *before* the refactor commit so dead
+code never enters history.
+1. `chore:` remove stats tooltip + counters (the cut from #4 below)
+2. `refactor:` split `tkinter_app` → `manager` / `effective_state` / `popups` / `popup_place` / `scale`
+   (multi-monitor popups + `waiting_angry` ride along — already built & tested)
+3. `feat:` StopFailure limit detection (+ watchdog demotion)
+4. `feat:` Windows "home monitor" picker
+
+### Limit detection — StopFailure (Q2–Q4, Q6)
+Replace the time-guess with the real terminating hook. Claude Code exposes
+**`StopFailure`** (*"fires when a turn ends due to an API error"*) with a structured
+`error_type` enum — verified **absent** from our installed hooks, which is *why* a
+limit hit looked like "no terminating hook fired."
+
+- **Prereq:** add `StopFailure` to `EVENTS` in `install_hooks.py` and re-run the
+  installer — `CLAUDE_MASCOT_DEBUG=1` can't capture it until `emit.py` is invoked for it.
+- **Wire-and-log together:** add a `StopFailure` branch to `compute_next_state`; keep
+  `CLAUDE_MASCOT_DEBUG=1` on to capture the real payload + triangulate against
+  `Stop`/`Notification`; finalize the map from the captured `debug.log`.
+- **`error_type` map (provisional — confirm from `debug.log`):**
+  - → `dead` (gravestone): `rate_limit` (all of them — revive-on-next-prompt undoes a
+    false tombstone), `billing_error`, `authentication_failed`, `oauth_org_not_allowed`
+  - → `idle` (turn just ended, *not* death): `overloaded`, `server_error`,
+    `model_not_found`, `invalid_request`, `max_output_tokens`, `unknown`
+- **Keep** the `Notification`/`Stop` `_payload_text` match as the **secondary** path — it
+  supplies the "resets at 3pm" bubble that `StopFailure` (error_type only) lacks.
+- **Watchdog → thin backstop:** raise `WORKING_STALL_S` → 270 (just under the 300s
+  prune); keep the thinking stall. Make the watchdog **early-`return "idle"`** instead of
+  mutate-`raw`-and-fall-through (a stalled busy state can otherwise reach `sleeping` via
+  the idle overlay) + a pinning test. Note: any `StopFailure` now sets idle-or-dead
+  immediately, so the watchdog is near-vestigial — kept only for a truly-no-hook wedge.
+
+### Home monitor picker (Q7 = B) — NEW, Windows-only
+Cards anchor to the *primary* monitor today; if your main display isn't primary they
+spawn out of sight. Add a **deterministic** picker (no foreground-window heuristic):
+- `EnumDisplayMonitors` (Win32) to enumerate displays + work areas
+- `home_monitor` setting in `settings.py`; picker in `control_panel.py`
+- `_place_initial` resolves the chosen monitor's work area instead of `primary_work_area()`
+- Linux: degrades to current primary/screen behavior (matches tray/chroma being Win-only)
+
+### Refactor (Q5)
+Decomposition is **done as-is**; `MascotWindow` stays whole (under the 800-line ceiling;
+the testability-driven extractions are already out).
+
+---
+
 ## Batch A — sprite/animation layer (ship together)
 
 ### 1. Happy / celebrate state — ✅
@@ -38,8 +101,13 @@ from a timestamp, **never written to the state file**.
 
 ## Batch B
 
-### 4. Session stats on hover — ✅
-Counters live in the **pure, tested** state machine; tooltip mirrors `BubbleWindow`.
+### 4. Session stats on hover — ❌ CUT (2026-06-17, see Grill-session decisions)
+**Reversed.** Hover-only on a 158px card is near-undiscoverable, and the per-session
+counters don't fit Tamagotchi's *lifetime* need (YAGNI). Remove `StatsTooltip`, the
+`TOOLTIP_*` constants, the `<Enter>`/`<Leave>` bindings + `_stats_text` plumbing, the
+`prompts`/`tools_run`/`subagents_spawned` counters in `state_logic`, and their 7 tests.
+The life-stats display returns with Tamagotchi (#6), driven by lifetime `pet.json`.
+~~Counters live in the **pure, tested** state machine; tooltip mirrors `BubbleWindow`.~~
 - [x] `state_logic.py`: add `tools_run`, `subagents_spawned`, `prompts` to
       `default_state`; increment in `compute_next_state` (uses `current.get(k,0)+1`
       so old state files upgrade cleanly)
@@ -80,8 +148,9 @@ could not trigger.
       `thinking` with no new event, the display falls back to idle instead of
       appearing frozen (only `thinking`, never `working`, to avoid cutting long tools)
 - [x] tests: Stop-with-limit-text tombstones; limit detected in non-`message` field
-- **NEXT (needs user):** enable `CLAUDE_MASCOT_DEBUG=1`, reproduce a limit hit, and
-  share `debug.log` so we can confirm exactly what (if anything) fires and finalize.
+- **SUPERSEDED (2026-06-17):** the real fix is the `StopFailure` hook — see
+  "Limit detection — StopFailure" under Grill-session decisions above. The reason this
+  looked like "no terminating hook fired" is that `StopFailure` was never installed.
 
 ### Duplicate, overlapping cards — ✅
 No single-instance guard, so a second `run_mascot.py` (e.g. autostart + a manual
@@ -105,6 +174,9 @@ Persistent leveling/evolving pet. Outline only for now.
 - [ ] XP from lifetime activity; level curve; mood/energy decay over real time
 - [ ] Evolution-stage sprite sets (baby/teen/adult) in the ASCII-grid format
 - [ ] Level badge + XP bar on the card; evolution transition; optional needs
+- [ ] **Life-stats display** — revives the cut hover-tooltip pattern (#4), but driven by
+      **lifetime** `pet.json` counters (age, XP, prompts/tools/agents over the pet's life)
+      rather than the per-session counters we removed
 - Phasing: (a) persistence+XP, (b) level/badge UI, (c) evolution art, (d) mood/needs
 
 ---

@@ -1,33 +1,27 @@
-"""Tkinter mascot widget.
+"""Tkinter mascot card.
 
-One window per Claude session. Native, built-in tkinter only — no external deps.
-The mascot is a custom character drawn on a Canvas (see `sprite_pixel.py`), not
-an emoji or image asset. Run with: python run_mascot.py  (or: python -m mascot)
+Defines `MascotWindow` — one always-on-top Toplevel per Claude session, drawn on
+a single Canvas (the creature itself lives in `sprite_pixel.py`). The process
+entry point and session manager live in `mascot/manager.py`. Native, built-in
+tkinter only — no external deps. Run with: python -m mascot.
 """
 from __future__ import annotations
 
 import math
 import random
-import subprocess
 import sys
 import time
 import tkinter as tk
 from pathlib import Path
 from typing import Any
 
-from . import config, icon, osplatform, single_instance, sprite_pixel, sprite_smooth, state_store
+from . import config, effective_state, osplatform, sprite_pixel, sprite_smooth
+from .popups import BubbleWindow, StatsTooltip
+from .scale import font as _font, s as _s
 
 # Mascot art modules, selectable via config.ART_STYLE. The smooth blob is kept
 # on the side; the pixel creature is the default.
 _ART = {"pixel": sprite_pixel, "smooth": sprite_smooth}
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _pythonw() -> Path:
-    """pythonw.exe (no console window) next to the running interpreter, if any."""
-    candidate = Path(sys.executable).with_name("pythonw.exe")
-    return candidate if candidate.exists() else Path(sys.executable)
 
 
 def _draw_gravestone(c, cx, cy) -> None:
@@ -79,21 +73,8 @@ STATE_CAPTIONS = {
 }
 
 # --- card geometry / palette ----------------------------------------------
-# Every measurement below is authored at the "small" size, then multiplied by
-# config.UI_SCALE so "medium"/"large" scale the whole card uniformly.
-_SCALE = config.UI_SCALE
-
-
-def _s(value: float) -> int:
-    """Scale a base (small-size) measurement by the configured widget size."""
-    return max(1, round(value * _SCALE))
-
-
-def _font(size: int, *opts: str) -> tuple:
-    """A Segoe UI font tuple whose point size tracks the widget size."""
-    return ("Segoe UI", _s(size), *opts)
-
-
+# Measurements are authored at the "small" size and scaled by `_s` (mascot.scale)
+# so "medium"/"large" scale the whole card uniformly.
 CARD_W = _s(158)
 CARD_H = _s(196)
 WIN_BG = "#101117"          # window backdrop (blends with the panel's corners)
@@ -132,23 +113,8 @@ BOB_AMPLITUDE = _s(4)
 BOB_PERIOD_S = 2.0
 PULSE_PERIOD_S = 1.2
 
-# Comic speech bubble (shown above the card while Claude needs the user).
-BUBBLE_W = _s(196)
-BUBBLE_PAD = _s(10)
-BUBBLE_GAP = _s(6)
-BUBBLE_FONT = _font(9)
-BUBBLE_FILL = "#fdf6e3"
-BUBBLE_TEXT = "#1c1e26"
-BUBBLE_MAX_CHARS = 160
-
-# Stats tooltip — a small dark card shown beside the mascot on hover, surfacing
-# the session's running counters (prompts · tools · agents · uptime).
-TOOLTIP_FILL = "#252735"
-TOOLTIP_TEXT = "#cdd2e6"
-TOOLTIP_EDGE = "#3a3d4f"
-TOOLTIP_FONT = _font(7)
-TOOLTIP_PAD = _s(9)
-TOOLTIP_GAP = _s(6)
+# The speech bubble and hover tooltip (their constants + classes) live in
+# mascot/popups.py.
 
 # Shake-to-dizzy easter egg.
 SHAKE_MIN_DIST = 7
@@ -174,10 +140,21 @@ BLINK_MIN_GAP_S = 4.0
 BLINK_MAX_GAP_S = 7.0
 
 # Stall watchdog: a turn that ends abnormally (notably a usage/session-limit hit)
-# fires no terminating hook, so the heartbeat freezes mid-`thinking`. Rather than
-# look frozen forever, fall the *display* back to idle once thinking has gone this
-# long without any new event. Generous, so a long pure-reasoning turn isn't cut off.
+# fires NO terminating hook, so the heartbeat just freezes wherever it was. Rather
+# than look frozen-busy forever, effective_state.compute falls the *display* back
+# to idle once a busy state has gone this long with no new event. A real limit
+# lands in `working` far more often than `thinking` (after the first tool, every
+# PostToolUse keeps the state `working`), so the watchdog covers both.
+#   - `thinking`: short grace; pure-reasoning stretches are brief.
+#   - `working`:  longer grace, since one tool (a big build/test) can legitimately
+#     block for minutes with no intermediate hook. If it really is still running,
+#     its PostToolUse refreshes `ts` and snaps the mascot straight back; sub-agent
+#     work keeps `ts` warm via nested hooks, so it never trips this at all.
+# Both stay under config.STALE_TIMEOUT_S so the fallback shows before the whole
+# card is pruned as stale.
 THINKING_STALL_S = 180.0
+WORKING_STALL_S = 270.0          # just under STALE_TIMEOUT_S; demoted to a backstop
+                                 # now that StopFailure resolves real turn-deaths
 
 # Attention shake: while a permission/attention prompt sits unanswered, the whole
 # card starts to shake after WAITING_SHAKE_AFTER_S, then grows steadily more
@@ -241,104 +218,18 @@ def _format_duration(seconds: float) -> str:
 def _render_sig(state: dict[str, Any], effective_state: str) -> tuple:
     """Signature of the *visible* content (excludes the `ts` heartbeat)."""
     subs = tuple((s.get("type") or "?") for s in (state.get("subagents") or []))
-    return (effective_state, subs, state.get("cwd", ""))
+    # Include the active tool so the caption refreshes as it changes (only while
+    # working, where it's surfaced — see _caption).
+    tool = state.get("tool") if effective_state == "working" else None
+    return (effective_state, subs, state.get("cwd", ""), tool)
 
 
-class BubbleWindow:
-    """A speech bubble shown above a mascot while Claude needs the user.
-
-    A small opaque, frameless Toplevel (Windows `-transparentcolor` layered
-    windows render unreliably with `overrideredirect`, so we avoid them).
-    """
-
-    def __init__(self, manager_root: tk.Tk, message: str) -> None:
-        self.message = ""
-        self._width = BUBBLE_W
-        self._height = 0
-
-        self.top = tk.Toplevel(manager_root)
-        self.top.overrideredirect(True)
-        self.top.attributes("-topmost", True)
-        self.top.configure(bg=BUBBLE_TEXT)  # 2px dark border via padding below
-
-        self.label = tk.Label(
-            self.top,
-            bg=BUBBLE_FILL,
-            fg=BUBBLE_TEXT,
-            font=BUBBLE_FONT,
-            justify="center",
-            wraplength=BUBBLE_W - 2 * BUBBLE_PAD,
-            padx=BUBBLE_PAD,
-            pady=BUBBLE_PAD,
-        )
-        self.label.pack(padx=2, pady=2)
-        self.set_message(message)
-
-    def set_message(self, message: str) -> None:
-        message = (message or "Claude needs your attention")[:BUBBLE_MAX_CHARS]
-        if message == self.message:
-            return
-        self.message = message
-        self.label.config(text=message)
-        self.top.update_idletasks()
-        self._width = self.top.winfo_reqwidth()
-        self._height = self.top.winfo_reqheight()
-
-    def place_above(self, card_x: int, card_y: int, card_w: int, screen_w: int) -> None:
-        x = card_x + card_w // 2 - self._width // 2
-        x = max(0, min(x, screen_w - self._width))
-        y = card_y - self._height - BUBBLE_GAP
-        if y < 0:
-            y = card_y
-        self.top.geometry(f"+{x}+{y}")
-
-    def destroy(self) -> None:
-        try:
-            self.top.destroy()
-        except tk.TclError:
-            pass
-
-
-class StatsTooltip:
-    """A small dark tooltip shown beside a card while the pointer hovers it,
-    surfacing the session's running counters. Mirrors BubbleWindow's lifecycle."""
-
-    def __init__(self, manager_root: tk.Tk, text: str) -> None:
-        self._width = 0
-        self._height = 0
-        self.top = tk.Toplevel(manager_root)
-        self.top.overrideredirect(True)
-        self.top.attributes("-topmost", True)
-        self.top.configure(bg=TOOLTIP_EDGE)  # 1px border via the padding below
-        self.label = tk.Label(
-            self.top, bg=TOOLTIP_FILL, fg=TOOLTIP_TEXT, font=TOOLTIP_FONT,
-            justify="center", padx=TOOLTIP_PAD, pady=_s(5),
-        )
-        self.label.pack(padx=1, pady=1)
-        self.set_text(text)
-
-    def set_text(self, text: str) -> None:
-        if text == self.label.cget("text"):
-            return
-        self.label.config(text=text)
-        self.top.update_idletasks()
-        self._width = self.top.winfo_reqwidth()
-        self._height = self.top.winfo_reqheight()
-
-    def place_beside(self, card_x: int, card_y: int, card_w: int, card_h: int,
-                     screen_w: int) -> None:
-        x = card_x - self._width - TOOLTIP_GAP          # prefer the left of the card
-        if x < 0:
-            x = card_x + card_w + TOOLTIP_GAP           # no room left -> go right
-        x = max(0, min(x, screen_w - self._width))
-        y = card_y + (card_h - self._height) // 2
-        self.top.geometry(f"+{x}+{y}")
-
-    def destroy(self) -> None:
-        try:
-            self.top.destroy()
-        except tk.TclError:
-            pass
+def _caption(effective_state: str, tool: str | None) -> str:
+    """Caption under the creature. While a tool is actively running, name it
+    (e.g. 'Bash…') instead of the generic 'working…'."""
+    if effective_state == "working" and tool:
+        return f"{tool}…"
+    return STATE_CAPTIONS.get(effective_state, "—")
 
 
 class MascotWindow:
@@ -440,7 +331,7 @@ class MascotWindow:
         self._bob_y = 0.0
 
         c.create_text(CREATURE_CX, CAPTION_Y,
-                      text=STATE_CAPTIONS.get(self._effective_state, "—"),
+                      text=_caption(self._effective_state, self.state.get("tool")),
                       font=CAPTION_FONT, fill=accent)
 
         self._draw_badges(c)
@@ -601,34 +492,21 @@ class MascotWindow:
 
     # --- effective state --------------------------------------------------
     def _compute_effective_state(self, now: float) -> str:
-        """Effective (displayed) state. These overlays are widget-side only,
-        in priority order:
-          - `dizzy`      while a recent shake is still in effect (top priority),
-          - `happy`      briefly after Claude finishes a turn, or on a pet,
-          - `sleeping`   after the raw state has been idle for SLEEP_AFTER_IDLE_S,
-          - `idle_blink` a brief blink while idle (before dozing off).
-        """
-        if now < self._dizzy_until:
-            return "dizzy"
-        if now < self._celebrate_until:
-            return "happy"
-        raw = self.state.get("state", "idle")
-        # Glare (angry face) once an unanswered prompt has waited long enough that
-        # the card starts shaking — same threshold as the attention shake.
-        if (raw == "waiting" and self._waiting_since is not None
-                and now - self._waiting_since >= WAITING_SHAKE_AFTER_S):
-            return "waiting_angry"
-        # Don't sit frozen on `thinking` if the turn died with no closing hook
-        # (e.g. a session-limit hit): after a long stale stretch, show idle.
-        ts = self.state.get("ts")
-        if raw == "thinking" and ts is not None and now - ts > THINKING_STALL_S:
-            raw = "idle"
-        if raw == "idle" and self._idle_since is not None:
-            if now - self._idle_since >= config.SLEEP_AFTER_IDLE_S:
-                return "sleeping"
-            if now < self._blink_until:
-                return "idle_blink"
-        return raw
+        """Thin wrapper over the pure effective_state.compute, fed this card's
+        live timers and the configured thresholds."""
+        return effective_state.compute(
+            self.state.get("state", "idle"), now,
+            ts=self.state.get("ts"),
+            dizzy_until=self._dizzy_until,
+            celebrate_until=self._celebrate_until,
+            waiting_since=self._waiting_since,
+            idle_since=self._idle_since,
+            blink_until=self._blink_until,
+            sleep_after_idle_s=config.SLEEP_AFTER_IDLE_S,
+            shake_after_s=WAITING_SHAKE_AFTER_S,
+            thinking_stall_s=THINKING_STALL_S,
+            working_stall_s=WORKING_STALL_S,
+        )
 
     # --- state ------------------------------------------------------------
     def update_state(self, state: dict[str, Any], now: float | None = None) -> None:
@@ -698,13 +576,21 @@ class MascotWindow:
             self._bubble.destroy()
             self._bubble = None
 
+    def _card_bounds(self) -> tuple[int, int, int, int]:
+        """Work area of the monitor the card currently sits on, so popups clamp to
+        the same screen after the card is dragged across monitors. Falls back to
+        Tk's (primary) screen metrics off Windows or on any lookup failure."""
+        cx, cy = self.root.winfo_x(), self.root.winfo_y()
+        return osplatform.monitor_work_area_at(cx, cy) or (
+            0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        )
+
     def _reposition_bubble(self) -> None:
         if self._bubble is None:
             return
         try:
             self._bubble.place_above(
-                self.root.winfo_x(), self.root.winfo_y(),
-                CARD_W, self.root.winfo_screenwidth(),
+                self.root.winfo_x(), self.root.winfo_y(), CARD_W, self._card_bounds(),
             )
         except tk.TclError:
             pass
@@ -741,7 +627,7 @@ class MascotWindow:
         try:
             self._tooltip.place_beside(
                 self.root.winfo_x(), self.root.winfo_y(),
-                CARD_W, CARD_H, self.root.winfo_screenwidth(),
+                CARD_W, CARD_H, self._card_bounds(),
             )
         except tk.TclError:
             pass
@@ -884,105 +770,3 @@ class MascotWindow:
             self._bubble = None
         self._hide_tooltip()
         self.root.destroy()
-
-
-class MascotManager:
-    """Owns the single Tk root; spawns one Toplevel window per live session."""
-
-    def __init__(self) -> None:
-        self.windows: dict[str, MascotWindow] = {}
-        self.root = tk.Tk()
-        self.root.withdraw()  # hidden controller window
-        self.root.title("Mascot Manager")
-        icon.apply(self.root)  # mascot icon for the taskbar / any child windows
-
-        config.STATE_DIR.mkdir(parents=True, exist_ok=True)
-        print("[mascot] state dir:", config.STATE_DIR)
-        print("[mascot] tkinter app started")
-
-        # System-tray icon (Windows only). Best-effort: any failure leaves the
-        # widget fully working, just without a tray icon.
-        self._cards_hidden = False
-        self.tray = None
-        if osplatform.IS_WINDOWS:
-            try:
-                from .tray import SystemTray
-                self.tray = SystemTray(
-                    tooltip="Claude Familiar",
-                    on_toggle=self._on_tray_toggle,
-                    on_settings=self._on_tray_settings,
-                    on_quit=self._on_tray_quit,
-                )
-            except Exception as exc:  # noqa: BLE001 — never let the tray stop startup
-                print("[mascot] system tray unavailable:", exc)
-                self.tray = None
-
-        self.root.after(500, self._refresh)
-
-    def _refresh(self) -> None:
-        now = time.time()
-        states = state_store.load_states(config.STATE_DIR, now)
-
-        for sid in list(self.windows):
-            if sid not in states:
-                self.windows[sid].close()
-                del self.windows[sid]
-
-        for index, (sid, state) in enumerate(sorted(states.items())):
-            win = self.windows.get(sid)
-            if win is None:
-                win = MascotWindow(self.root, sid, state, index)
-                self.windows[sid] = win
-                if self._cards_hidden:        # honor a tray "hide" for new sessions
-                    win.set_hidden(True)
-            else:
-                win.update_state(state, now)
-
-        self.root.after(500, self._refresh)
-
-    # --- system-tray callbacks (run on the Tk thread) ---------------------
-    def _on_tray_toggle(self) -> None:
-        """Show / hide every card at once."""
-        self._cards_hidden = not self._cards_hidden
-        for win in self.windows.values():
-            win.set_hidden(self._cards_hidden)
-
-    def _on_tray_settings(self) -> None:
-        """Open the settings panel as its own process, like the rest of the app."""
-        try:
-            subprocess.Popen([str(_pythonw()), "-m", "mascot.control_panel"],
-                             cwd=str(PROJECT_ROOT))
-        except OSError as exc:
-            print("[mascot] could not open settings:", exc)
-
-    def _on_tray_quit(self) -> None:
-        """Close every card, drop the tray icon, and end the main loop."""
-        for win in list(self.windows.values()):
-            win.close()
-        self.windows.clear()
-        if self.tray is not None:
-            self.tray.dispose()
-            self.tray = None
-        self.root.quit()
-
-    def run(self) -> None:
-        try:
-            self.root.mainloop()
-        finally:
-            if self.tray is not None:        # also covers a normal window-close exit
-                self.tray.dispose()
-                self.tray = None
-
-
-def main() -> None:
-    # Only one widget process at a time. A second one would poll the same state
-    # dir and draw a duplicate, exactly-overlapping card for every session.
-    guard = single_instance.acquire()
-    if guard is None:
-        print("[mascot] another Claude Familiar widget is already running; exiting.")
-        return
-    MascotManager().run()
-
-
-if __name__ == "__main__":
-    main()
