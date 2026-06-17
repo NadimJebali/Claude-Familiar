@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from . import config, effective_state, osplatform, sprite_pixel, sprite_smooth
-from .popups import BubbleWindow, StatsTooltip
+from .popups import BubbleWindow
 from .scale import font as _font, s as _s
 
 # Mascot art modules, selectable via config.ART_STYLE. The smooth blob is kept
@@ -244,7 +244,6 @@ class MascotWindow:
         self._hidden = False
         self._manager_root = manager_root
         self._bubble: BubbleWindow | None = None
-        self._tooltip: StatsTooltip | None = None
 
         # effective-state / shake bookkeeping (must exist before first compute)
         self._dizzy_until = 0.0
@@ -303,8 +302,6 @@ class MascotWindow:
         self.canvas.bind("<Button-1>", self._on_drag_start)
         self.canvas.bind("<B1-Motion>", self._on_drag_motion)
         self.canvas.bind("<ButtonRelease-1>", self._on_drag_end)
-        self.canvas.bind("<Enter>", self._on_hover_enter)
-        self.canvas.bind("<Leave>", self._on_hover_leave)
 
         self._place_initial(index)
         self._render()
@@ -398,7 +395,6 @@ class MascotWindow:
         # Undo any active attention-shake first so the grab point maps to the
         # card's true resting position (no jump as the shake is removed).
         self._reset_shake_offset()
-        self._hide_tooltip()  # don't keep a stale tooltip floating during a drag
         self._press_pos = (event.x_root, event.y_root)
         self._drag_offset = (event.x_root - self.root.winfo_x(),
                              event.y_root - self.root.winfo_y())
@@ -598,43 +594,6 @@ class MascotWindow:
         except tk.TclError:
             pass
 
-    # --- stats tooltip ----------------------------------------------------
-    def _stats_text(self, now: float) -> str:
-        st = self.state
-        prompts = st.get("prompts", 0)
-        tools = st.get("tools_run", 0)
-        agents = st.get("subagents_spawned", 0)
-        up = _format_duration(now - self._started) if self._started else "—"
-        agent_part = f"   ·   {agents} agents" if agents else ""
-        return f"{prompts} prompts   ·   {tools} tools{agent_part}\nup {up}"
-
-    def _on_hover_enter(self, _event: tk.Event) -> None:
-        text = self._stats_text(time.time())
-        if self._tooltip is None:
-            self._tooltip = StatsTooltip(self._manager_root, text)
-        else:
-            self._tooltip.set_text(text)
-        self._position_tooltip()
-
-    def _on_hover_leave(self, _event: tk.Event) -> None:
-        self._hide_tooltip()
-
-    def _hide_tooltip(self) -> None:
-        if self._tooltip is not None:
-            self._tooltip.destroy()
-            self._tooltip = None
-
-    def _position_tooltip(self) -> None:
-        if self._tooltip is None:
-            return
-        try:
-            self._tooltip.place_beside(
-                self.root.winfo_x(), self.root.winfo_y(),
-                CARD_W, CARD_H, self._card_bounds(),
-            )
-        except tk.TclError:
-            pass
-
     # --- animation --------------------------------------------------------
     def _animate(self) -> None:
         """Cheap ~25fps loop: bob the creature, pulse the border while waiting."""
@@ -683,9 +642,6 @@ class MascotWindow:
 
             if self._bubble is not None:
                 self._reposition_bubble()
-            if self._tooltip is not None:        # keep counters/uptime live while hovering
-                self._tooltip.set_text(self._stats_text(now))
-                self._position_tooltip()
         except tk.TclError:
             return
 
@@ -771,5 +727,4 @@ class MascotWindow:
         if self._bubble is not None:
             self._bubble.destroy()
             self._bubble = None
-        self._hide_tooltip()
         self.root.destroy()

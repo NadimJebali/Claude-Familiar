@@ -1,9 +1,8 @@
-"""Floating popups shown around a mascot card: the speech bubble (while Claude
-needs the user) and the on-hover stats tooltip.
+"""The speech bubble shown above a mascot card while Claude needs the user.
 
-Both are small frameless Toplevels; their on-screen placement is delegated to the
-pure ``popup_place`` helpers so it stays correct across multiple monitors and can
-be unit-tested without a display.
+A small frameless Toplevel; its on-screen placement is delegated to the pure
+``popup_place`` helpers so it stays correct across multiple monitors and can be
+unit-tested without a display.
 """
 from __future__ import annotations
 
@@ -20,15 +19,6 @@ BUBBLE_FONT = _font(9)
 BUBBLE_FILL = "#fdf6e3"
 BUBBLE_TEXT = "#1c1e26"
 BUBBLE_MAX_CHARS = 160
-
-# Stats tooltip — a small dark card shown beside the mascot on hover, surfacing
-# the session's running counters (prompts · tools · agents · uptime).
-TOOLTIP_FILL = "#252735"
-TOOLTIP_TEXT = "#cdd2e6"
-TOOLTIP_EDGE = "#3a3d4f"
-TOOLTIP_FONT = _font(7)
-TOOLTIP_PAD = _s(9)
-TOOLTIP_GAP = _s(6)
 
 
 class BubbleWindow:
@@ -75,45 +65,6 @@ class BubbleWindow:
                     bounds: tuple[int, int, int, int]) -> None:
         x, y = popup_place.above(card_x, card_y, card_w, self._width, self._height,
                                  bounds, BUBBLE_GAP)
-        self.top.geometry(f"+{x}+{y}")
-
-    def destroy(self) -> None:
-        try:
-            self.top.destroy()
-        except tk.TclError:
-            pass
-
-
-class StatsTooltip:
-    """A small dark tooltip shown beside a card while the pointer hovers it,
-    surfacing the session's running counters. Mirrors BubbleWindow's lifecycle."""
-
-    def __init__(self, manager_root: tk.Tk, text: str) -> None:
-        self._width = 0
-        self._height = 0
-        self.top = tk.Toplevel(manager_root)
-        self.top.overrideredirect(True)
-        self.top.attributes("-topmost", True)
-        self.top.configure(bg=TOOLTIP_EDGE)  # 1px border via the padding below
-        self.label = tk.Label(
-            self.top, bg=TOOLTIP_FILL, fg=TOOLTIP_TEXT, font=TOOLTIP_FONT,
-            justify="center", padx=TOOLTIP_PAD, pady=_s(5),
-        )
-        self.label.pack(padx=1, pady=1)
-        self.set_text(text)
-
-    def set_text(self, text: str) -> None:
-        if text == self.label.cget("text"):
-            return
-        self.label.config(text=text)
-        self.top.update_idletasks()
-        self._width = self.top.winfo_reqwidth()
-        self._height = self.top.winfo_reqheight()
-
-    def place_beside(self, card_x: int, card_y: int, card_w: int, card_h: int,
-                     bounds: tuple[int, int, int, int]) -> None:
-        x, y = popup_place.beside(card_x, card_y, card_w, card_h,
-                                  self._width, self._height, bounds, TOOLTIP_GAP)
         self.top.geometry(f"+{x}+{y}")
 
     def destroy(self) -> None:

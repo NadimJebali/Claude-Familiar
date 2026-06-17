@@ -102,10 +102,6 @@ def default_state(session_id: str, cwd: str = "", model: str = "") -> dict[str, 
         "tool": None,
         "subagents": [],  # list of {"id", "type", "description"}
         "notify": None,   # {"message", "type"} while Claude needs the user (e.g. permission)
-        # Lifetime-of-session counters, surfaced in the hover tooltip.
-        "prompts": 0,
-        "tools_run": 0,            # main-thread tool calls (excludes sub-agent internals)
-        "subagents_spawned": 0,
     }
 
 
@@ -144,7 +140,6 @@ def compute_next_state(
     elif event == "UserPromptSubmit":
         nxt["state"] = "thinking"
         nxt["tool"] = None
-        nxt["prompts"] = current.get("prompts", 0) + 1
 
     elif event == "PreToolUse":
         nxt["state"] = "working"
@@ -158,13 +153,11 @@ def compute_next_state(
                     "description": tool_input.get("description", ""),
                 }
             )
-            nxt["subagents_spawned"] = current.get("subagents_spawned", 0) + 1
         elif not payload.get("agent_id"):
-            # A main-thread tool: surface it in the caption and count it. A tool
-            # running INSIDE a sub-agent carries a top-level agent_id and isn't part
-            # of the visible session, so it touches neither the caption nor the count.
+            # A main-thread tool: surface it in the caption. A tool running INSIDE a
+            # sub-agent carries a top-level agent_id and isn't part of the visible
+            # session, so it doesn't touch the caption.
             nxt["tool"] = payload.get("tool_name")
-            nxt["tools_run"] = current.get("tools_run", 0) + 1
 
     elif event == "PostToolUse":
         if payload.get("tool_name") == AGENT_TOOL:
