@@ -377,7 +377,10 @@ class MascotWindow:
         """Anchor the card to the bottom-right of the *primary* monitor's work
         area, stacking extra sessions upward, and clamp so it can never land
         off-screen (wrong monitor / behind the taskbar / too many stacked)."""
-        area = osplatform.primary_work_area()
+        area = osplatform.choose_work_area(
+            config.HOME_MONITOR, osplatform.enumerate_work_areas(),
+            osplatform.primary_work_area(),
+        )
         if area is not None:
             ax, ay, aw, ah = area
         else:  # non-Windows / lookup failed: fall back to Tk's screen metrics

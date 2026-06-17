@@ -430,6 +430,11 @@ def test_settings_defaults_include_shake_controls():
     assert "shake_max_amp_px" in settings_mod.DEFAULTS
 
 
+def test_settings_defaults_include_home_monitor():
+    from mascot import settings as settings_mod
+    assert settings_mod.DEFAULTS.get("home_monitor") == -1
+
+
 def test_config_clamp_handles_bounds_and_bad_values():
     from mascot import config
     assert config._clamp("nope", 5, 120, 30) == 30   # unparseable -> default
@@ -586,3 +591,40 @@ def test_effective_stalled_busy_never_sleeps_with_idle_since():
                 idle_since=800.0, sleep_after_idle_s=60.0) == "idle"
     assert _eff("thinking", now=1000.0, ts=700.0, thinking_stall_s=180.0,
                 idle_since=800.0, sleep_after_idle_s=60.0) == "idle"
+
+
+# --- home-monitor work-area selection (pure) ------------------------------
+# monitors = list of (x, y, w, h) work areas in enumeration order.
+_MON = [(0, 0, 1920, 1040), (1920, 0, 2560, 1400)]   # primary + a second display
+_PRIMARY_WA = (0, 0, 1920, 1040)
+
+
+def test_choose_work_area_valid_index_returns_that_monitor():
+    from mascot import osplatform
+    assert osplatform.choose_work_area(1, _MON, _PRIMARY_WA) == (1920, 0, 2560, 1400)
+
+
+def test_choose_work_area_auto_default_returns_primary():
+    # The default home_monitor (-1, "auto") anchors to the primary work area.
+    from mascot import osplatform
+    assert osplatform.choose_work_area(-1, _MON, _PRIMARY_WA) == _PRIMARY_WA
+
+
+def test_choose_work_area_out_of_range_index_falls_back_to_primary():
+    # A stale/unplugged index (>= monitor count) falls back to primary, not a crash.
+    from mascot import osplatform
+    assert osplatform.choose_work_area(5, _MON, _PRIMARY_WA) == _PRIMARY_WA
+
+
+def test_choose_work_area_non_int_setting_falls_back_to_primary():
+    # A hand-edited/garbage setting must not crash — fall back to primary.
+    from mascot import osplatform
+    assert osplatform.choose_work_area("nope", _MON, _PRIMARY_WA) == _PRIMARY_WA
+    assert osplatform.choose_work_area(None, _MON, _PRIMARY_WA) == _PRIMARY_WA
+
+
+def test_choose_work_area_empty_monitors_returns_primary():
+    # No enumerated monitors (off Windows / lookup failed) -> primary (may be None).
+    from mascot import osplatform
+    assert osplatform.choose_work_area(0, [], _PRIMARY_WA) == _PRIMARY_WA
+    assert osplatform.choose_work_area(-1, [], None) is None

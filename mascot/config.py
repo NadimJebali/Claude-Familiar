@@ -49,6 +49,11 @@ UI_SCALE = {"small": 1.0, "medium": 1.3, "large": 1.6}.get(WIDGET_SIZE, 1.0)
 SHAKE_AFTER_S = _clamp(_S["shake_after_s"], 5, 600, 30)
 SHAKE_MAX_AMP_PX = int(_clamp(_S["shake_max_amp_px"], 2, 60, 16))
 
+# Which monitor the cards spawn on: an int index into the enumerated monitors, or
+# -1 ("auto") for the primary. Resolved in tkinter_app via osplatform helpers; an
+# out-of-range/garbage value falls back to primary, so no clamping is needed here.
+HOME_MONITOR = _S["home_monitor"]
+
 # Per-state accent colors (R, G, B).
 STATE_COLORS = {
     "idle":     (120, 144, 168),

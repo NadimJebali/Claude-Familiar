@@ -16,7 +16,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
-from . import autostart, icon, settings as settings_mod, shortcuts, sprite_pixel, sprite_smooth
+from . import autostart, icon, osplatform, settings as settings_mod, shortcuts, sprite_pixel, sprite_smooth
 from .tkinter_app import _accent, round_rect
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -137,6 +137,8 @@ class ControlPanel:
         self.startup_var = tk.BooleanVar(value=autostart.is_enabled())
         self.shake_after_var = tk.IntVar(value=int(s["shake_after_s"]))
         self.shake_amp_var = tk.IntVar(value=int(s["shake_max_amp_px"]))
+        self.home_monitor_var = tk.IntVar(value=int(s["home_monitor"]))
+        self._monitors = osplatform.enumerate_work_areas()
         self.status = tk.StringVar(value="")
 
         self._build()
@@ -194,6 +196,18 @@ class ControlPanel:
         ttk.Label(tab, text="CARD", style="Section.TLabel").pack(anchor="w", pady=(0, 2))
         ttk.Checkbutton(tab, text="Transparent background — floating card (Windows only)",
                         variable=self.transp_var).pack(anchor="w")
+
+        ttk.Separator(tab).pack(fill="x", pady=12)
+        ttk.Label(tab, text="DISPLAY", style="Section.TLabel").pack(anchor="w", pady=(0, 2))
+        ttk.Label(tab, text="Which monitor the cards spawn on (Windows).",
+                  style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
+        mon_row = ttk.Frame(tab, style="Card.TFrame")
+        mon_row.pack(anchor="w")
+        ttk.Radiobutton(mon_row, text="Auto (primary)", value=-1,
+                        variable=self.home_monitor_var).pack(side="left", padx=(0, 10))
+        for i in range(len(self._monitors)):
+            ttk.Radiobutton(mon_row, text=f"Monitor {i + 1}", value=i,
+                            variable=self.home_monitor_var).pack(side="left", padx=(0, 10))
         return tab
 
     def _tab_behavior(self, parent: ttk.Notebook) -> ttk.Frame:
@@ -323,6 +337,7 @@ class ControlPanel:
             "transparent_bg": bool(self.transp_var.get()),
             "shake_after_s": int(self.shake_after_var.get()),
             "shake_max_amp_px": int(self.shake_amp_var.get()),
+            "home_monitor": int(self.home_monitor_var.get()),
         })
         autostart.set_enabled(bool(self.startup_var.get()))
         self.startup_var.set(autostart.is_enabled())
