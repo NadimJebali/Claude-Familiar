@@ -171,16 +171,47 @@ shake reversal and slowly walked a frantic card clean off the screen.
 
 ## Future / stretch
 
-### 6. Tamagotchi mode — ⬜ FUTURE
-Persistent leveling/evolving pet. Outline only for now.
-- [ ] `~/.claude/mascot/pet.json` lifetime XP/level/stage (separate from session state)
-- [ ] XP from lifetime activity; level curve; mood/energy decay over real time
-- [ ] Evolution-stage sprite sets (baby/teen/adult) in the ASCII-grid format
-- [ ] Level badge + XP bar on the card; evolution transition; optional needs
-- [ ] **Life-stats display** — revives the cut hover-tooltip pattern (#4), but driven by
-      **lifetime** `pet.json` counters (age, XP, prompts/tools/agents over the pet's life)
-      rather than the per-session counters we removed
-- Phasing: (a) persistence+XP, (b) level/badge UI, (c) evolution art, (d) mood/needs
+### 6. Tamagotchi mode — 🔄 IN PROGRESS (PRD #8)
+Persistent virtual-pet layer on the mascot: **coins** earned from Claude activity
+(daily-capped), a **shop** for food/toys, three gentle **needs** (hunger/happiness/
+energy), a **mood** shown on the idle face, **XP/levels**, and **egg→baby→teen→
+adult** evolution. **One global pet** shared across every session card; a delight,
+never an obligation (no sickness/death — the gravestone stays for usage limits).
+Filed as PRD #8 with four phased issues:
+- ✅ **#9 pet engine + persistence (pure core)** — see decision log below
+- ⬜ #10 Pet window + shop + feed/play (blocked by #9)
+- ⬜ #11 status tooltip + idle-face mood (blocked by #9)
+- ⬜ #12 evolution stages + per-stage art (blocked by #9)
+
+#### #9 — pet engine + persistence (done, TDD)
+- **`mascot/pet_logic.py`** — the pure core (clock-free, I/O-free, immutable;
+  mirrors `state_logic`/`effective_state`/`osplatform`): `decay` (hunger/happiness
+  drift down; energy **drains while working, refills while idle**; clamped 0..100;
+  negative-elapsed-safe), `apply_effects` (stat→delta map, clamped, negative-safe,
+  **needs-only** so an item can never grant power), `award` (coins daily-capped +
+  date reset; **XP uncapped**), `events_for_transition` + `apply_events` +
+  `EVENT_REWARDS` (`working`/`thinking`→`idle` = a completed turn; a vanished
+  sub-agent badge = a finished sub-agent), `mood`, `level_for_xp`, `(level,age)→
+  stage`.
+- **`mascot/pet_store.py`** — the thin I/O wrapper (mirrors `hooks/emit.py`) owning
+  `~/.claude/mascot/pet.json`: `default_pet`, atomic `save`, and `load` with
+  **decay-on-load** via a `last_seen` stamp (missing/corrupt → fresh default;
+  unknown keys back-filled for forward-compat; `born` preserved across restarts).
+- **`mascot/manager.py`** is the **sole writer**: each 500ms poll it decays the pet
+  (working = any session busy) and awards coins/XP from polled session-state
+  transitions, persisting throttled (an award forces a flush; a flush also runs on
+  exit). **No change to `hooks/emit.py`** — earning is derived widget-side, so the
+  hook emitter stays fast and there are no cross-process races on the file.
+- **Decisions:** coins are daily-capped (200/day, global) but **XP is not** — the
+  evolution **age-gate** (`(level,age)→stage`), not an XP cap, is what stops
+  grinding stages, so the cap matches the PRD's "never pays to over-use" without
+  freezing progression. Stats bottom out at 0 (droopy/sleepy), never sickness or
+  death. Decay rates / coin amounts / level & stage curves are a **tuning pass**,
+  so the tests assert **direction / clamping / monotonicity**, not magnitudes.
+- **Tests:** 57 new cases in `tests/test_phase1.py` (synthetic inputs, same style
+  as the existing pure cores + the emit round-trip). The GUI (Pet window, tooltip,
+  idle-face mood, evolution art) arrives in #10–#12 and is verified visually per
+  convention.
 
 ---
 

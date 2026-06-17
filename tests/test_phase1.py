@@ -576,3 +576,456 @@ def test_choose_work_area_empty_monitors_returns_primary():
     from mascot import osplatform
     assert osplatform.choose_work_area(0, [], _PRIMARY_WA) == _PRIMARY_WA
     assert osplatform.choose_work_area(-1, [], None) is None
+
+
+# --- Tamagotchi pet engine (pure core) ------------------------------------
+# Behavioral tests for the clock-free / I/O-free pet core. They assert STRUCTURE
+# (direction, clamping, monotonicity, immutability) rather than the exact decay
+# rates / coin amounts, which the PRD calls a tuning pass — so balancing later
+# never breaks the contract. One hour of elapsed time is the convenient unit.
+_HOUR = 3600.0
+_DAY = 86400.0
+
+
+def _pet(**over):
+    """A fresh, valid pet dict for synthetic-input tests (full stats by default)."""
+    p = {
+        "name": "", "born": 0.0, "last_seen": 0.0,
+        "hunger": 100, "happiness": 100, "energy": 100,
+        "coins": 0, "xp": 0, "coins_today": 0, "last_award_date": "",
+        "inventory": {},
+    }
+    p.update(over)
+    return p
+
+
+def test_decay_lowers_hunger_and_happiness_over_time():
+    from mascot import pet_logic
+    out = pet_logic.decay(_pet(), _HOUR, working=True)
+    assert out["hunger"] < 100
+    assert out["happiness"] < 100
+
+
+def test_decay_is_monotonic_more_elapsed_lowers_more():
+    from mascot import pet_logic
+    short = pet_logic.decay(_pet(), 600.0, working=True)
+    long = pet_logic.decay(_pet(), _HOUR, working=True)
+    assert long["hunger"] < short["hunger"]
+    assert long["happiness"] < short["happiness"]
+
+
+def test_energy_drains_while_working_refills_while_idle():
+    # The pet's rhythm mirrors the user's: energy drops while Claude works and
+    # recovers while idle/asleep.
+    from mascot import pet_logic
+    working = pet_logic.decay(_pet(energy=50), _HOUR, working=True)
+    idle = pet_logic.decay(_pet(energy=50), _HOUR, working=False)
+    assert working["energy"] < 50
+    assert idle["energy"] > 50
+
+
+def test_decay_clamps_at_zero_never_negative():
+    # Soft-needs tone: stats bottom out at 0, never go negative (no punishment).
+    from mascot import pet_logic
+    out = pet_logic.decay(_pet(hunger=1, happiness=1, energy=1), 100 * _HOUR, working=True)
+    assert out["hunger"] == 0
+    assert out["happiness"] == 0
+    assert out["energy"] == 0
+
+
+def test_energy_refill_clamps_at_max():
+    from mascot import pet_logic
+    out = pet_logic.decay(_pet(energy=95), 100 * _HOUR, working=False)
+    assert out["energy"] == pet_logic.MAX_STAT
+
+
+def test_decay_zero_elapsed_is_noop():
+    from mascot import pet_logic
+    out = pet_logic.decay(_pet(hunger=50, happiness=50, energy=50), 0.0, working=True)
+    assert (out["hunger"], out["happiness"], out["energy"]) == (50, 50, 50)
+
+
+def test_decay_negative_elapsed_is_safe_noop():
+    # A clock skew (now < last_seen) must not ADD hunger or crash.
+    from mascot import pet_logic
+    out = pet_logic.decay(_pet(hunger=50, energy=50), -123.0, working=True)
+    assert out["hunger"] == 50
+    assert out["energy"] == 50
+
+
+def test_decay_does_not_mutate_input():
+    from mascot import pet_logic
+    pet = _pet(hunger=50)
+    pet_logic.decay(pet, _HOUR, working=True)
+    assert pet["hunger"] == 50
+
+
+def test_apply_effects_adds_positive_deltas():
+    from mascot import pet_logic
+    out = pet_logic.apply_effects(_pet(hunger=50), {"hunger": 30})
+    assert out["hunger"] == 80
+
+
+def test_apply_effects_supports_negative_deltas():
+    # A trade-off item (energy drink): +energy but -happiness.
+    from mascot import pet_logic
+    out = pet_logic.apply_effects(_pet(energy=40, happiness=60), {"energy": 30, "happiness": -20})
+    assert out["energy"] == 70
+    assert out["happiness"] == 40
+
+
+def test_apply_effects_clamps_to_max():
+    from mascot import pet_logic
+    out = pet_logic.apply_effects(_pet(hunger=90), {"hunger": 50})
+    assert out["hunger"] == pet_logic.MAX_STAT
+
+
+def test_apply_effects_clamps_to_zero_negative_safe():
+    from mascot import pet_logic
+    out = pet_logic.apply_effects(_pet(happiness=10), {"happiness": -50})
+    assert out["happiness"] == 0
+
+
+def test_apply_effects_ignores_non_need_stats():
+    # Effects only touch the three needs — a shop item can never grant coins/XP/
+    # power (PRD: coins buy only care/cosmetic goods, never advantage).
+    from mascot import pet_logic
+    out = pet_logic.apply_effects(_pet(coins=0, xp=0), {"coins": 999, "xp": 999, "bogus": 5})
+    assert out["coins"] == 0
+    assert out["xp"] == 0
+
+
+def test_apply_effects_does_not_mutate_input():
+    from mascot import pet_logic
+    pet = _pet(hunger=50)
+    pet_logic.apply_effects(pet, {"hunger": 10})
+    assert pet["hunger"] == 50
+
+
+def test_award_adds_coins_and_xp():
+    from mascot import pet_logic
+    out = pet_logic.award(_pet(), coins=5, xp=10, today="2026-06-17")
+    assert out["coins"] == 5
+    assert out["xp"] == 10
+
+
+def test_award_xp_is_not_capped():
+    # XP fuels long-term leveling and is intentionally uncapped; only COINS are
+    # capped (PRD: a daily coin cap so it never pays to over-use Claude). Age-gated
+    # evolution is what stops XP-grinding, not an XP cap.
+    from mascot import pet_logic
+    out = pet_logic.award(_pet(), coins=0, xp=100_000, today="2026-06-17")
+    assert out["xp"] == 100_000
+
+
+def test_award_coins_capped_per_day():
+    from mascot import pet_logic
+    cap = pet_logic.DAILY_COIN_CAP
+    out = pet_logic.award(_pet(), coins=cap + 50, xp=0, today="2026-06-17")
+    assert out["coins"] == cap
+    assert out["coins_today"] == cap
+
+
+def test_award_coins_accumulate_up_to_cap_across_calls():
+    from mascot import pet_logic
+    cap = pet_logic.DAILY_COIN_CAP
+    p = pet_logic.award(_pet(), coins=cap - 1, xp=0, today="2026-06-17")
+    p = pet_logic.award(p, coins=10, xp=0, today="2026-06-17")  # only 1 more fits
+    assert p["coins"] == cap
+    assert p["coins_today"] == cap
+
+
+def test_award_cap_resets_on_new_day():
+    from mascot import pet_logic
+    cap = pet_logic.DAILY_COIN_CAP
+    maxed = pet_logic.award(_pet(), coins=cap, xp=0, today="2026-06-17")
+    assert maxed["coins"] == cap
+    # A new day refreshes the daily allowance; the lifetime coin total keeps growing.
+    nextday = pet_logic.award(maxed, coins=5, xp=0, today="2026-06-18")
+    assert nextday["coins"] == cap + 5
+    assert nextday["coins_today"] == 5
+    assert nextday["last_award_date"] == "2026-06-18"
+
+
+def test_award_does_not_mutate_input():
+    from mascot import pet_logic
+    pet = _pet()
+    pet_logic.award(pet, coins=5, xp=5, today="2026-06-17")
+    assert pet["coins"] == 0 and pet["xp"] == 0
+
+
+def _sess(state="idle", subagents=None):
+    """A minimal session-state slice (the fields the transition mapper reads)."""
+    return {"state": state, "subagents": subagents or []}
+
+
+def _sub(sid):
+    return {"id": sid, "type": "agent", "description": ""}
+
+
+def test_transition_working_to_idle_is_a_completed_turn():
+    from mascot import pet_logic
+    assert pet_logic.events_for_transition(_sess("working"), _sess("idle")) == ["turn_completed"]
+
+
+def test_transition_thinking_to_idle_is_a_completed_turn():
+    from mascot import pet_logic
+    assert pet_logic.events_for_transition(_sess("thinking"), _sess("idle")) == ["turn_completed"]
+
+
+def test_transition_waiting_to_idle_is_not_a_completed_turn():
+    # Answering a permission prompt isn't a finished turn — no reward (mirrors the
+    # happy-celebrate trigger, which also excludes waiting->idle and dead).
+    from mascot import pet_logic
+    out = pet_logic.events_for_transition(_sess("waiting"), _sess("idle"))
+    assert "turn_completed" not in out
+
+
+def test_transition_revive_from_dead_is_not_a_completed_turn():
+    from mascot import pet_logic
+    assert pet_logic.events_for_transition(_sess("dead"), _sess("thinking")) == []
+
+
+def test_transition_vanished_subagent_badge_is_a_finished_subagent():
+    from mascot import pet_logic
+    out = pet_logic.events_for_transition(_sess("working", [_sub("a")]), _sess("working", []))
+    assert out == ["subagent_finished"]
+
+
+def test_transition_counts_each_vanished_subagent():
+    from mascot import pet_logic
+    prev = _sess("working", [_sub("a"), _sub("b"), _sub("c")])
+    nxt = _sess("working", [_sub("b")])  # a and c finished
+    assert pet_logic.events_for_transition(prev, nxt).count("subagent_finished") == 2
+
+
+def test_transition_new_subagent_appearing_is_not_rewarded():
+    from mascot import pet_logic
+    assert pet_logic.events_for_transition(_sess("working", []), _sess("working", [_sub("a")])) == []
+
+
+def test_transition_turn_end_clearing_badges_awards_turn_and_each_subagent():
+    # A Stop ends the turn AND clears badges in one transition: the completed turn
+    # plus every sub-agent that was still listed both count.
+    from mascot import pet_logic
+    out = pet_logic.events_for_transition(
+        _sess("working", [_sub("a"), _sub("b")]), _sess("idle", []))
+    assert "turn_completed" in out
+    assert out.count("subagent_finished") == 2
+
+
+def test_apply_events_rewards_a_completed_turn():
+    from mascot import pet_logic
+    out = pet_logic.apply_events(_pet(), ["turn_completed"], today="2026-06-17")
+    coins, xp = pet_logic.EVENT_REWARDS["turn_completed"]
+    assert out["coins"] == coins
+    assert out["xp"] == xp
+    assert coins > 0  # a finished turn is worth something
+
+
+def test_apply_events_stacks_multiple_events():
+    from mascot import pet_logic
+    events = ["turn_completed", "subagent_finished"]
+    out = pet_logic.apply_events(_pet(), events, today="2026-06-17")
+    assert out["coins"] == sum(pet_logic.EVENT_REWARDS[e][0] for e in events)
+    assert out["xp"] == sum(pet_logic.EVENT_REWARDS[e][1] for e in events)
+
+
+def test_apply_events_ignores_unknown_event():
+    from mascot import pet_logic
+    out = pet_logic.apply_events(_pet(), ["nonsense"], today="2026-06-17")
+    assert out["coins"] == 0 and out["xp"] == 0
+
+
+def test_apply_events_empty_is_a_noop():
+    from mascot import pet_logic
+    out = pet_logic.apply_events(_pet(coins=7, xp=3), [], today="2026-06-17")
+    assert out["coins"] == 7 and out["xp"] == 3
+
+
+def test_apply_events_still_respects_the_daily_coin_cap():
+    # All earning funnels through award(), so a flood of events can't beat the cap.
+    from mascot import pet_logic
+    out = pet_logic.apply_events(_pet(), ["turn_completed"] * 10_000, today="2026-06-17")
+    assert out["coins"] == pet_logic.DAILY_COIN_CAP
+
+
+def test_apply_events_does_not_mutate_input():
+    from mascot import pet_logic
+    pet = _pet()
+    pet_logic.apply_events(pet, ["turn_completed"], today="2026-06-17")
+    assert pet["coins"] == 0
+
+
+def test_mood_all_needs_high_is_happy():
+    from mascot import pet_logic
+    assert pet_logic.mood(_pet(hunger=100, happiness=100, energy=100)) == "happy"
+
+
+def test_mood_low_hunger_is_hungry():
+    from mascot import pet_logic
+    assert pet_logic.mood(_pet(hunger=5, happiness=80, energy=80)) == "hungry"
+
+
+def test_mood_low_energy_is_tired():
+    from mascot import pet_logic
+    assert pet_logic.mood(_pet(hunger=80, happiness=80, energy=5)) == "tired"
+
+
+def test_mood_low_happiness_is_sad():
+    from mascot import pet_logic
+    assert pet_logic.mood(_pet(hunger=80, happiness=5, energy=80)) == "sad"
+
+
+def test_mood_moderate_needs_is_content():
+    # Nothing depleted, nothing maxed -> a neutral, content mood.
+    from mascot import pet_logic
+    assert pet_logic.mood(_pet(hunger=50, happiness=50, energy=50)) == "content"
+
+
+def test_mood_single_most_depleted_need_wins():
+    from mascot import pet_logic
+    # Several needs low, but the single lowest (happiness) defines the mood.
+    assert pet_logic.mood(_pet(hunger=20, happiness=5, energy=20)) == "sad"
+
+
+def test_mood_ties_break_deterministically_hunger_first():
+    from mascot import pet_logic
+    # Equal-low hunger and energy -> hunger wins (deterministic tie-break).
+    assert pet_logic.mood(_pet(hunger=10, happiness=80, energy=10)) == "hungry"
+
+
+def test_level_starts_at_one_for_a_new_pet():
+    from mascot import pet_logic
+    assert pet_logic.level_for_xp(0) == 1
+
+
+def test_level_is_monotonic_non_decreasing_in_xp():
+    from mascot import pet_logic
+    levels = [pet_logic.level_for_xp(x) for x in range(0, 2000, 50)]
+    assert levels == sorted(levels)
+    assert levels[-1] > levels[0]   # and it does climb
+
+
+def test_first_levelup_at_the_xp_threshold():
+    # The first level-up (egg hatches here) happens at exactly one level's worth
+    # of XP — locked via the constant so the curve can be tuned freely.
+    from mascot import pet_logic
+    n = pet_logic.XP_PER_LEVEL
+    assert pet_logic.level_for_xp(n - 1) == 1
+    assert pet_logic.level_for_xp(n) == 2
+
+
+def test_stage_level_one_is_an_egg_regardless_of_age():
+    # The pet starts as an egg and stays one until the first level-up — even if it
+    # has been around a long while.
+    from mascot import pet_logic
+    assert pet_logic.stage_for(1, 100 * _DAY) == "egg"
+
+
+def test_stage_hatches_to_baby_on_first_levelup():
+    from mascot import pet_logic
+    assert pet_logic.stage_for(2, 0.0) == "baby"
+
+
+def test_stage_reaches_teen_then_adult_with_enough_level_and_age():
+    from mascot import pet_logic
+    assert pet_logic.stage_for(5, 2 * _DAY) == "teen"
+    assert pet_logic.stage_for(20, 10 * _DAY) == "adult"
+
+
+def test_stage_is_age_gated_a_young_high_level_pet_is_not_yet_adult():
+    # Evolution honors real elapsed time: a level-20 pet only hours old can't be an
+    # adult yet — the age gate is what stops XP-grinding from skipping stages.
+    from mascot import pet_logic
+    young = pet_logic.stage_for(20, 0.0)
+    assert young != "adult"
+    assert young in ("baby", "teen")
+
+
+# --- Tamagotchi persistence wrapper (pet_store, file I/O) ------------------
+
+def test_default_pet_is_full_and_fresh():
+    from mascot import pet_store, pet_logic
+    pet = pet_store.default_pet(now=1000.0)
+    assert pet["hunger"] == pet_logic.MAX_STAT
+    assert pet["happiness"] == pet_logic.MAX_STAT
+    assert pet["energy"] == pet_logic.MAX_STAT
+    assert pet["coins"] == 0 and pet["xp"] == 0
+    assert pet["born"] == 1000.0 and pet["last_seen"] == 1000.0
+
+
+def test_pet_round_trips_through_save_then_load(tmp_path):
+    from mascot import pet_store
+    path = tmp_path / "pet.json"
+    pet = pet_store.default_pet(now=1000.0)
+    pet["name"], pet["coins"], pet["xp"] = "Mochi", 42, 350
+    pet_store.save(path, pet, now=1000.0)
+    loaded = pet_store.load(path, now=1000.0)  # same instant -> no decay
+    assert loaded["name"] == "Mochi"
+    assert loaded["coins"] == 42
+    assert loaded["xp"] == 350
+
+
+def test_load_missing_file_yields_a_fresh_default_pet(tmp_path):
+    from mascot import pet_store, pet_logic
+    loaded = pet_store.load(tmp_path / "nope.json", now=1000.0)
+    assert loaded["coins"] == 0
+    assert loaded["hunger"] == pet_logic.MAX_STAT
+    assert loaded["born"] == 1000.0
+
+
+def test_load_corrupt_file_yields_a_fresh_default_pet(tmp_path):
+    from mascot import pet_store, pet_logic
+    path = tmp_path / "pet.json"
+    path.write_text("{ this is not valid json", encoding="utf-8")
+    loaded = pet_store.load(path, now=1000.0)
+    assert loaded["coins"] == 0
+    assert loaded["hunger"] == pet_logic.MAX_STAT
+
+
+def test_load_applies_decay_for_real_elapsed_time(tmp_path):
+    # decay-on-load: a pet saved an hour ago resumes hungrier, via last_seen.
+    from mascot import pet_store
+    path = tmp_path / "pet.json"
+    pet_store.save(path, pet_store.default_pet(now=0.0), now=0.0)
+    loaded = pet_store.load(path, now=_HOUR, working=False)
+    assert loaded["hunger"] < 100
+    assert loaded["happiness"] < 100
+
+
+def test_load_restamps_last_seen_to_now(tmp_path):
+    from mascot import pet_store
+    path = tmp_path / "pet.json"
+    pet_store.save(path, pet_store.default_pet(now=0.0), now=0.0)
+    loaded = pet_store.load(path, now=_HOUR)
+    assert loaded["last_seen"] == _HOUR
+
+
+def test_load_fills_missing_keys_for_forward_compat(tmp_path):
+    # An old / hand-edited pet.json missing newer fields upgrades cleanly.
+    from mascot import pet_store
+    path = tmp_path / "pet.json"
+    path.write_text(json.dumps({"coins": 5, "last_seen": 0.0}), encoding="utf-8")
+    loaded = pet_store.load(path, now=0.0)
+    assert loaded["coins"] == 5            # preserved
+    assert "hunger" in loaded              # filled from defaults
+    assert "inventory" in loaded
+
+
+def test_load_preserves_born_across_restarts(tmp_path):
+    # Age must survive restarts: born is not reset to "now" on reload.
+    from mascot import pet_store
+    path = tmp_path / "pet.json"
+    pet_store.save(path, pet_store.default_pet(now=100.0), now=100.0)
+    loaded = pet_store.load(path, now=5000.0)
+    assert loaded["born"] == 100.0
+
+
+def test_save_stamps_last_seen_and_round_trips_on_disk(tmp_path):
+    from mascot import pet_store
+    path = tmp_path / "pet.json"
+    pet_store.save(path, pet_store.default_pet(now=0.0), now=555.0)
+    written = json.loads(path.read_text(encoding="utf-8"))
+    assert written["last_seen"] == 555.0
+    assert written["hunger"] == 100

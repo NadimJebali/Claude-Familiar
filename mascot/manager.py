@@ -12,10 +12,15 @@ import time
 import tkinter as tk
 from pathlib import Path
 
-from . import config, icon, osplatform, single_instance, state_store
+from . import config, icon, osplatform, pet_logic, pet_store, single_instance, state_store
 from .tkinter_app import MascotWindow
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# How often the widget flushes the pet to pet.json. The pet updates every poll in
+# memory; persistence is throttled (an award forces an out-of-band save) and
+# decay-on-load reconstructs anything missed if the process dies between flushes.
+PET_SAVE_INTERVAL_S = 10.0
 
 
 def _pythonw() -> Path:
@@ -55,6 +60,19 @@ class MascotManager:
                 print("[mascot] system tray unavailable:", exc)
                 self.tray = None
 
+        # The one global pet. The widget is its SOLE writer: it applies decay and
+        # derives coin/XP events from polled session-state transitions. Best-effort
+        # — any pet failure must leave the mascot itself fully working.
+        now = time.time()
+        try:
+            self.pet = pet_store.load(pet_store.PET_PATH, now)
+        except Exception as exc:  # noqa: BLE001
+            print("[mascot] could not load pet:", exc)
+            self.pet = pet_store.default_pet(now)
+        self._pet_prev: dict[str, dict] = {}   # sid -> last session state (transitions)
+        self._pet_last_tick = now
+        self._pet_last_save = now
+
         self.root.after(500, self._refresh)
 
     def _refresh(self) -> None:
@@ -76,7 +94,46 @@ class MascotManager:
             else:
                 win.update_state(state, now)
 
+        self._update_pet(states, now)
         self.root.after(500, self._refresh)
+
+    # --- pet (Tamagotchi) -------------------------------------------------
+    def _update_pet(self, states: dict[str, dict], now: float) -> None:
+        """Advance the global pet from this poll: decay needs over real elapsed
+        time and award coins/XP for session-state transitions, then persist
+        (throttled). Wrapped so a pet failure never disrupts the mascot."""
+        try:
+            elapsed = max(0.0, now - self._pet_last_tick)
+            self._pet_last_tick = now
+            # Energy drains while any session is busy and refills while all idle.
+            working = any(s.get("state") in ("working", "thinking") for s in states.values())
+            self.pet = pet_logic.decay(self.pet, elapsed, working)
+
+            today = time.strftime("%Y-%m-%d", time.localtime(now))
+            awarded = False
+            for sid, state in states.items():
+                prev = self._pet_prev.get(sid)
+                if prev is None:
+                    continue   # a new session has no transition yet
+                events = pet_logic.events_for_transition(prev, state)
+                if events:
+                    self.pet = pet_logic.apply_events(self.pet, events, today=today)
+                    awarded = True
+            # Track only live sessions, so a closed card can't fire a stale transition.
+            self._pet_prev = dict(states)
+
+            if awarded or (now - self._pet_last_save >= PET_SAVE_INTERVAL_S):
+                self._save_pet(now)
+        except Exception as exc:  # noqa: BLE001 — the pet must never crash the widget
+            print("[mascot] pet update failed:", exc)
+
+    def _save_pet(self, now: float) -> None:
+        """Flush the pet to pet.json (best-effort; the widget is its sole writer)."""
+        try:
+            self.pet = pet_store.save(pet_store.PET_PATH, self.pet, now)
+            self._pet_last_save = now
+        except Exception as exc:  # noqa: BLE001
+            print("[mascot] could not save pet:", exc)
 
     # --- system-tray callbacks (run on the Tk thread) ---------------------
     def _on_tray_toggle(self) -> None:
@@ -107,6 +164,7 @@ class MascotManager:
         try:
             self.root.mainloop()
         finally:
+            self._save_pet(time.time())      # flush the latest pet on any exit
             if self.tray is not None:        # also covers a normal window-close exit
                 self.tray.dispose()
                 self.tray = None
