@@ -153,6 +153,16 @@ BLINK_DURATION_S = 0.12
 BLINK_MIN_GAP_S = 4.0
 BLINK_MAX_GAP_S = 7.0
 
+# Mood emotes: a small popup above the creature every few seconds while it's in a
+# low-need idle mood — a piece of food when hungry, a drifting "Z" when sleepy/
+# tired. They rise and fade like the pet hearts, on the same animate clock.
+EMOTE_PX = _s(2)
+EMOTE_RISE_PX = _s(16)
+EMOTE_LIFETIME_S = 1.4
+EMOTE_MIN_GAP_S = 3.0
+EMOTE_MAX_GAP_S = 5.0
+_EMOTE_FOR_STATE = {"idle_hungry": "food", "idle_tired": "zzz", "sleeping": "zzz"}
+
 # Stall watchdog: a turn that ends abnormally (notably a usage/session-limit hit)
 # fires NO terminating hook, so the heartbeat just freezes wherever it was. Rather
 # than look frozen-busy forever, effective_state.compute falls the *display* back
@@ -272,6 +282,8 @@ class MascotWindow:
         self._blink_until = 0.0
         self._next_blink = 0.0
         self._hearts: list[dict[str, float]] = []
+        self._emotes: list[dict[str, Any]] = []   # mood popups (food / zzz)
+        self._next_emote = 0.0
         self._press_pos: tuple[int, int] | None = None
         self._last_shake_pos: tuple[int, int] | None = None
         self._last_move: tuple[int, int] | None = None
@@ -494,6 +506,48 @@ class MascotWindow:
             alive.append(h)
         self._hearts = alive
 
+    # --- mood emotes (food / zzz popups) ----------------------------------
+    def _schedule_emote(self, now: float) -> None:
+        """Pop a mood emote every few seconds while the pet is hungry/sleepy. The
+        kind follows the effective state, so it only shows in the matching mood."""
+        kind = _EMOTE_FOR_STATE.get(self._effective_state)
+        if kind is None:
+            self._next_emote = 0.0
+            return
+        if self._next_emote == 0.0:
+            self._next_emote = now + random.uniform(EMOTE_MIN_GAP_S, EMOTE_MAX_GAP_S)
+        elif now >= self._next_emote:
+            self._emotes.append({
+                "kind": kind,
+                "x": float(CREATURE_CX + random.uniform(-4, 10)),
+                "y0": float(CREATURE_CY - _s(12)),
+                "t0": now,
+                "drift": random.uniform(-3.0, 9.0),
+            })
+            self._emotes = self._emotes[-3:]
+            self._next_emote = now + random.uniform(EMOTE_MIN_GAP_S, EMOTE_MAX_GAP_S)
+
+    def _animate_emotes(self, now: float) -> None:
+        """Rise + fade the active mood emotes; drop expired ones."""
+        self.canvas.delete("emote")
+        if not self._emotes:
+            return
+        alive: list[dict[str, Any]] = []
+        for e in self._emotes:
+            prog = (now - e["t0"]) / EMOTE_LIFETIME_S
+            if prog >= 1.0:
+                continue
+            x = e["x"] + e["drift"] * prog
+            y = e["y0"] - prog * EMOTE_RISE_PX
+            if e["kind"] == "food":
+                sprite_pixel.draw_food(self.canvas, x, y, EMOTE_PX)
+            else:
+                # the "Z" fades toward the panel as it drifts up
+                color = _hex(_lerp((247, 243, 238), _PANEL_FILL_RGB, prog))
+                sprite_pixel.draw_zzz(self.canvas, x, y, EMOTE_PX, color=color)
+            alive.append(e)
+        self._emotes = alive
+
     def _track_shake(self, x_root: int, y_root: int) -> None:
         """Count rapid direction reversals on any axis; enough -> go dizzy."""
         if self._last_shake_pos is None:
@@ -699,6 +753,10 @@ class MascotWindow:
 
             # Rising heart particles from a pet.
             self._animate_hearts(now)
+
+            # Mood popups (food when hungry, "Z" when sleepy), every few seconds.
+            self._schedule_emote(now)
+            self._animate_emotes(now)
 
             # Gentle border pulse while the raw state needs the user's attention.
             if self._border_id is not None:

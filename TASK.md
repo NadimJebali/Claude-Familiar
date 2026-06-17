@@ -290,6 +290,16 @@ unaffected — it governs the *face*, not card removal. +2 tests.
   iterate the ASCII grids in `sprite_pixel._BODIES` / `_EGG`. Issue #12 stays open
   for that review.
 
+#### Mood polish (follow-up): emote popups + hungry eyes
+- `idle_hungry` eyes gained white-flanked pupils (they read as eyes, not black dots).
+- **Mood emotes:** a little food apple pops up above the creature every few seconds
+  while hungry (`idle_hungry`), and a drifting "Z" while sleepy/tired
+  (`idle_tired`/`sleeping`) — `sprite_pixel.draw_food`/`draw_zzz`, spawned + risen +
+  faded on the card's existing particle clock (like the hearts), keyed off the
+  effective state so they only show in the matching mood.
+- Confirmed: moods **and** reactions (mood faces, happy/celebrate, hearts, emotes)
+  compose over **every** stage (baby/teen/adult); only the **egg** is faceless.
+
 ---
 
 ## Considered & rejected

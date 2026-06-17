@@ -181,9 +181,9 @@ _FACES = {
         "..oOmOOOOOOmOo..",   # corners up
         "..oOOmmmmmmOOo..",   # gentle grin
     ],
-    "idle_hungry": [         # droopy: pupils dropped low, small mouth
+    "idle_hungry": [         # round eyes (white-flanked pupils), small wistful mouth
         "..oOwwwOOwwwOo..",
-        "..oOOkOOOOkOOo..",
+        "..oOwkwOOwkwOo..",
         "..oOOOOOOOOOOo..",
         "..oOOOOmmOOOOo..",
         "..oOOOOOOOOOOo..",
@@ -297,3 +297,53 @@ def draw_heart(
                 continue
             x = x0 + col * px
             c.create_rectangle(x, y, x + px, y + px, fill=color, outline="", tags=tag)
+
+
+# --- mood emotes (popups above the creature) -------------------------------
+# Tiny multi-color pixel art that pops up while the pet is in a low-need mood: a
+# piece of food when hungry, a drifting "Z" when sleepy. Same blocky technique.
+_FOOD = [          # a little apple (g = leaf, s = stem, r = apple body)
+    "..g...",
+    "..s...",
+    ".rrrr.",
+    "rrrrrr",
+    "rrrrrr",
+    ".rrrr.",
+]
+_FOOD_COLORS = {"r": "#e0556a", "g": "#6fcf83", "s": MOUTH}
+_FOOD_W = len(_FOOD[0])
+_FOOD_H = len(_FOOD)
+
+_ZED = [           # a single "Z"; the widget staggers a few to read as "zzz"
+    "ZZZZ",
+    "...Z",
+    "..Z.",
+    ".Z..",
+    "ZZZZ",
+]
+_ZED_W = len(_ZED[0])
+_ZED_H = len(_ZED)
+
+
+def _draw_grid(c, grid, colors, cx, cy, px, tag):
+    w, h = len(grid[0]), len(grid)
+    x0 = cx - (w * px) / 2
+    y0 = cy - (h * px) / 2
+    for r, row in enumerate(grid):
+        y = y0 + r * px
+        for col, ch in enumerate(row):
+            if ch == ".":
+                continue
+            x = x0 + col * px
+            c.create_rectangle(x, y, x + px, y + px, fill=colors[ch], outline="", tags=tag)
+
+
+def draw_food(c: tk.Canvas, cx: float, cy: float, px: int, tag: str = "emote") -> None:
+    """Draw a small food icon centered at (cx, cy) (the 'hungry' mood popup)."""
+    _draw_grid(c, _FOOD, _FOOD_COLORS, cx, cy, px, tag)
+
+
+def draw_zzz(c: tk.Canvas, cx: float, cy: float, px: int,
+             color: str = WHITE, tag: str = "emote") -> None:
+    """Draw a single sleepy 'Z' centered at (cx, cy) (the 'tired' mood popup)."""
+    _draw_grid(c, _ZED, {"Z": color}, cx, cy, px, tag)
