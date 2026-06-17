@@ -181,7 +181,8 @@ Filed as PRD #8 with four phased issues:
 - ✅ **#9 pet engine + persistence (pure core)** — see decision log below
 - ✅ **#10 Pet window + shop + feed/play** — see decision log below
 - ✅ **#11 status tooltip + idle-face mood** — see decision log below
-- ⬜ #12 evolution stages + per-stage art (blocked by #9)
+- 🔄 **#12 evolution stages + per-stage art** — mechanism + scaling + flourish done
+  & tested; the per-stage **art is in HITL review** (drafts authored)
 
 #### #9 — pet engine + persistence (done, TDD)
 - **`mascot/pet_logic.py`** — the pure core (clock-free, I/O-free, immutable;
@@ -268,6 +269,26 @@ unaffected — it governs the *face*, not card removal. +2 tests.
   / drag / card-hide, follows the card (incl. shake) in `_animate`. Need-bar colors
   are shared via `config.NEED_COLORS` (also used by the Pet window). GUI verified via
   a construct→hover→leave→close smoke test.
+
+#### #12 — evolution stages + per-stage body art (mechanism done; art HITL)
+- **Composition (tested):** `sprite_pixel` now keys the body by stage — `_BODIES`
+  (baby/teen/adult, each 6 top + 5 bottom rows) plus a faceless 16-row `_EGG` —
+  and `grid_for(stage, state)` composes `body[stage] + face[state]` (the egg
+  ignores the face). Every existing face is reused at every stage; unknown
+  stage→baby, unknown face→idle, all validated at import. +4 composition tests.
+- **Growth + flourish:** `STAGE_SCALE` grows the creature per stage; `draw_creature`
+  gained `stage`/`flourish` args (a milestone sparkle drawn at `MILESTONE_LEVEL`,
+  10). The card derives stage from the pet (`level_for_xp` + age via
+  `stage_for`), threads it through `_draw_creature` and the render signature (so a
+  stage change repaints even when the face doesn't), and the Pet window renders the
+  pet at its stage too. `icon.py` updated to the new `grid_for` API.
+- **Egg → baby on first level-up** falls out of `stage_for` (#9): level 1 = egg,
+  level 2 = baby, no extra logic. Smooth art has no stages (single blob), matching
+  how it already lacks the per-state faces.
+- **HITL:** the per-stage grids are **first-draft art**; they render correctly
+  (verified across egg/baby/teen/adult via a smoke test) but want a visual pass —
+  iterate the ASCII grids in `sprite_pixel._BODIES` / `_EGG`. Issue #12 stays open
+  for that review.
 
 ---
 

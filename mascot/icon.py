@@ -35,7 +35,7 @@ def _pixel_rows() -> list[list[tuple[int, int, int] | None]]:
     """The idle mascot as a 16x16 grid of RGB tuples (``None`` = transparent)."""
     accent = _rgb(sprite_pixel.BODY)  # the sparkle reuses the body orange
     rows: list[list[tuple[int, int, int] | None]] = []
-    for line in sprite_pixel._grid("idle"):
+    for line in sprite_pixel.grid_for("baby", "idle"):
         cells: list[tuple[int, int, int] | None] = []
         for ch in line:
             if ch == ".":

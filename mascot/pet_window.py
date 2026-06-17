@@ -25,7 +25,7 @@ from typing import Any, Callable
 from . import config, pet_logic, pet_store, shop, sprite_pixel
 from .control_panel import (ACCENT, BG, BORDER, DANGER, FG, MUTED, OK, PANEL,
                             PANEL_HI, WARN, _apply_theme)
-from .tkinter_app import round_rect
+from .tkinter_app import MILESTONE_LEVEL, round_rect
 
 NAME_MAX = 16
 CELEBRATE_S = 1.5
@@ -70,6 +70,7 @@ class PetWindow:
         self._celebrate_until = 0.0
         self._hearts: list[dict[str, float]] = []
         self._list_sig: tuple | None = None
+        self._cached_pet: dict[str, Any] = {}   # latest pet for the 25fps sprite loop
 
         self.root = tk.Toplevel(parent)
         self.root.title("Claude Familiar — Pet")
@@ -208,6 +209,7 @@ class PetWindow:
     # --- rendering --------------------------------------------------------
     def _refresh(self, force: bool = False) -> None:
         pet = self._pet()
+        self._cached_pet = pet
         level = self._level(pet)
         name = pet.get("name") or "Your Pet"
         self.name_var.set(f"🐾  {name}")
@@ -299,7 +301,12 @@ class PetWindow:
             face = "happy" if celebrating else "idle"
             accent = sprite_pixel.BODY
             cx, cy = PET_CANVAS_W // 2, PET_CANVAS_H // 2
-            sprite_pixel.draw_creature(c, cx, cy, face, accent, PET_PX)
+            pet = self._cached_pet
+            level = pet_logic.level_for_xp(pet.get("xp", 0))
+            age = max(0.0, now - pet.get("born", now))
+            stage = pet_logic.stage_for(level, age)
+            sprite_pixel.draw_creature(c, cx, cy, face, accent, PET_PX, stage=stage,
+                                       flourish=level >= MILESTONE_LEVEL)
             self._animate_hearts(now)
         except tk.TclError:
             return

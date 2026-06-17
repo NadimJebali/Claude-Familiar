@@ -40,13 +40,20 @@ def _draw_gravestone(c, cx, cy) -> None:
                   font=_font(10, "bold"), tags="creature")
 
 
-def _draw_creature(c, cx, cy, state, accent) -> None:
-    """Draw the mascot using the configured art style, scaled to the widget size."""
+def _draw_creature(c, cx, cy, state, accent, stage="baby", flourish=False) -> None:
+    """Draw the mascot using the configured art style, scaled to the widget size.
+
+    For the pixel art the creature also grows with its evolution `stage` and gets a
+    milestone `flourish` at higher levels; the smooth art has no stages (it falls
+    back to its single blob), matching how it lacks the per-state faces too."""
     if state == "dead":
         _draw_gravestone(c, cx, cy)
         return
-    size = CREATURE_PX if config.ART_STYLE == "pixel" else CREATURE_R
-    _ART.get(config.ART_STYLE, sprite_pixel).draw_creature(c, cx, cy, state, accent, size)
+    if config.ART_STYLE == "pixel":
+        px = max(1, round(CREATURE_PX * sprite_pixel.STAGE_SCALE.get(stage, 1.0)))
+        sprite_pixel.draw_creature(c, cx, cy, state, accent, px, stage=stage, flourish=flourish)
+    else:
+        sprite_smooth.draw_creature(c, cx, cy, state, accent, CREATURE_R)
 
 
 def round_rect(c, x1, y1, x2, y2, r, **kw) -> int:
@@ -129,6 +136,9 @@ DIZZY_DURATION_S = 2.0
 # Celebrate (happy) reaction: brief joy when Claude finishes a turn, and when the
 # mascot is petted. A widget-side effective state, like dizzy/sleeping.
 CELEBRATE_DURATION_S = 1.5
+
+# Evolution: the pet earns a milestone flourish (extra sparkles) at this level.
+MILESTONE_LEVEL = 10
 
 # Click-to-pet: a press+release that moves less than this (px) is a pet tap, not a
 # drag. Petting emits rising pixel hearts that fade as they climb.
@@ -219,13 +229,16 @@ def _format_duration(seconds: float) -> str:
     return f"{h}h {m}m"
 
 
-def _render_sig(state: dict[str, Any], effective_state: str) -> tuple:
+def _render_sig(state: dict[str, Any], effective_state: str, stage: str = "baby",
+                flourish: bool = False) -> tuple:
     """Signature of the *visible* content (excludes the `ts` heartbeat)."""
     subs = tuple((s.get("type") or "?") for s in (state.get("subagents") or []))
     # Include the active tool so the caption refreshes as it changes (only while
     # working, where it's surfaced — see _caption).
     tool = state.get("tool") if effective_state == "working" else None
-    return (effective_state, subs, state.get("cwd", ""), tool)
+    # Include evolution stage/flourish so the card redraws when the pet evolves,
+    # even if the face (effective state) is unchanged.
+    return (effective_state, stage, flourish, subs, state.get("cwd", ""), tool)
 
 
 def _caption(effective_state: str, tool: str | None) -> str:
@@ -334,7 +347,10 @@ class MascotWindow:
             PANEL_RADIUS, fill="", outline=accent, width=2,
         )
 
-        _draw_creature(c, CREATURE_CX, CREATURE_CY, self._effective_state, accent)
+        stage = self._pet_stage()
+        flourish = self._pet_flourish()
+        _draw_creature(c, CREATURE_CX, CREATURE_CY, self._effective_state, accent,
+                       stage, flourish)
         self._bob_y = 0.0
 
         c.create_text(CREATURE_CX, CAPTION_Y,
@@ -353,7 +369,7 @@ class MascotWindow:
         self._info_id = c.create_text(CREATURE_CX, INFO_Y, text=self._info_text_val,
                                       font=INFO_FONT, fill=INFO_FG)
 
-        self._sig = _render_sig(self.state, self._effective_state)
+        self._sig = _render_sig(self.state, self._effective_state, stage, flourish)
 
     def _info_line(self, now: float) -> str:
         """'<model> · <duration>' — either part omitted if unknown."""
@@ -565,10 +581,25 @@ class MascotWindow:
     def _refresh_render(self, now: float) -> None:
         """Recompute effective state; redraw only if the visible content changed."""
         self._effective_state = self._compute_effective_state(now)
-        new_sig = _render_sig(self.state, self._effective_state)
+        new_sig = _render_sig(self.state, self._effective_state,
+                              self._pet_stage(), self._pet_flourish())
         if new_sig == self._sig:
             return
         self._render()
+
+    def _pet_stage(self) -> str:
+        """The pet's evolution stage from its level + age (egg/baby/teen/adult)."""
+        pet = self._pet_data
+        if not pet:
+            return "baby"
+        level = pet_logic.level_for_xp(pet.get("xp", 0))
+        age = max(0.0, time.time() - pet.get("born", time.time()))
+        return pet_logic.stage_for(level, age)
+
+    def _pet_flourish(self) -> bool:
+        """Whether the pet has reached the milestone level for a sparkle flourish."""
+        pet = self._pet_data
+        return bool(pet) and pet_logic.level_for_xp(pet.get("xp", 0)) >= MILESTONE_LEVEL
 
     def _schedule_blink(self, now: float) -> None:
         """Trigger an occasional blink, but only while genuinely idle (not busy,

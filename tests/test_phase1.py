@@ -389,6 +389,35 @@ def test_png_icon_has_valid_signature_and_chunks():
     assert b"IHDR" in data[:30] and data[-8:-4] == b"IEND"
 
 
+# --- evolution: per-stage body composes the shared faces (#12) -------------
+
+def test_grid_for_composes_a_valid_16x16_for_every_stage_and_face():
+    from mascot import sprite_pixel as sp
+    for stage in ("egg", "baby", "teen", "adult"):
+        for face in sp._FACES:
+            grid = sp.grid_for(stage, face)
+            assert len(grid) == sp.GRID_H, (stage, face)
+            assert all(len(row) == sp.GRID_W for row in grid), (stage, face)
+
+
+def test_grid_for_egg_is_faceless_and_state_independent():
+    from mascot import sprite_pixel as sp
+    assert sp.grid_for("egg", "idle") == sp.grid_for("egg", "working")
+
+
+def test_grid_for_reuses_the_shared_face_rows_at_each_stage():
+    # Evolution reuses the per-state faces over a per-stage body: the middle 5 rows
+    # are exactly the shared face for any non-egg stage.
+    from mascot import sprite_pixel as sp
+    for stage in ("baby", "teen", "adult"):
+        assert sp.grid_for(stage, "happy")[6:11] == sp._FACES["happy"], stage
+
+
+def test_grid_for_unknown_stage_falls_back_to_baby():
+    from mascot import sprite_pixel as sp
+    assert sp.grid_for("mystery", "idle") == sp.grid_for("baby", "idle")
+
+
 # --- configurable attention shake -----------------------------------------
 
 def test_settings_defaults_include_shake_controls():

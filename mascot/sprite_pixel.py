@@ -23,22 +23,90 @@ COLORS = {"o": OUTLINE, "O": BODY, "w": WHITE, "k": PUPIL, "m": MOUTH}
 GRID_W = 16
 GRID_H = 16
 
-# Constant top (sparkle "antenna" + head) and bottom (belly + feet).
-_TOP = [
+# Evolution exploits the sprite's split: a per-STAGE body (the 6 top + 5 bottom
+# rows) wraps the shared per-STATE face (the 5 middle rows), so a render is
+# ``body[stage] + face[state]`` and every face is reused at every stage. The egg
+# is special — a faceless 16-row grid that hatches into the baby on first level-up.
+#
+# Stages advance at the engine's (level, age) thresholds (pet_logic.stage_for).
+# These per-stage grids are first-draft art meant to be iterated on visually.
+_BODIES = {
+    "baby": {
+        "top": [
+            "................",
+            ".......a........",
+            "......aaa.......",
+            "....oooooooo....",
+            "...oooooooooo...",
+            "..ooOOOOOOOOoo..",
+        ],
+        "bottom": [
+            "..ooOOOOOOOOoo..",
+            "...oooooooooo...",
+            "....oooooooo....",
+            ".....o....o.....",
+            "................",
+        ],
+    },
+    "teen": {                       # taller sparkle pair + four little feet
+        "top": [
+            "................",
+            "......a.a.......",
+            ".......a........",
+            "....oooooooo....",
+            "...oooooooooo...",
+            "..ooOOOOOOOOoo..",
+        ],
+        "bottom": [
+            "..ooOOOOOOOOoo..",
+            "...oooooooooo...",
+            "....oooooooo....",
+            "....o.o..o.o....",
+            "................",
+        ],
+    },
+    "adult": {                      # ear tips, a broader body, sturdier legs
+        "top": [
+            "...a........a...",
+            "...oo......oo...",
+            "...oooooooooo...",
+            "..oooooooooooo..",
+            "..oooooooooooo..",
+            "..ooOOOOOOOOoo..",
+        ],
+        "bottom": [
+            "..ooOOOOOOOOoo..",
+            "..oooooooooooo..",
+            "...oooooooooo...",
+            "...o..o..o..o...",
+            "................",
+        ],
+    },
+}
+
+# The egg: a faceless shell with a few speckles (no face is composed for it).
+_EGG = [
     "................",
-    ".......a........",
-    "......aaa.......",
-    "....oooooooo....",
-    "...oooooooooo...",
-    "..ooOOOOOOOOoo..",
-]
-_BOTTOM = [
-    "..ooOOOOOOOOoo..",
-    "...oooooooooo...",
-    "....oooooooo....",
-    ".....o....o.....",
+    "......oooo......",
+    ".....oOOOOo.....",
+    "....oOOOOOOo....",
+    "...oOOOaOOOoo...",
+    "...oOOOOOOOOo...",
+    "...oOOaOOOaOo...",
+    "...oOOOOOOOOo...",
+    "...oOOOOaOOOo...",
+    "...oOOOOOOOOo...",
+    "....oOOOOOOo....",
+    "....oOOOOOOo....",
+    ".....oOOOOo.....",
+    "......oooo......",
+    "................",
     "................",
 ]
+
+# The creature grows as it evolves: a per-stage pixel-size multiplier applied to
+# the base cell size by the renderer. Tuning/visual, not structural.
+STAGE_SCALE = {"egg": 0.85, "baby": 1.0, "teen": 1.2, "adult": 1.4}
 
 # Per-state face (the 5 middle rows: eyes + mouth).
 _FACES = {
@@ -137,30 +205,43 @@ _FACES = {
 }
 
 
-def _grid(state: str) -> list[str]:
-    rows = _TOP + _FACES.get(state, _FACES["idle"]) + _BOTTOM
+def grid_for(stage: str, state: str) -> list[str]:
+    """The 16x16 character grid for a (stage, state): ``body[stage] + face[state]``.
+
+    The egg is faceless, so its grid ignores `state`. An unknown stage falls back to
+    the baby body and an unknown state to the idle face, so a new face/stage can't
+    crash the render.
+    """
+    if stage == "egg":
+        rows = _EGG
+    else:
+        body = _BODIES.get(stage, _BODIES["baby"])
+        rows = body["top"] + _FACES.get(state, _FACES["idle"]) + body["bottom"]
     # Cheap self-check: catch a mistyped row the moment this module loads.
-    assert len(rows) == GRID_H, f"{state}: {len(rows)} rows"
+    assert len(rows) == GRID_H, f"{stage}/{state}: {len(rows)} rows"
     for r in rows:
-        assert len(r) == GRID_W, f"{state}: bad row width {len(r)!r}"
+        assert len(r) == GRID_W, f"{stage}/{state}: bad row width {len(r)!r}"
     return rows
 
 
-# Validate every face at import time.
-for _s in _FACES:
-    _grid(_s)
+# Validate every face composed against every stage (+ the egg) at import time.
+for _stage in (*_BODIES, "egg"):
+    for _s in _FACES:
+        grid_for(_stage, _s)
 
 
 def draw_creature(
     c: tk.Canvas, cx: float, cy: float, state: str, accent: str,
-    px: int = 5, tag: str = "creature",
+    px: int = 5, tag: str = "creature", stage: str = "baby", flourish: bool = False,
 ) -> None:
-    """Draw the pixel creature centered at (cx, cy), one square per grid cell.
+    """Draw the pixel creature for `stage`/`state` centered at (cx, cy), one square
+    per grid cell.
 
     `px` is the size of each pixel; the default renders an ~80px character. All
-    cells are tagged `tag` so the caller can bob or delete the whole group.
+    cells are tagged `tag` so the caller can bob or delete the whole group. When
+    `flourish` is set (a leveled-up milestone), a few accent sparkles are added.
     """
-    grid = _grid(state)
+    grid = grid_for(stage, state)
     x0 = cx - (GRID_W * px) / 2
     y0 = cy - (GRID_H * px) / 2
     for r, row in enumerate(grid):
@@ -171,6 +252,20 @@ def draw_creature(
             color = accent if ch == "a" else COLORS[ch]
             x = x0 + col * px
             c.create_rectangle(x, y, x + px, y + px, fill=color, outline="", tags=tag)
+    if flourish:
+        _draw_flourish(c, cx, cy, px, accent, tag)
+
+
+# A small milestone sparkle: a few accent pixels at the upper corners, drawn over
+# the creature once it has leveled up enough (a visual reward, tuning not structural).
+_FLOURISH = [(-7, -7), (-6, -6), (7, -7), (6, -6), (-8, -3), (8, -3)]
+
+
+def _draw_flourish(c: tk.Canvas, cx: float, cy: float, px: int, accent: str, tag: str) -> None:
+    for gx, gy in _FLOURISH:
+        x = cx + gx * px
+        y = cy + gy * px
+        c.create_rectangle(x, y, x + px, y + px, fill=accent, outline="", tags=tag)
 
 
 # --- pet hearts -------------------------------------------------------------
