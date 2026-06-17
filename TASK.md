@@ -324,8 +324,13 @@ unaffected — it governs the *face*, not card removal. +2 tests.
   `manager._on_pet_petted`) and tapping the pet in the **Pet window** (`_pet_tap`)
   now award the daily-capped `EVENT_REWARDS["pet"]` (+1 coin/+1 XP) on top of the
   happy reaction. Earning sources now live: completed turn (+5), sub-agent finish
-  (+3), petting (+1) — all under the 200/day cap. `first_prompt_of_day` (+20)
-  remains defined-but-unwired (needs a date-streak tracker).
+  (+3), petting (+1) — all under the 200/day cap.
+- **First-prompt streak wired** (the last earning source): `pet_logic.started_prompt`
+  (pure, tested) detects a session entering `thinking`; the widget claims a
+  once-per-day bonus (`FIRST_PROMPT_OF_DAY`, +20), persisted via a new
+  `last_prompt_date` field on the pet. **All four PRD coin sources (user story 4)
+  are now live:** completed turn, sub-agent finish, daily first-prompt streak, and
+  petting — under the 200/day cap.
 
 ---
 

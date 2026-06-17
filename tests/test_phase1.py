@@ -904,6 +904,20 @@ def test_transition_turn_end_clearing_badges_awards_turn_and_each_subagent():
     assert out.count("subagent_finished") == 2
 
 
+def test_started_prompt_detects_entering_thinking():
+    from mascot import pet_logic
+    assert pet_logic.started_prompt(_sess("idle"), _sess("thinking")) is True
+    assert pet_logic.started_prompt(_sess("waiting"), _sess("thinking")) is True
+    assert pet_logic.started_prompt(_sess("dead"), _sess("thinking")) is True
+
+
+def test_started_prompt_false_when_already_thinking_or_not_thinking():
+    from mascot import pet_logic
+    assert pet_logic.started_prompt(_sess("thinking"), _sess("thinking")) is False
+    assert pet_logic.started_prompt(_sess("working"), _sess("idle")) is False
+    assert pet_logic.started_prompt(_sess("thinking"), _sess("working")) is False
+
+
 def test_apply_events_rewards_a_completed_turn():
     from mascot import pet_logic
     out = pet_logic.apply_events(_pet(), ["turn_completed"], today="2026-06-17")

@@ -35,6 +35,7 @@ def default_pet(now: float) -> dict[str, Any]:
         "xp": 0,
         "coins_today": 0,
         "last_award_date": "",
+        "last_prompt_date": "",   # for the daily first-prompt streak bonus
         "inventory": {},   # item_id -> count owned (food + toys)
         "cooldowns": {},   # item_id -> last-played timestamp (toys)
     }

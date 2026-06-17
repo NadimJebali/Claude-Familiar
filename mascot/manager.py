@@ -129,6 +129,12 @@ class MascotManager:
                 if prev is None:
                     continue   # a new session has no transition yet
                 events = pet_logic.events_for_transition(prev, state)
+                # Daily first-prompt streak: the first new prompt of the day pays a
+                # bonus. Claim it once per calendar day (persisted in last_prompt_date).
+                if (pet_logic.started_prompt(prev, state)
+                        and self.pet.get("last_prompt_date") != today):
+                    self.pet = {**self.pet, "last_prompt_date": today}
+                    events = events + [pet_logic.FIRST_PROMPT_OF_DAY]
                 if events:
                     self.pet = pet_logic.apply_events(self.pet, events, today=today)
                     awarded = True

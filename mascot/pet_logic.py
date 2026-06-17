@@ -126,6 +126,14 @@ def events_for_transition(prev: dict[str, Any], nxt: dict[str, Any]) -> list[str
     return events
 
 
+def started_prompt(prev: dict[str, Any], nxt: dict[str, Any]) -> bool:
+    """True when a session just began a new prompt (entered ``thinking`` from any
+    non-thinking state). The widget uses this for the daily first-prompt streak;
+    it's clock-free, so the date check (is it the first today?) lives in the widget.
+    """
+    return prev.get("state") != "thinking" and nxt.get("state") == "thinking"
+
+
 # event -> (coins, xp). Varied so earning feels tied to how you actually work
 # (PRD user story 4). All amounts are a tuning pass, not structural.
 EVENT_REWARDS: dict[str, tuple[int, int]] = {
