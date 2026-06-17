@@ -363,6 +363,25 @@ def test_pid_alive_true_for_self_and_safe_on_unknown():
     assert mascot_proc.pid_alive("not-an-int") is True  # unparseable -> keep
 
 
+def test_live_owner_keeps_card_even_when_heartbeat_is_stale():
+    # Sleep is energy recovery now, not death: a quiet-but-live session must keep
+    # its card. A live, trackable owner PID overrides the staleness timeout.
+    import os
+    from mascot import state_store
+    state = {"session_id": SID, "owner_pid": os.getpid(), "ts": 0.0}
+    assert state_store.is_session_live(state, now=10_000.0, timeout=300.0) is True
+
+
+def test_ownerless_session_falls_back_to_staleness_backstop():
+    # With no trackable owner PID (unknown platform / lookup failed), an abandoned
+    # file is still pruned once its heartbeat goes stale — the backstop survives.
+    from mascot import state_store
+    fresh = {"session_id": SID, "owner_pid": None, "ts": 9_900.0}
+    stale = {"session_id": SID, "owner_pid": None, "ts": 0.0}
+    assert state_store.is_session_live(fresh, now=10_000.0, timeout=300.0) is True
+    assert state_store.is_session_live(stale, now=10_000.0, timeout=300.0) is False
+
+
 def test_png_icon_has_valid_signature_and_chunks():
     from mascot import icon
     data = icon._png_bytes()
