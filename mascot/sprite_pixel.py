@@ -84,25 +84,27 @@ _BODIES = {
     },
 }
 
-# The egg: a faceless shell with a few speckles (no face is composed for it).
+# The egg: a faceless shell with big dinosaur-egg speckles ('a' = speckle; drawn in
+# a fixed grey, not the state accent — see draw_creature). No face is composed for it.
 _EGG = [
     "................",
     "......oooo......",
     ".....oOOOOo.....",
     "....oOOOOOOo....",
-    "...oOOOaOOOoo...",
-    "...oOOOOOOOOo...",
-    "...oOOaOOOaOo...",
-    "...oOOOOOOOOo...",
-    "...oOOOOaOOOo...",
-    "...oOOOOOOOOo...",
-    "....oOOOOOOo....",
-    "....oOOOOOOo....",
+    "...oOOaaOOOOo...",
+    "...oOOaaOaaOo...",
+    "..oOOOOOOaaOOo..",
+    "..oOaaOOOOOOOo..",
+    "..oOaaOOaaOOOo..",
+    "...oOOOOaaOOo...",
+    "...oOOaaOOOOo...",
+    "....oOaaOOOo....",
     ".....oOOOOo.....",
     "......oooo......",
     "................",
     "................",
 ]
+EGG_SPECKLE = "#6f7486"   # dino-egg spots: a steady grey, independent of mood
 
 # The creature grows as it evolves: a per-stage pixel-size multiplier applied to
 # the base cell size by the renderer. Tuning/visual, not structural.
@@ -242,6 +244,8 @@ def draw_creature(
     `flourish` is set (a leveled-up milestone), a few accent sparkles are added.
     """
     grid = grid_for(stage, state)
+    # 'a' is the accent sparkle on a creature, but the egg's fixed grey speckles.
+    spot = EGG_SPECKLE if stage == "egg" else accent
     x0 = cx - (GRID_W * px) / 2
     y0 = cy - (GRID_H * px) / 2
     for r, row in enumerate(grid):
@@ -249,7 +253,7 @@ def draw_creature(
         for col, ch in enumerate(row):
             if ch == ".":
                 continue
-            color = accent if ch == "a" else COLORS[ch]
+            color = spot if ch == "a" else COLORS[ch]
             x = x0 + col * px
             c.create_rectangle(x, y, x + px, y + px, fill=color, outline="", tags=tag)
     if flourish:

@@ -418,6 +418,16 @@ def test_grid_for_unknown_stage_falls_back_to_baby():
     assert sp.grid_for("mystery", "idle") == sp.grid_for("baby", "idle")
 
 
+def test_every_shop_item_has_valid_pixel_art():
+    # Every catalog item is showcased with its own 12x12 art in the Pet window.
+    from mascot import shop, item_art
+    for it in shop.CATALOG:
+        assert item_art.has_art(it["id"]), it["id"]
+    for item_id, grid in item_art._ITEMS.items():
+        assert len(grid) == item_art.GRID, item_id
+        assert all(len(row) == item_art.GRID for row in grid), item_id
+
+
 # --- configurable attention shake -----------------------------------------
 
 def test_settings_defaults_include_shake_controls():

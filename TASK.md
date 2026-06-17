@@ -300,6 +300,19 @@ unaffected — it governs the *face*, not card removal. +2 tests.
 - Confirmed: moods **and** reactions (mood faces, happy/celebrate, hearts, emotes)
   compose over **every** stage (baby/teen/adult); only the **egg** is faceless.
 
+#### Polish round 2: dino egg, on-card Pet button, shop item art
+- **Dino egg:** bigger 2×2 speckles in `_EGG`, painted a steady grey
+  (`EGG_SPECKLE`) instead of the state accent — a fresh pet's mood is *happy*, which
+  would otherwise tint the spots pink. `draw_creature` special-cases the egg's `a`.
+- **On-card Pet button:** a small "🐾" `tk.Button` (top-left of each card, a child of
+  the toplevel so it survives canvas redraws) opens the Pet window via a new
+  `MascotWindow(on_open_pet=…)` callback → `manager._open_pet_window`.
+- **Shop item art:** new `mascot/item_art.py` — a 12×12 pixel grid per catalog item
+  (cookie / bowl / energy can / roast / ball / puzzle cube) with a shared `PALETTE`,
+  validated at import. The Pet window shop + inventory rows now show the rendered
+  icon instead of an emoji. +1 test (every catalog item has valid art). Art is
+  draft-quality, easy to iterate in `item_art._ITEMS`.
+
 ---
 
 ## Considered & rejected

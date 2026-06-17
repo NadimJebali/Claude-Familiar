@@ -96,6 +96,7 @@ _SUPPORTS_CHROMA = sys.platform == "win32"
 PANEL_FILL = "#1d1f29"
 _PANEL_FILL_RGB = (29, 31, 41)   # PANEL_FILL as RGB, for fading heart particles
 PANEL_EDGE = "#2a2d3b"      # resting border color
+PET_BTN_FG = "#d9885a"      # the on-card "open Pet window" paw button
 PANEL_MARGIN = _s(7)
 PANEL_RADIUS = _s(20)
 
@@ -262,9 +263,11 @@ def _caption(effective_state: str, tool: str | None) -> str:
 class MascotWindow:
     """One mascot window (Toplevel) per session, drawn on a single Canvas."""
 
-    def __init__(self, manager_root: tk.Tk, session_id: str, state: dict[str, Any], index: int) -> None:
+    def __init__(self, manager_root: tk.Tk, session_id: str, state: dict[str, Any], index: int,
+                 on_open_pet=None) -> None:
         self.session_id = session_id
         self.state = state
+        self._on_open_pet = on_open_pet
         self._sig: tuple | None = None
         self._drag_offset: tuple[int, int] | None = None
         self._alive = True
@@ -337,6 +340,19 @@ class MascotWindow:
         self.canvas.bind("<ButtonRelease-1>", self._on_drag_end)
         self.canvas.bind("<Enter>", self._on_enter)   # hover -> pet status tooltip
         self.canvas.bind("<Leave>", self._on_leave)
+
+        # A small paw button that opens the Pet window (a child of the toplevel, so
+        # it survives the canvas's full redraws). Only shown when wired by the manager.
+        self._pet_btn: tk.Button | None = None
+        if on_open_pet is not None:
+            self._pet_btn = tk.Button(
+                self.root, text="🐾", command=self._open_pet, cursor="hand2",
+                font=_font(8), bd=0, highlightthickness=0, relief="flat", takefocus=0,
+                bg=PANEL_FILL, fg=PET_BTN_FG,
+                activebackground=PANEL_EDGE, activeforeground=PET_BTN_FG,
+                padx=2, pady=0,
+            )
+            self._pet_btn.place(x=PANEL_MARGIN + _s(6), y=PANEL_MARGIN + _s(6), anchor="nw")
 
         self._place_initial(index)
         self._render()
@@ -467,6 +483,11 @@ class MascotWindow:
         """Public hook: play the happy reaction + hearts (e.g. when the pet is fed
         or played with in the Pet window), so care feels consistent with petting."""
         self._pet(time.time())
+
+    def _open_pet(self) -> None:
+        """The on-card paw button: ask the manager to open the Pet window."""
+        if self._on_open_pet is not None:
+            self._on_open_pet()
 
     def _pet(self, now: float) -> None:
         """Reward a tap with a happy face and a few rising pixel hearts."""

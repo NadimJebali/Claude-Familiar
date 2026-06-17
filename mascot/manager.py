@@ -90,7 +90,8 @@ class MascotManager:
         for index, (sid, state) in enumerate(sorted(states.items())):
             win = self.windows.get(sid)
             if win is None:
-                win = MascotWindow(self.root, sid, state, index)
+                win = MascotWindow(self.root, sid, state, index,
+                                   on_open_pet=self._open_pet_window)
                 self.windows[sid] = win
                 if self._cards_hidden:        # honor a tray "hide" for new sessions
                     win.set_hidden(True)

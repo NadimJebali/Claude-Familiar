@@ -22,7 +22,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Any, Callable
 
-from . import config, pet_logic, pet_store, shop, sprite_pixel
+from . import config, item_art, pet_logic, pet_store, shop, sprite_pixel
 from .control_panel import (ACCENT, BG, BORDER, DANGER, FG, MUTED, OK, PANEL,
                             PANEL_HI, WARN, _apply_theme)
 from .tkinter_app import MILESTONE_LEVEL, round_rect
@@ -243,24 +243,31 @@ class PetWindow:
             c.create_text(BAR_W - 4, y + BAR_H / 2, anchor="e", text=str(int(value)),
                           fill="#1c1e26", font=("Segoe UI", 7, "bold"))
 
+    def _item_icon(self, parent: tk.Misc, item_id: str) -> tk.Canvas:
+        """A small canvas showing the item's pixel art."""
+        cv = tk.Canvas(parent, width=28, height=28, bg=PANEL, highlightthickness=0, bd=0)
+        item_art.draw_item(cv, item_id, 14, 14, 2)
+        return cv
+
     def _build_shop(self, pet: dict[str, Any], level: int) -> None:
         for child in self.shop_tab.winfo_children():
             child.destroy()
         for item in shop.CATALOG:
             row = ttk.Frame(self.shop_tab, style="Card.TFrame")
             row.pack(fill="x", pady=3)
-            unlocked = shop.is_unlocked(item, level)
-            kind = "🍖" if item["type"] == shop.FOOD else "🧸"
-            title = f"{kind} {item['name']}  ·  🪙{item['price']}"
-            ttk.Label(row, text=title, style="Card.TLabel").pack(anchor="w")
-            sub = item["desc"] if unlocked else f"Unlocks at level {item['min_level']}"
-            ttk.Label(row, text=f"{sub}   ({_effects_text(item['effects'])})",
-                      style="Muted.TLabel").pack(side="left")
+            self._item_icon(row, item["id"]).pack(side="left", padx=(0, 6))
             ok, _ = shop.can_buy(pet, item, level)
             btn = ttk.Button(row, text="Buy", command=lambda it=item: self._buy(it))
             if not ok:
                 btn.state(["disabled"])
             btn.pack(side="right")
+            info = ttk.Frame(row, style="Card.TFrame")
+            info.pack(side="left", fill="x", expand=True)
+            ttk.Label(info, text=item["name"], style="Card.TLabel").pack(anchor="w")
+            unlocked = shop.is_unlocked(item, level)
+            sub = (f"{item['price']} coins · {_effects_text(item['effects'])}" if unlocked
+                   else f"Unlocks at level {item['min_level']}")
+            ttk.Label(info, text=sub, style="Muted.TLabel").pack(anchor="w")
 
     def _build_items(self, pet: dict[str, Any]) -> None:
         for child in self.items_tab.winfo_children():
@@ -276,9 +283,7 @@ class PetWindow:
                 continue
             row = ttk.Frame(self.items_tab, style="Card.TFrame")
             row.pack(fill="x", pady=3)
-            kind = "🍖" if item["type"] == shop.FOOD else "🧸"
-            ttk.Label(row, text=f"{kind} {item['name']}  ×{count}",
-                      style="Card.TLabel").pack(side="left")
+            self._item_icon(row, item_id).pack(side="left", padx=(0, 6))
             if item["type"] == shop.FOOD:
                 ttk.Button(row, text="Feed", command=lambda it=item: self._feed(it)).pack(side="right")
             else:
@@ -288,6 +293,7 @@ class PetWindow:
                     btn.state(["disabled"])
                     ttk.Label(row, text=reason, style="Muted.TLabel").pack(side="right", padx=(0, 6))
                 btn.pack(side="right")
+            ttk.Label(row, text=f"{item['name']}  ×{count}", style="Card.TLabel").pack(side="left")
 
     # --- animation --------------------------------------------------------
     def _animate(self) -> None:
