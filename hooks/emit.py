@@ -89,7 +89,8 @@ def _debug_log(event: str, payload: dict[str, Any]) -> None:
     if not os.environ.get("CLAUDE_MASCOT_DEBUG"):
         return
     try:
-        keys = ("message", "reason", "title", "notification_type", "subtype", "tool_name")
+        keys = ("message", "reason", "title", "notification_type", "subtype",
+                "tool_name", "error_type")
         fields = {k: payload.get(k) for k in keys if payload.get(k) is not None}
         line = f"{time.time():.0f}\t{event}\t{json.dumps(fields, ensure_ascii=False)}\n"
         log = STATE_DIR.parent / "debug.log"
