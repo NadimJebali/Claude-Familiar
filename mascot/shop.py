@@ -64,9 +64,12 @@ def owned(pet: dict[str, Any], item: dict[str, Any]) -> int:
 
 
 def can_buy(pet: dict[str, Any], item: dict[str, Any], level: int) -> tuple[bool, str]:
-    """Whether the pet can buy `item` now: unlocked by level and affordable."""
+    """Whether the pet can buy `item` now: unlocked by level, affordable, and — for
+    reusable toys — not already owned (a toy is a one-time purchase; food stacks)."""
     if not is_unlocked(item, level):
         return False, f"Reach level {item['min_level']} to unlock"
+    if item.get("type") == TOY and owned(pet, item) >= 1:
+        return False, "Already owned"
     if pet.get("coins", 0) < item["price"]:
         return False, "Not enough coins"
     return True, ""

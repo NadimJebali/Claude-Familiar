@@ -36,6 +36,8 @@ TICK_MS = 600
 PET_PX = 6                      # creature pixel size in the window
 PET_CANVAS_W, PET_CANVAS_H = 180, 150
 BAR_W, BAR_H = 150, 14
+BAR_LABEL_H = 13                # room for the need label above each bar
+BAR_SLOT = BAR_LABEL_H + BAR_H + 6   # label + bar + gap, per need
 
 # Need-bar colors (shared with the tooltip via config) + their display labels.
 NEED_COLORS = config.NEED_COLORS
@@ -71,6 +73,7 @@ class PetWindow:
         self._hearts: list[dict[str, float]] = []
         self._list_sig: tuple | None = None
         self._cached_pet: dict[str, Any] = {}   # latest pet for the 25fps sprite loop
+        self._cooldowns: dict[str, tuple] = {}  # toy_id -> (item, play_btn, label) for live countdown
 
         self.root = tk.Toplevel(parent)
         self.root.title("Claude Familiar — Pet")
@@ -124,7 +127,7 @@ class PetWindow:
         self.pet_canvas.pack()
         self.pet_canvas.bind("<Button-1>", lambda _e: self._pet_tap())
 
-        self.bars = tk.Canvas(left, width=BAR_W, height=(BAR_H + 12) * 3,
+        self.bars = tk.Canvas(left, width=BAR_W, height=BAR_SLOT * 3,
                               bg=PANEL, highlightthickness=0, bd=0)
         self.bars.pack(pady=(8, 6))
 
@@ -230,28 +233,31 @@ class PetWindow:
             self.name_entry.insert(0, pet["name"])
         self._draw_bars(pet)
 
-        sig = (pet.get("coins", 0), level, tuple(sorted(pet.get("inventory", {}).items())),
-               tuple(shop.can_play(pet, it, time.time())[0]
-                     for it in shop.CATALOG if it["type"] == shop.TOY))
+        # The lists only rebuild on these (coins/level/inventory); the toy cooldown
+        # countdown updates live in _update_cooldowns, so it isn't part of the sig.
+        sig = (pet.get("coins", 0), level, tuple(sorted(pet.get("inventory", {}).items())))
         if force or sig != self._list_sig:
             self._list_sig = sig
             self._build_shop(pet, level)
             self._build_items(pet)
+        self._update_cooldowns()
 
     def _draw_bars(self, pet: dict[str, Any]) -> None:
         c = self.bars
         c.delete("all")
         for i, need in enumerate(("hunger", "happiness", "energy")):
-            y = i * (BAR_H + 12) + 6
+            top = i * BAR_SLOT
             value = max(0, min(pet_logic.MAX_STAT, pet.get(need, 0)))
             frac = value / pet_logic.MAX_STAT
-            c.create_text(2, y - 2, anchor="sw", text=NEED_LABELS[need],
+            # label sits fully inside the canvas, above its bar (anchor nw at the slot top)
+            c.create_text(1, top, anchor="nw", text=NEED_LABELS[need],
                           fill=MUTED, font=("Segoe UI", 7))
-            round_rect(c, 0, y, BAR_W, y + BAR_H, 6, fill=TRACK, outline="")
+            bar_y = top + BAR_LABEL_H
+            round_rect(c, 0, bar_y, BAR_W, bar_y + BAR_H, 6, fill=TRACK, outline="")
             if frac > 0:
-                round_rect(c, 0, y, max(8, BAR_W * frac), y + BAR_H, 6,
+                round_rect(c, 0, bar_y, max(8, BAR_W * frac), bar_y + BAR_H, 6,
                            fill=NEED_COLORS[need], outline="")
-            c.create_text(BAR_W - 4, y + BAR_H / 2, anchor="e", text=str(int(value)),
+            c.create_text(BAR_W - 4, bar_y + BAR_H / 2, anchor="e", text=str(int(value)),
                           fill="#1c1e26", font=("Segoe UI", 7, "bold"))
 
     def _item_icon(self, parent: tk.Misc, item_id: str) -> tk.Canvas:
@@ -268,7 +274,9 @@ class PetWindow:
             row.pack(fill="x", pady=3)
             self._item_icon(row, item["id"]).pack(side="left", padx=(0, 6))
             ok, _ = shop.can_buy(pet, item, level)
-            btn = ttk.Button(row, text="Buy", command=lambda it=item: self._buy(it))
+            owned_toy = item["type"] == shop.TOY and shop.owned(pet, item) >= 1
+            btn = ttk.Button(row, text="Owned" if owned_toy else "Buy",
+                             command=lambda it=item: self._buy(it))
             if not ok:
                 btn.state(["disabled"])
             btn.pack(side="right")
@@ -283,6 +291,7 @@ class PetWindow:
     def _build_items(self, pet: dict[str, Any]) -> None:
         for child in self.items_tab.winfo_children():
             child.destroy()
+        self._cooldowns = {}
         inv = pet.get("inventory", {})
         if not inv:
             ttk.Label(self.items_tab, text="No items yet — buy some food or a toy in the Shop.",
@@ -297,14 +306,30 @@ class PetWindow:
             self._item_icon(row, item_id).pack(side="left", padx=(0, 6))
             if item["type"] == shop.FOOD:
                 ttk.Button(row, text="Feed", command=lambda it=item: self._feed(it)).pack(side="right")
+                # food stacks, so show the count
+                ttk.Label(row, text=f"{item['name']}  ×{count}", style="Card.TLabel").pack(side="left")
             else:
-                ok, reason = shop.can_play(pet, item, time.time())
+                # toys are one-time, reusable on a cooldown: a Play button + a live
+                # countdown label (updated by _update_cooldowns), no quantity.
                 btn = ttk.Button(row, text="Play", command=lambda it=item: self._play(it))
-                if not ok:
-                    btn.state(["disabled"])
-                    ttk.Label(row, text=reason, style="Muted.TLabel").pack(side="right", padx=(0, 6))
                 btn.pack(side="right")
-            ttk.Label(row, text=f"{item['name']}  ×{count}", style="Card.TLabel").pack(side="left")
+                cd = ttk.Label(row, text="", style="Muted.TLabel")
+                cd.pack(side="right", padx=(0, 6))
+                self._cooldowns[item_id] = (item, btn, cd)
+                ttk.Label(row, text=item["name"], style="Card.TLabel").pack(side="left")
+
+    def _update_cooldowns(self) -> None:
+        """Live-update each owned toy's Play button + countdown label every tick, so
+        the cooldown actually ticks down (the list itself isn't rebuilt each second)."""
+        now = time.time()
+        pet = self._cached_pet
+        for item, btn, cd in self._cooldowns.values():
+            ok, reason = shop.can_play(pet, item, now)
+            try:
+                btn.state(["!disabled"] if ok else ["disabled"])
+                cd.config(text="" if ok else reason)
+            except tk.TclError:
+                pass
 
     # --- animation --------------------------------------------------------
     def _animate(self) -> None:

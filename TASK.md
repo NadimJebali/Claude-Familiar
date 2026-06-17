@@ -342,6 +342,19 @@ unaffected — it governs the *face*, not card removal. +2 tests.
   Pet-window header, and the control-panel header + "Pet" button; the 🪙 coins in
   the Pet window; and the ✓ in the control-panel status labels.
 
+#### Polish round 5: live toy cooldown, one-time toys, bar-label clip fix
+- **Toy cooldown now counts down live.** It was static because the Items list only
+  rebuilds on a coins/level/inventory change; the cooldown's "can play" boolean
+  stays false the whole time, so the "Resting (Xs)" text never re-rendered. Now each
+  toy keeps a persistent Play button + countdown label, updated every tick by
+  `_update_cooldowns` (no list rebuild), so it ticks down and re-enables at 0.
+- **Reusable toys are one-time purchases.** `shop.can_buy` now rejects a toy already
+  owned ("Already owned"); food still stacks. The shop shows owned toys as a disabled
+  "Owned" button, and the Items tab drops the `×count` for toys. +2 tests.
+- **Hunger bar label no longer clipped.** The first need label was anchored
+  south-west at y≈4, so its top fell above the canvas edge. Bars now lay out per a
+  `BAR_SLOT` with the label anchored north-west at each slot's top (fully inside).
+
 ---
 
 ## Considered & rejected

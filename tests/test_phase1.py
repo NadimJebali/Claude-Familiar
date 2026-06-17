@@ -1174,6 +1174,23 @@ def test_can_buy_rejects_when_locked_by_level():
     assert ok is False
 
 
+def test_can_buy_rejects_a_toy_already_owned():
+    # Toys are reusable (play on a cooldown), so they're a one-time purchase.
+    from mascot import shop
+    toy = {"id": "ball", "name": "Ball", "price": 20, "type": shop.TOY,
+           "effects": {"happiness": 20}, "cooldown_s": 300, "min_level": 1}
+    assert shop.can_buy(_pet(coins=999, inventory={"ball": 1}), toy, level=1)[0] is False
+    assert shop.can_buy(_pet(coins=999, inventory={}), toy, level=1)[0] is True
+
+
+def test_can_buy_allows_stacking_food():
+    # Food is consumable, so you can always buy more.
+    from mascot import shop
+    food = {"id": "snack", "name": "Snack", "price": 10, "type": shop.FOOD,
+            "effects": {"hunger": 25}, "min_level": 1}
+    assert shop.can_buy(_pet(coins=999, inventory={"snack": 3}), food, level=1)[0] is True
+
+
 def test_buy_spends_coins_and_adds_to_inventory():
     from mascot import shop
     item = {"id": "snack", "name": "Snack", "price": 30, "type": shop.FOOD, "effects": {}, "min_level": 1}
