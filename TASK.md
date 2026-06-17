@@ -311,7 +311,21 @@ unaffected — it governs the *face*, not card removal. +2 tests.
   (cookie / bowl / energy can / roast / ball / puzzle cube) with a shared `PALETTE`,
   validated at import. The Pet window shop + inventory rows now show the rendered
   icon instead of an emoji. +1 test (every catalog item has valid art). Art is
-  draft-quality, easy to iterate in `item_art._ITEMS`.
+  draft-quality, easy to iterate in `item_art._ITEMS`. (Feast redrawn as a roast
+  turkey with two drumstick legs for clarity.)
+
+#### Polish round 3: reset progress + petting trickle wired
+- **Reset progress** (Settings → Setup tab): `control_panel._reset_pet` overwrites
+  `pet.json` with a fresh `default_pet` (egg, 0 coins/XP, full needs, no items/name)
+  after a confirm dialog. A running widget picks it up via its external-change
+  reload — Settings is a deliberate out-of-band reset, the widget stays the writer.
+- **Petting trickle wired** (the `pet` coin source from the engine, previously
+  defined but unwired): tapping a **card** (`MascotWindow(on_pet=…)` →
+  `manager._on_pet_petted`) and tapping the pet in the **Pet window** (`_pet_tap`)
+  now award the daily-capped `EVENT_REWARDS["pet"]` (+1 coin/+1 XP) on top of the
+  happy reaction. Earning sources now live: completed turn (+5), sub-agent finish
+  (+3), petting (+1) — all under the 200/day cap. `first_prompt_of_day` (+20)
+  remains defined-but-unwired (needs a date-streak tracker).
 
 ---
 

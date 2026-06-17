@@ -186,7 +186,9 @@ class PetWindow:
         self.status.set(f"Played with {item['name']}!")
 
     def _pet_tap(self) -> None:
-        """Tapping the pet pets it: a quick happy reaction + hearts (no cost)."""
+        """Tapping the pet pets it: a happy reaction + hearts + a small coin trickle."""
+        today = time.strftime("%Y-%m-%d", time.localtime())
+        self._commit(pet_logic.apply_events(self._pet(), [pet_logic.PET], today=today))
         self._celebrate()
 
     def _celebrate(self) -> None:

@@ -12,11 +12,13 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
-from . import autostart, icon, osplatform, settings as settings_mod, shortcuts, sprite_pixel, sprite_smooth
+from . import (autostart, icon, osplatform, pet_store, settings as settings_mod,
+               shortcuts, sprite_pixel, sprite_smooth)
 from .tkinter_app import _accent, round_rect
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -261,6 +263,15 @@ class ControlPanel:
         self.hooks_label.pack(side="left")
         ttk.Button(hrow, text="Install / update", command=self._install_hooks).pack(side="right")
 
+        ttk.Label(tab, text="PET", style="Section.TLabel").pack(anchor="w")
+        prow = ttk.Frame(tab, style="Card.TFrame")
+        prow.pack(fill="x", pady=(2, 12))
+        ttk.Label(prow, text="Start over with a brand-new egg — clears coins, XP, level, "
+                             "needs, name & items.", style="Muted.TLabel",
+                  wraplength=300, justify="left").pack(side="left")
+        ttk.Button(prow, text="Reset progress", style="Danger.TButton",
+                   command=self._reset_pet).pack(side="right")
+
         ttk.Separator(tab).pack(fill="x", pady=6)
         ttk.Label(tab, text="DANGER ZONE", style="Section.TLabel",
                   foreground=DANGER).pack(anchor="w", pady=(0, 2))
@@ -358,6 +369,25 @@ class ControlPanel:
             self.status.set("Opened the Pet window.")
         except OSError as exc:
             self.status.set(f"Could not open Pet window: {exc}")
+
+    def _reset_pet(self) -> None:
+        """Overwrite pet.json with a fresh egg. A running widget picks this up via
+        its external-change reload (it's the single writer; this is a deliberate
+        out-of-band reset from Settings)."""
+        from tkinter import messagebox
+        if not messagebox.askyesno(
+            "Reset pet progress",
+            "Start over with a brand-new egg?\n\nThis clears the pet's coins, XP, "
+            "level, needs, name, and inventory, and can't be undone.",
+            icon="warning", parent=self.root,
+        ):
+            return
+        try:
+            now = time.time()
+            pet_store.save(pet_store.PET_PATH, pet_store.default_pet(now), now)
+            self.status.set("Pet progress reset — a fresh egg is on the way.")
+        except OSError as exc:
+            self.status.set(f"Could not reset pet: {exc}")
 
     def _uninstall(self) -> None:
         from tkinter import messagebox

@@ -91,7 +91,8 @@ class MascotManager:
             win = self.windows.get(sid)
             if win is None:
                 win = MascotWindow(self.root, sid, state, index,
-                                   on_open_pet=self._open_pet_window)
+                                   on_open_pet=self._open_pet_window,
+                                   on_pet=self._on_pet_petted)
                 self.windows[sid] = win
                 if self._cards_hidden:        # honor a tray "hide" for new sessions
                     win.set_hidden(True)
@@ -200,6 +201,15 @@ class MascotManager:
                 win.celebrate()
             except Exception:  # noqa: BLE001
                 pass
+
+    def _on_pet_petted(self) -> None:
+        """A card tap pets the pet: a small daily-capped coin/XP trickle."""
+        try:
+            today = time.strftime("%Y-%m-%d", time.localtime())
+            self.pet = pet_logic.apply_events(self.pet, [pet_logic.PET], today=today)
+            self._save_pet(time.time())
+        except Exception as exc:  # noqa: BLE001
+            print("[mascot] pet trickle failed:", exc)
 
     # --- system-tray callbacks (run on the Tk thread) ---------------------
     def _on_tray_toggle(self) -> None:

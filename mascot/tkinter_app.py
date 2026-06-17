@@ -264,10 +264,11 @@ class MascotWindow:
     """One mascot window (Toplevel) per session, drawn on a single Canvas."""
 
     def __init__(self, manager_root: tk.Tk, session_id: str, state: dict[str, Any], index: int,
-                 on_open_pet=None) -> None:
+                 on_open_pet=None, on_pet=None) -> None:
         self.session_id = session_id
         self.state = state
         self._on_open_pet = on_open_pet
+        self._on_pet = on_pet      # called when the card is petted (coin trickle)
         self._sig: tuple | None = None
         self._drag_offset: tuple[int, int] | None = None
         self._alive = True
@@ -477,6 +478,8 @@ class MascotWindow:
         if (moved < PET_TAP_MAX_DIST and now >= self._dizzy_until
                 and raw not in ("waiting", "dead")):
             self._pet(now)
+            if self._on_pet is not None:    # a pet earns a small coin trickle
+                self._on_pet()
 
     # --- pet hearts -------------------------------------------------------
     def celebrate(self) -> None:
