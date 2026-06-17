@@ -164,6 +164,7 @@ class ControlPanel:
         ttk.Button(footer, text="Save & Apply", style="Accent.TButton",
                    command=self._save).pack(side="left")
         ttk.Button(footer, text="Launch widget", command=self._launch).pack(side="left", padx=6)
+        ttk.Button(footer, text="🐾 Pet", command=self._open_pet).pack(side="left")
         ttk.Button(footer, text="Close", command=self.root.destroy).pack(side="right")
 
         ttk.Label(self.root, textvariable=self.status, style="MutedBG.TLabel",
@@ -349,6 +350,14 @@ class ControlPanel:
             self.status.set("Widget launched.")
         except OSError as exc:
             self.status.set(f"Could not launch widget: {exc}")
+
+    def _open_pet(self) -> None:
+        """Open the Pet window as its own process (so it works without a tray)."""
+        try:
+            subprocess.Popen([str(_pythonw()), "-m", "mascot.pet_window"], cwd=str(PROJECT_ROOT))
+            self.status.set("Opened the Pet window.")
+        except OSError as exc:
+            self.status.set(f"Could not open Pet window: {exc}")
 
     def _uninstall(self) -> None:
         from tkinter import messagebox

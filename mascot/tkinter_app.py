@@ -424,6 +424,11 @@ class MascotWindow:
             self._pet(now)
 
     # --- pet hearts -------------------------------------------------------
+    def celebrate(self) -> None:
+        """Public hook: play the happy reaction + hearts (e.g. when the pet is fed
+        or played with in the Pet window), so care feels consistent with petting."""
+        self._pet(time.time())
+
     def _pet(self, now: float) -> None:
         """Reward a tap with a happy face and a few rising pixel hearts."""
         self._celebrate_until = now + CELEBRATE_DURATION_S

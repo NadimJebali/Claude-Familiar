@@ -52,6 +52,7 @@ TPM_RIGHTBUTTON = 0x0002
 _ID_TOGGLE = 1
 _ID_SETTINGS = 2
 _ID_QUIT = 3
+_ID_PET = 4
 
 LRESULT = ctypes.c_ssize_t
 WNDPROCTYPE = ctypes.WINFUNCTYPE(
@@ -164,12 +165,13 @@ class SystemTray:
 
     Callbacks (any may be omitted) run on the Tk thread:
       * ``on_toggle``   — left-click, or the "Show / hide cards" item
+      * ``on_pet``      — the "Pet…" item
       * ``on_settings`` — the "Settings…" item
       * ``on_quit``     — the "Quit" item
     """
 
     def __init__(self, tooltip: str = "Claude Familiar", *,
-                 on_toggle=None, on_settings=None, on_quit=None) -> None:
+                 on_toggle=None, on_pet=None, on_settings=None, on_quit=None) -> None:
         # Set sentinels first so dispose() is safe even if construction fails.
         self._hwnd = None
         self._nid = None
@@ -177,6 +179,7 @@ class SystemTray:
         self._class_atom = 0
 
         self._on_toggle = on_toggle or (lambda: None)
+        self._on_pet = on_pet or (lambda: None)
         self._on_settings = on_settings or (lambda: None)
         self._on_quit = on_quit or (lambda: None)
 
@@ -254,6 +257,7 @@ class SystemTray:
         menu = _user32.CreatePopupMenu()
         if not menu:
             return
+        _user32.AppendMenuW(menu, MF_STRING, _ID_PET, "Pet…")
         _user32.AppendMenuW(menu, MF_STRING, _ID_TOGGLE, "Show / hide cards")
         _user32.AppendMenuW(menu, MF_STRING, _ID_SETTINGS, "Settings…")
         _user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
@@ -269,7 +273,9 @@ class SystemTray:
         _user32.PostMessageW(self._hwnd, 0, 0, 0)
         _user32.DestroyMenu(menu)
 
-        if cmd == _ID_TOGGLE:
+        if cmd == _ID_PET:
+            self._safe(self._on_pet)
+        elif cmd == _ID_TOGGLE:
             self._safe(self._on_toggle)
         elif cmd == _ID_SETTINGS:
             self._safe(self._on_settings)

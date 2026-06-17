@@ -179,7 +179,7 @@ adult** evolution. **One global pet** shared across every session card; a deligh
 never an obligation (no sickness/death — the gravestone stays for usage limits).
 Filed as PRD #8 with four phased issues:
 - ✅ **#9 pet engine + persistence (pure core)** — see decision log below
-- ⬜ #10 Pet window + shop + feed/play (blocked by #9)
+- ✅ **#10 Pet window + shop + feed/play** — see decision log below
 - ⬜ #11 status tooltip + idle-face mood (blocked by #9)
 - ⬜ #12 evolution stages + per-stage art (blocked by #9)
 
@@ -212,6 +212,42 @@ Filed as PRD #8 with four phased issues:
   as the existing pure cores + the emit round-trip). The GUI (Pet window, tooltip,
   idle-face mood, evolution art) arrives in #10–#12 and is verified visually per
   convention.
+
+#### Card-lifetime fix (fb85fbf) — sleep = energy recovery, not a timeout
+Card pruning was `is_stale OR is_owner_dead`; the heartbeat only ticks on hook
+events, so an idle→sleeping-but-live session was timed out at `STALE_TIMEOUT_S`
+(300s). That fought the energy-recovery model (sleep refills energy, US10/US28), so
+`state_store.is_session_live()` now keeps a card while its owning `claude` process
+is alive (pruning only on confirmed owner death or `SessionEnd`); the staleness
+timeout survives only as a backstop for sessions with no trackable owner PID. The
+`effective_state` stall watchdog (`WORKING_STALL_S`/`THINKING_STALL_S`) is
+unaffected — it governs the *face*, not card removal. +2 tests.
+
+#### #10 — Pet window + shop + feed/play (done, TDD core + GUI)
+- **`mascot/shop.py`** (pure, tested): a **data-driven `CATALOG`** (food + toys,
+  trade-off items, level gates) and pure ops reusing `pet_logic.apply_effects`:
+  `can_buy`/`buy` (spend coins, +inventory), `can_feed`/`feed` (consume one, apply
+  effects, +care XP), `cooldown_remaining`/`can_play`/`play` (reusable toy on a
+  cooldown, +care XP). Validation is split into `can_*` (-> `(ok, reason)`) from the
+  transforms, which assume the precondition and stay immutable.
+- **`mascot/pet_window.py`** (GUI): the dashboard — pet sprite, three need bars,
+  coins, name, level, inventory, and a Shop/Items tabbed view with Buy/Feed/Play
+  and a rename box. Feeding/playing/tapping reuse the **happy face + pixel hearts**.
+  Persistence is abstracted behind `load_pet`/`save_pet` callbacks so the same
+  window runs **in-process** (tray, sharing the manager's live pet) or
+  **standalone** (`python -m mascot.pet_window`, from Settings, read-modify-write
+  via `pet_store`).
+- **Single-writer across two entry points:** the **tray** opens the window in the
+  manager process (no race). The **Settings** button launches it as its own process
+  (Linux/no-tray); it read-modify-writes per action, and the **manager reloads
+  `pet.json` when its mtime changes externally**, so the two stay in sync without
+  IPC. The hooks still never touch `pet.json`. Wired: `tray.py` (+"Pet…" item),
+  `manager.py` (open/focus + external reload + `_celebrate_cards`),
+  `control_panel.py` (+"🐾 Pet" button), `MascotWindow.celebrate()`.
+- **`cooldowns: {}`** added to `default_pet` (forward-compatible via decay-on-load's
+  key back-fill). **Tests:** +18 shop cases. GUI verified by construct->act->destroy
+  smoke tests (Pet window actions; manager external-reload + in-process buy) — a
+  full visual review still wants a live launch.
 
 ---
 

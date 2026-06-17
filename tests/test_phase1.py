@@ -612,7 +612,7 @@ def _pet(**over):
         "name": "", "born": 0.0, "last_seen": 0.0,
         "hunger": 100, "happiness": 100, "energy": 100,
         "coins": 0, "xp": 0, "coins_today": 0, "last_award_date": "",
-        "inventory": {},
+        "inventory": {}, "cooldowns": {},
     }
     p.update(over)
     return p
@@ -1048,3 +1048,145 @@ def test_save_stamps_last_seen_and_round_trips_on_disk(tmp_path):
     written = json.loads(path.read_text(encoding="utf-8"))
     assert written["last_seen"] == 555.0
     assert written["hunger"] == 100
+
+
+# --- Tamagotchi shop (pure: catalog + buy / feed / play) -------------------
+
+def test_catalog_has_food_and_toys_with_unique_ids():
+    from mascot import shop
+    ids = [it["id"] for it in shop.CATALOG]
+    assert len(ids) == len(set(ids))                       # no dup ids
+    types = {it["type"] for it in shop.CATALOG}
+    assert shop.FOOD in types and shop.TOY in types
+    for it in shop.CATALOG:                                # every row is well-formed
+        assert it["price"] > 0 and it["min_level"] >= 1 and isinstance(it["effects"], dict)
+
+
+def test_item_by_id_finds_and_misses():
+    from mascot import shop
+    assert shop.item_by_id(shop.CATALOG[0]["id"]) is shop.CATALOG[0]
+    assert shop.item_by_id("nope") is None
+
+
+def test_is_unlocked_gates_by_level():
+    from mascot import shop
+    gated = {"id": "x", "name": "X", "price": 1, "type": shop.FOOD, "effects": {}, "min_level": 3}
+    assert shop.is_unlocked(gated, level=2) is False
+    assert shop.is_unlocked(gated, level=3) is True
+
+
+def test_can_buy_rejects_when_too_few_coins():
+    from mascot import shop
+    item = {"id": "x", "name": "X", "price": 50, "type": shop.FOOD, "effects": {}, "min_level": 1}
+    ok, _ = shop.can_buy(_pet(coins=10), item, level=1)
+    assert ok is False
+
+
+def test_can_buy_rejects_when_locked_by_level():
+    from mascot import shop
+    item = {"id": "x", "name": "X", "price": 1, "type": shop.FOOD, "effects": {}, "min_level": 5}
+    ok, _ = shop.can_buy(_pet(coins=999), item, level=1)
+    assert ok is False
+
+
+def test_buy_spends_coins_and_adds_to_inventory():
+    from mascot import shop
+    item = {"id": "snack", "name": "Snack", "price": 30, "type": shop.FOOD, "effects": {}, "min_level": 1}
+    out = shop.buy(_pet(coins=100), item)
+    assert out["coins"] == 70
+    assert out["inventory"]["snack"] == 1
+
+
+def test_buy_does_not_mutate_input():
+    from mascot import shop
+    item = {"id": "snack", "name": "Snack", "price": 30, "type": shop.FOOD, "effects": {}, "min_level": 1}
+    pet = _pet(coins=100)
+    shop.buy(pet, item)
+    assert pet["coins"] == 100 and pet["inventory"] == {}
+
+
+_SNACK = {"id": "snack", "name": "Snack", "price": 10, "type": "food",
+          "effects": {"hunger": 30}, "min_level": 1}
+
+
+def test_can_feed_requires_food_and_ownership():
+    from mascot import shop
+    assert shop.can_feed(_pet(inventory={}), _SNACK)[0] is False           # none owned
+    assert shop.can_feed(_pet(inventory={"snack": 1}), _SNACK)[0] is True
+    toy = {"id": "ball", "name": "Ball", "price": 1, "type": "toy", "effects": {}, "min_level": 1}
+    assert shop.can_feed(_pet(inventory={"ball": 1}), toy)[0] is False     # not food
+
+
+def test_feed_applies_effects_consumes_one_and_grants_xp():
+    from mascot import shop
+    pet = _pet(hunger=40, xp=0, inventory={"snack": 2})
+    out = shop.feed(pet, _SNACK)
+    assert out["hunger"] == 70                       # +30 effect
+    assert out["inventory"]["snack"] == 1            # one consumed
+    assert out["xp"] == shop.CARE_XP                 # caring earns XP
+
+
+def test_feed_last_item_clears_it_from_inventory():
+    from mascot import shop
+    out = shop.feed(_pet(inventory={"snack": 1}), _SNACK)
+    assert "snack" not in out["inventory"]
+
+
+def test_feed_trade_off_item_clamps_negative_effect():
+    from mascot import shop
+    drink = {"id": "energy_drink", "name": "Energy Drink", "price": 30, "type": "food",
+             "effects": {"energy": 40, "happiness": -15}, "min_level": 2}
+    out = shop.feed(_pet(energy=50, happiness=10, inventory={"energy_drink": 1}), drink)
+    assert out["energy"] == 90
+    assert out["happiness"] == 0                      # 10 - 15 clamped to 0
+
+
+def test_feed_does_not_mutate_input():
+    from mascot import shop
+    pet = _pet(hunger=40, inventory={"snack": 2})
+    shop.feed(pet, _SNACK)
+    assert pet["hunger"] == 40 and pet["inventory"]["snack"] == 2
+
+
+_BALL = {"id": "ball", "name": "Ball", "price": 20, "type": "toy",
+         "effects": {"happiness": 20}, "cooldown_s": 300, "min_level": 1}
+
+
+def test_can_play_requires_toy_and_ownership():
+    from mascot import shop
+    assert shop.can_play(_pet(inventory={}), _BALL, now=0.0)[0] is False        # none owned
+    assert shop.can_play(_pet(inventory={"ball": 1}), _BALL, now=0.0)[0] is True
+    assert shop.can_play(_pet(inventory={"snack": 1}), _SNACK, now=0.0)[0] is False  # not a toy
+
+
+def test_play_applies_happiness_sets_cooldown_keeps_toy_and_grants_xp():
+    from mascot import shop
+    pet = _pet(happiness=40, xp=0, inventory={"ball": 1})
+    out = shop.play(pet, _BALL, now=1000.0)
+    assert out["happiness"] == 60                    # +20 effect
+    assert out["inventory"]["ball"] == 1             # toys are reusable, not consumed
+    assert out["cooldowns"]["ball"] == 1000.0        # cooldown stamped
+    assert out["xp"] == shop.CARE_XP
+
+
+def test_can_play_rejected_during_cooldown_then_allowed_after():
+    from mascot import shop
+    played = shop.play(_pet(happiness=40, inventory={"ball": 1}), _BALL, now=1000.0)
+    # still resting a moment later...
+    assert shop.can_play(played, _BALL, now=1100.0)[0] is False
+    # ...and ready again once the cooldown elapses.
+    assert shop.can_play(played, _BALL, now=1000.0 + _BALL["cooldown_s"])[0] is True
+
+
+def test_cooldown_remaining_counts_down_to_zero():
+    from mascot import shop
+    played = shop.play(_pet(inventory={"ball": 1}), _BALL, now=1000.0)
+    assert shop.cooldown_remaining(played, _BALL, now=1000.0) == _BALL["cooldown_s"]
+    assert shop.cooldown_remaining(played, _BALL, now=1000.0 + _BALL["cooldown_s"]) == 0.0
+
+
+def test_play_does_not_mutate_input():
+    from mascot import shop
+    pet = _pet(happiness=40, inventory={"ball": 1})
+    shop.play(pet, _BALL, now=1000.0)
+    assert pet["happiness"] == 40 and pet["cooldowns"] == {}

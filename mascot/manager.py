@@ -53,6 +53,7 @@ class MascotManager:
                 self.tray = SystemTray(
                     tooltip="Claude Familiar",
                     on_toggle=self._on_tray_toggle,
+                    on_pet=self._on_tray_pet,
                     on_settings=self._on_tray_settings,
                     on_quit=self._on_tray_quit,
                 )
@@ -72,6 +73,8 @@ class MascotManager:
         self._pet_prev: dict[str, dict] = {}   # sid -> last session state (transitions)
         self._pet_last_tick = now
         self._pet_last_save = now
+        self._pet_file_mtime = self._pet_mtime()
+        self._pet_win = None                   # the Pet window, when open (tray)
 
         self.root.after(500, self._refresh)
 
@@ -103,6 +106,14 @@ class MascotManager:
         time and award coins/XP for session-state transitions, then persist
         (throttled). Wrapped so a pet failure never disrupts the mascot."""
         try:
+            # Pick up edits made by a standalone Pet window (opened from Settings):
+            # if pet.json changed under us, reload it (decay-on-load brings it to now).
+            mtime = self._pet_mtime()
+            if mtime is not None and mtime != self._pet_file_mtime:
+                self.pet = pet_store.load(pet_store.PET_PATH, now)
+                self._pet_file_mtime = mtime
+                self._pet_last_tick = now      # load already decayed up to now
+
             elapsed = max(0.0, now - self._pet_last_tick)
             self._pet_last_tick = now
             # Energy drains while any session is busy and refills while all idle.
@@ -128,12 +139,61 @@ class MascotManager:
             print("[mascot] pet update failed:", exc)
 
     def _save_pet(self, now: float) -> None:
-        """Flush the pet to pet.json (best-effort; the widget is its sole writer)."""
+        """Flush the pet to pet.json (best-effort). Records our own write's mtime so
+        we don't mistake it for an external edit on the next poll."""
         try:
             self.pet = pet_store.save(pet_store.PET_PATH, self.pet, now)
             self._pet_last_save = now
+            self._pet_file_mtime = self._pet_mtime()
         except Exception as exc:  # noqa: BLE001
             print("[mascot] could not save pet:", exc)
+
+    @staticmethod
+    def _pet_mtime() -> float | None:
+        try:
+            return pet_store.PET_PATH.stat().st_mtime
+        except OSError:
+            return None
+
+    # --- pet window (opened from the tray, in this process) ---------------
+    def _on_tray_pet(self) -> None:
+        self._open_pet_window()
+
+    def _open_pet_window(self) -> None:
+        """Open (or focus) the Pet window as a Toplevel in this process, so it
+        shares the live in-memory pet and persists through the single writer."""
+        if self._pet_win is not None and getattr(self._pet_win, "_alive", False):
+            self._pet_win.focus()
+            return
+        try:
+            from .pet_window import PetWindow
+            self._pet_win = PetWindow(
+                self.root,
+                load_pet=lambda: self.pet,
+                save_pet=self._pet_window_save,
+                on_care=self._celebrate_cards,
+                on_close=self._on_pet_window_closed,
+            )
+        except Exception as exc:  # noqa: BLE001 — never let it crash the widget
+            print("[mascot] could not open pet window:", exc)
+            self._pet_win = None
+
+    def _pet_window_save(self, pet: dict) -> dict:
+        """Persist a Pet-window action through the single writer + record mtime."""
+        self.pet = pet
+        self._save_pet(time.time())
+        return self.pet
+
+    def _on_pet_window_closed(self) -> None:
+        self._pet_win = None
+
+    def _celebrate_cards(self) -> None:
+        """Play the happy reaction + hearts on every card when the pet is fed/played."""
+        for win in self.windows.values():
+            try:
+                win.celebrate()
+            except Exception:  # noqa: BLE001
+                pass
 
     # --- system-tray callbacks (run on the Tk thread) ---------------------
     def _on_tray_toggle(self) -> None:
