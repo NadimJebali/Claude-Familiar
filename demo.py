@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Demo the mascot widget with fake sessions.
+"""Demo the mascot widget with fake sessions — including the Tamagotchi pet.
 
-Creates two test state files and launches the tkinter widget so you can see
-the cards without needing live Claude sessions. Cleans up on exit.
+Creates a couple of test state files AND seeds a demo pet (a hatched, slightly
+hungry teen with coins + items) so you can see the evolved creature, the idle-face
+mood, the hover tooltip, the food/zzz popups, and the Pet window (tray "Pet…", the
+on-card paw button, or Settings). Your real pet.json is backed up and restored on
+exit, so the demo never touches your actual progress.
 
-Run with:  python demo.py
+Run with:  python demo.py   (stop with Ctrl+C)
 """
 import json
 import subprocess
@@ -12,9 +15,16 @@ import sys
 import time
 from pathlib import Path
 
-state_dir = Path.home() / ".claude" / "mascot" / "state"
-state_dir.mkdir(parents=True, exist_ok=True)
+BASE = Path.home() / ".claude" / "mascot"
+STATE_DIR = BASE / "state"
+PET_PATH = BASE / "pet.json"
+STATE_DIR.mkdir(parents=True, exist_ok=True)
 
+now = time.time()
+DAY = 86400.0
+
+# One busy card and one idle card — the idle one shows the pet's mood face, the
+# hover tooltip, and the food/zzz popups (busy states always win on the face).
 states = [
     {
         "session_id": "demo-frontend",
@@ -22,26 +32,45 @@ states = [
         "state": "working",
         "tool": "Edit",
         "subagents": [{"id": "a", "type": "code-reviewer"}],
-        "ts": time.time(),
+        "ts": now,
     },
     {
         "session_id": "demo-backend",
         "cwd": "C:/project/backend",
-        "state": "thinking",
+        "state": "idle",
         "tool": None,
         "subagents": [],
-        "ts": time.time(),
+        "ts": now,
     },
 ]
 
-print("Creating demo state files...")
+# A demo pet: a teen (level 5, 2 days old), a little hungry so you can see the
+# "hungry" idle face + the food popup, with coins + items to try the shop.
+demo_pet = {
+    "name": "Pixel",
+    "born": now - 2 * DAY,
+    "last_seen": now,
+    "hunger": 18, "happiness": 72, "energy": 84,
+    "coins": 120, "xp": 480,            # level 5 + 2d age -> teen stage
+    "coins_today": 0, "last_award_date": "", "last_prompt_date": "",
+    "inventory": {"snack": 3, "ball": 1}, "cooldowns": {},
+}
+
+print("Creating demo state files + a demo pet...")
 for state in states:
-    (state_dir / f"{state['session_id']}.json").write_text(json.dumps(state, indent=2))
+    (STATE_DIR / f"{state['session_id']}.json").write_text(json.dumps(state, indent=2))
+
+# Back up any real pet so the demo never clobbers your progress.
+pet_backup = PET_PATH.read_bytes() if PET_PATH.exists() else None
+PET_PATH.write_text(json.dumps(demo_pet, indent=2), encoding="utf-8")
 
 print()
 print("Launching mascot widget (tkinter)...")
-print("✓ Two windows appear in the bottom-right (⚙️ working, 🤔 thinking)")
-print("✓ Drag any card anywhere — it stays where you drop it")
+print("✓ Two cards appear bottom-right: one working, one idle")
+print("✓ The idle card shows the pet's mood face + a food popup (it's hungry)")
+print("✓ Hover a card for the status tooltip (needs / coins / level / name)")
+print("✓ Click the paw button (or tray 'Pet...') to open the Pet window — shop, feed, play")
+print("✓ Tap a card to pet it (+1 coin, rising hearts)")
 print("✓ Press Ctrl+C here to stop")
 print()
 
@@ -56,5 +85,12 @@ except KeyboardInterrupt:
 finally:
     print("Cleaning up demo state files...")
     for state in states:
-        (state_dir / f"{state['session_id']}.json").unlink(missing_ok=True)
+        (STATE_DIR / f"{state['session_id']}.json").unlink(missing_ok=True)
+    # Restore your real pet (or remove the demo pet if you had none).
+    if pet_backup is not None:
+        PET_PATH.write_bytes(pet_backup)
+        print("Restored your real pet.json.")
+    else:
+        PET_PATH.unlink(missing_ok=True)
+        print("Removed the demo pet.json.")
     print("Done.")

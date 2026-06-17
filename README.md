@@ -17,6 +17,10 @@ waiting (wide-eyed) · happy (celebrating / petted) · sleeping (zzz) ·
 dizzy (shake easter egg) · dead (gravestone, when usage runs out)
 ```
 
+When idle, the face also reflects the **pet's mood** (see below) — droopy when
+hungry, sad, sleepy, or sparkly when well cared-for — but Claude-activity states
+always take priority, so the mascot never lies about what Claude is doing.
+
 Two art styles ship in the box, selectable via `ART_STYLE` in
 `mascot/config.py`:
 
@@ -56,11 +60,45 @@ see the change.
   notification), the mascot becomes a 🪦 and keeps the message so you can read the
   reset time. It revives on your next prompt.
 - **Shake-to-dizzy.** Grab a card and shake it — the mascot gets dizzy (😵‍💫).
-- **Self-cleaning.** Closing a terminal removes its mascot immediately; crashed
-  sessions are pruned by a heartbeat timeout.
+- **Self-cleaning.** A card stays as long as its Claude process is alive — even
+  idle or asleep — and vanishes the moment that process exits. (A heartbeat
+  timeout is a backstop only for sessions whose owner can't be tracked.)
 
 It is **display only** — it never approves anything or interferes with Claude.
 Hooks just write a small JSON state file; the widget polls and renders it.
+
+## Raise a pet (Tamagotchi mode) 🥚
+
+Beyond the live status, the familiar is a **virtual pet you raise over time** —
+one global creature shared across all your sessions, a delight rather than a chore.
+
+- **Earn coins from real work.** Finishing a turn (+5), a sub-agent finishing (+3),
+  your first prompt of the day (+20), and petting (+1) all earn coins — under a
+  gentle **daily cap**, so it never pays to over-use Claude just to farm currency.
+- **A shop.** Spend coins on **food** (consumable) and **toys** (reusable, on a
+  play cooldown). Some items have trade-offs — an energy drink raises energy but
+  lowers happiness — and higher-tier items unlock as the pet levels up.
+- **Three gentle needs** — hunger, happiness, energy — drift over time; energy
+  drains while Claude works and refills while it's idle/asleep. Needs only ever
+  dull the mood, **never sickness or death** (the gravestone stays reserved for
+  usage limits).
+- **Mood on the face.** While idle, the mascot's face reflects the pet's mood, with
+  a piece of food or a 💤 popping up now and then when it's hungry or sleepy.
+- **It grows up.** The pet earns XP, levels up, and visibly evolves —
+  **egg → baby → teen → adult** (gated by both level and real age) — with a
+  milestone sparkle at higher levels.
+- **The Pet window.** Open it from the tray (*Pet…*), the 🐾 button on a card, or
+  Settings. It's the home for the pet: need bars, coins, level, name, inventory,
+  and the shop with **Buy / Feed / Play**. Name your pet there too.
+- **Glance tooltip.** Hover a card for a compact status — the three need bars,
+  coins, level, and name.
+- **Reset any time.** Settings → *Reset progress* starts over with a fresh egg.
+
+The pet lives in `~/.claude/mascot/pet.json`; the widget is its single writer (it
+applies decay and derives coins/XP from your session transitions — the hook
+emitter is untouched). The balance numbers (decay rates, coin amounts, level/stage
+curves) are easy to tune in `mascot/pet_logic.py`, and item prices/effects in
+`mascot/shop.py`.
 
 ## Requirements
 
@@ -134,7 +172,10 @@ reacting. Run the widget once; it manages all your sessions.
 python demo.py
 ```
 
-This spawns two fake sessions so you can see the cards and cycle through states.
+This spawns two fake sessions (one working, one idle) **and a demo pet**, so you
+can see the cards, the idle-face mood, the food/💤 popups, the hover tooltip, and
+the Pet window — without a live Claude session. Your real `pet.json` is backed up
+and restored on exit, so the demo never touches your actual progress.
 
 ## Autostart on login (optional)
 
@@ -171,32 +212,44 @@ Claude Code session ──hooks──▶ emit.py ──atomic write──▶ ~/.
 - **`hooks/state_logic.py`** holds `compute_next_state(current, event, payload)`,
   a pure function (the unit-tested core) that maps each hook event to the next
   state.
-- **`mascot/tkinter_app.py`** polls the state directory every second and
-  creates/destroys one native Tkinter window per active session. Each card is a
-  single Canvas; the mascot is drawn by **`mascot/sprite_pixel.py`** (or
-  `sprite_smooth.py`, per `config.ART_STYLE`).
+- **`mascot/manager.py`** (`MascotManager`) polls the state directory every second
+  and creates/destroys one native Tkinter window (`mascot/tkinter_app.py`) per
+  active session. Each card is a single Canvas; the mascot is drawn by
+  **`mascot/sprite_pixel.py`** (or `sprite_smooth.py`, per `config.ART_STYLE`). The
+  manager is also the single writer of the pet (`pet.json`), applying decay and
+  awarding coins/XP from the polled state transitions.
 
 State files live in `~/.claude/mascot/state/`. Each carries a heartbeat (`ts`)
-and the owning `claude.exe` PID so stale/closed sessions get cleaned up.
+and the owning `claude.exe` PID; a card is pruned the moment that process exits.
 
 ## Project layout
 
 ```
 claude-mascot/
   mascot/
-    tkinter_app.py    # MascotManager (one Tk root) + per-session windows + speech bubble
-    sprite_pixel.py   # Claude-style pixel-art creature (default art)
+    manager.py        # MascotManager: one Tk root, polls sessions, single writer of the pet
+    tkinter_app.py    # MascotWindow: one card per session (canvas, drag, pet, tooltip, paw btn)
+    effective_state.py# pure overlay: dizzy/happy/sleeping/blink + stall watchdog + idle mood
+    popups.py         # speech bubble + pet status tooltip (frameless Toplevels)
+    popup_place.py    # pure multi-monitor popup placement (tested)
+    scale.py          # widget-size scaling primitives
+    sprite_pixel.py   # Claude-style pixel creature: faces + evolution stages + hearts/emotes
     sprite_smooth.py  # original rounded vector character (kept on the side)
+    pet_logic.py      # PURE pet core: decay, item effects, coins/XP, mood, level, stage (tested)
+    pet_store.py      # pet.json wrapper: load/save + decay-on-load (single source of truth)
+    shop.py           # data-driven shop catalog + buy/feed/play (pure, tested)
+    pet_window.py     # the Pet window: dashboard + shop + feed/play (in-process or standalone)
+    item_art.py       # pixel art for the shop items
     icon.py           # app icon (.ico/.png + iconphoto) rendered from the pixel mascot
     tray.py           # Windows system-tray icon + menu (Win32 ctypes; Windows only)
     single_instance.py# one-widget-at-a-time guard (named mutex / flock)
-    control_panel.py  # settings panel: art, size, transparency, install, autostart, hooks
+    control_panel.py  # settings panel: art, size, display, install, autostart, hooks, reset pet
     settings.py       # load/save ~/.claude/mascot/settings.json
-    osplatform.py     # IS_WINDOWS / IS_LINUX / IS_MACOS detection
+    osplatform.py     # IS_WINDOWS / IS_LINUX / IS_MACOS + monitor work areas
     desktop_entry.py  # write freedesktop .desktop launchers (Linux)
     shortcuts.py      # app shortcuts: .lnk (Windows) / .desktop (Linux)
     autostart.py      # run-at-login entry: Startup .lnk (Windows) / XDG autostart (Linux)
-    state_store.py    # read state dir, staleness + dead-PID pruning
+    state_store.py    # read state dir; prune by process liveness (staleness backstop)
     proc.py           # is the owning claude process still alive? (kernel32 / os.kill)
     config.py         # paths, timeouts, sizes (UI_SCALE), colors
     __main__.py       # python -m mascot
@@ -224,7 +277,9 @@ install (and whenever autostart is enabled), so it is not checked into the repo.
 python -m pytest -q
 ```
 
-Covers the state machine and the emit read-modify-write path (GUI excluded).
+Covers the state machine, the **pet engine** (decay, item effects, coins/XP with
+the daily cap, mood, level, stage, and the shop buy/feed/play), and the file-I/O
+wrappers (`emit`, `pet_store`). GUI is excluded — verified visually via `demo.py`.
 
 ## Troubleshooting
 
@@ -232,8 +287,9 @@ Covers the state machine and the emit read-modify-write path (GUI excluded).
   (`python -m mascot`) and that hooks installed cleanly — re-run
   `python scripts/install_hooks.py` and check `~/.claude/settings.json`. The
   interpreter in the hook command must be a Python that can import `tkinter`.
-- **Card lingers after closing a terminal.** It should vanish immediately; if a
-  session crashed hard it's pruned within the staleness timeout (~5 min).
+- **Card lingers after closing a terminal.** It should vanish the moment the
+  Claude process exits. If a session crashed in a way that hides its process from
+  the widget, an owner-less card is pruned by the staleness backstop (~5 min).
 - **Wrong Python gets used by hooks.** Re-run the install script *with the Python
   you want* — it records `sys.executable` at install time.
 - **Desktop icon says "Untrusted" (Linux/GNOME).** GNOME marks newly created
