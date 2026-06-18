@@ -466,6 +466,21 @@ so you notice even with the card off-screen (`plyer` added to `requirements.txt`
 - **Tests:** +14 in `tests/test_notifier.py` (edge cases + formatting + `emit`
   routing via an injected `show`). Suite 174 → 188 green.
 
+### #17 — psutil process detection + liveness (done)
+Replaced the hand-rolled process code with **psutil** (added to `requirements.txt`):
+`hooks/proc.py` dropped the Win32 Toolhelp snapshot + `/proc/<pid>/stat` parsing for
+a psutil ancestor walk (`find_owner_pid`), and `mascot/proc.py` dropped the
+kernel32/`os.kill` liveness for `psutil.pid_exists` (`pid_alive`). Public signatures
++ semantics unchanged: `find_owner_pid()` still returns the nearest Claude-ancestor
+PID or None; `pid_alive()` still returns True on any uncertainty so a session is
+never wrongly pruned. **psutil is imported lazily** inside both functions (so
+`emit`'s top-level `from proc import …` can't crash if psutil is missing — it
+degrades to "owner unknown" / "keep") — important because the hook runs in whatever
+Python Claude Code invokes. Tests adapted: the `/proc`-parse + Linux-matcher cases
+became a cross-platform `_is_owner_name` test + a `find_owner_pid` no-crash smoke;
+`pid_alive` self/None/garbage test unchanged. Verified live: `find_owner_pid()`
+returned a real PID when run under Claude Code. Suite stays 188 green.
+
 ## Notes
 - `smooth` art lacks the new faces → falls back to `idle` (acceptable; can add later).
 - Effective-state priority is the contract: `dizzy > happy > sleeping > raw`.

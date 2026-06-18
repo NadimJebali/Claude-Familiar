@@ -261,13 +261,13 @@ claude-mascot/
     shortcuts.py      # app shortcuts: .lnk (Windows) / .desktop (Linux)
     autostart.py      # run-at-login entry: Startup .lnk (Windows) / XDG autostart (Linux)
     state_store.py    # read state dir; prune by process liveness (staleness backstop)
-    proc.py           # is the owning claude process still alive? (kernel32 / os.kill)
+    proc.py           # is the owning claude process still alive? (psutil)
     config.py         # paths, timeouts, sizes (UI_SCALE), colors
     __main__.py       # python -m mascot
   hooks/
     emit.py           # invoked by every hook; stdin JSON -> atomic state update
     state_logic.py    # compute_next_state (pure, tested)
-    proc.py           # find owning Claude PID via process ancestry (Toolhelp / /proc)
+    proc.py           # find owning Claude PID via process ancestry (psutil)
   scripts/
     install_hooks.py  # install/uninstall hooks in ~/.claude/settings.json
   tests/              # pytest suite for state_logic + emit

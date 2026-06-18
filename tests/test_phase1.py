@@ -341,22 +341,26 @@ def test_missing_session_id_is_noop(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
-# --- cross-platform support (Linux port) ----------------------------------
+# --- process detection / liveness (psutil) --------------------------------
 
-def test_parse_proc_stat_handles_comm_with_spaces_and_parens():
+def test_owner_name_matcher_accepts_claude_across_platforms():
     import proc as hooks_proc
-    # Real /proc/<pid>/stat: comm is parenthesized and may contain ')' and spaces.
-    line = "4242 (claude) S 4200 4242 4200 0 -1 4194304 100 0"
-    assert hooks_proc._parse_stat(line) == (4200, "claude")
-    weird = "10 (weird ) name) S 7 10 7 0 -1 0 0"
-    assert hooks_proc._parse_stat(weird) == (7, "weird ) name")
+    # "claude.exe" (Windows), "claude" (Linux comm) and "claude-code" all match,
+    # case-insensitively; anything else does not.
+    assert hooks_proc._is_owner_name("claude")
+    assert hooks_proc._is_owner_name("claude.exe")
+    assert hooks_proc._is_owner_name("Claude")
+    assert hooks_proc._is_owner_name("claude-code")
+    assert not hooks_proc._is_owner_name("bash")
+    assert not hooks_proc._is_owner_name("")
 
 
-def test_linux_owner_matcher_accepts_claude_comm():
+def test_find_owner_pid_is_none_or_a_pid_and_never_crashes():
+    # Best-effort: with no Claude ancestor (the test runner) it returns None; if one
+    # exists it's a positive PID. Either way it must not raise.
     import proc as hooks_proc
-    assert hooks_proc._is_owner_linux("claude")
-    assert hooks_proc._is_owner_linux("claude-code")
-    assert not hooks_proc._is_owner_linux("bash")
+    result = hooks_proc.find_owner_pid()
+    assert result is None or (isinstance(result, int) and result > 0)
 
 
 def test_pid_alive_true_for_self_and_safe_on_unknown():
