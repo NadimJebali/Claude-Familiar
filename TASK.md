@@ -416,6 +416,18 @@ Added `ruff` as a **dev-only** dependency and `ruff.toml` (line-length 99,
 No behavior change (verified: `.format`/`%` byte-identical, `round`==`int(round)`);
 suite stays 164 green.
 
+### #16 — ADR: allow required runtime dependencies (decided)
+**Reverses the pure-stdlib stance.** Recorded as
+[ADR-0001](docs/adr/0001-runtime-dependencies.md) (the project's first ADR; new
+`docs/adr/` dir). Third-party packages may now live in `requirements.txt` and be
+imported by the widget where they replace fragile hand-rolled `ctypes` or extend
+platform support; OS-specific deps are gated by environment markers
+(`pywin32; sys_platform == "win32"`). README "no external dependencies" claim +
+`requirements.txt` header updated; dev tools stay in `requirements-dev.txt`. This
+**unblocks #17–#20** — but the ADR only *permits* deps; each issue is still judged
+on whether the dependency earns its cost over the working hand-rolled code. (The
+PyInstaller rejection stands on its own merits and is not reopened.)
+
 ## Notes
 - `smooth` art lacks the new faces → falls back to `idle` (acceptable; can add later).
 - Effective-state priority is the contract: `dizzy > happy > sleeping > raw`.

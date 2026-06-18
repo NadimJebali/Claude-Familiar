@@ -7,9 +7,8 @@ driven entirely by Claude Code's [hooks](https://docs.anthropic.com/en/docs/clau
 One mascot per Claude session. Sub-agents show up as little badges underneath.
 
 The mascot is a **pixel-art creature** styled after Claude's blocky terminal
-mascot — drawn cell-by-cell on a Tkinter canvas, no image files, no GPU, no
-dependencies. Its face changes per state, with a sparkle that glows in the
-state's accent color:
+mascot — drawn cell-by-cell on a Tkinter canvas, no image files, no GPU. Its face
+changes per state, with a sparkle that glows in the state's accent color:
 
 ```
 idle (calm) · thinking (looking up) · working (focused) ·
@@ -107,9 +106,14 @@ curves) are easy to tune in `mascot/pet_logic.py`, and item prices/effects in
   transparency — so leave the "transparent card" option off there.
 - **Python 3.11+** with Tkinter (bundled with the standard python.org installer;
   on Debian/Ubuntu install `python3-tk`)
-- No external dependencies — the widget is pure standard library.
-  The dev/test tools (`pytest`, plus `hypothesis` for the property-based tests)
-  are only needed to run the suite: `pip install -r requirements-dev.txt`.
+- **Runtime dependencies** are permitted as of
+  [ADR-0001](docs/adr/0001-runtime-dependencies.md) — the project no longer commits
+  to pure standard library. Any runtime deps live in `requirements.txt`
+  (`pip install -r requirements.txt`), with OS-specific ones gated by environment
+  markers. (The core today still runs on the standard library alone; third-party
+  packages land as issues #17–#20 are implemented.)
+- The dev/test tools (`pytest`, `hypothesis`, `ruff`) live in `requirements-dev.txt`:
+  `pip install -r requirements-dev.txt`.
 
 ## Install
 
