@@ -93,13 +93,16 @@ def _make_handler(dispatcher: _TkDispatcher, actions: dict[str, Callable[[], Non
 
 def _build_menu(pystray, dispatcher: _TkDispatcher,
                 actions: dict[str, Callable[[], None]]):
-    """Translate MENU_SPEC into a pystray ``Menu`` (needs pystray; thin shell)."""
+    """Translate MENU_SPEC into a pystray ``Menu`` (needs pystray; thin shell).
+
+    A row whose action key has no callback in ``actions`` is dropped — so omitting a
+    callback (e.g. ``on_pet`` in simple hook-visualiser mode) hides that menu item
+    without touching the static MENU_SPEC contract."""
     items = []
     for label, action_key in MENU_SPEC:
         if label is SEPARATOR:
             items.append(pystray.Menu.SEPARATOR)
-        else:
-            assert action_key is not None  # a non-separator row always carries a key
+        elif action_key in actions:
             items.append(pystray.MenuItem(
                 label,
                 _make_handler(dispatcher, actions, action_key),
@@ -126,11 +129,13 @@ class SystemTray:
 
         self._root = root
         self._dispatcher = _TkDispatcher()
+        # Only register callbacks that were actually provided; an omitted one drops
+        # its menu row (see _build_menu). This is how simple mode (no on_pet) hides
+        # the "Pet…" item.
+        provided = {"pet": on_pet, "toggle": on_toggle,
+                    "settings": on_settings, "quit": on_quit}
         self._actions: dict[str, Callable[[], None]] = {
-            "pet": on_pet or (lambda: None),
-            "toggle": on_toggle or (lambda: None),
-            "settings": on_settings or (lambda: None),
-            "quit": on_quit or (lambda: None),
+            key: cb for key, cb in provided.items() if cb is not None
         }
 
         import pystray

@@ -20,6 +20,7 @@ DEFAULTS: dict[str, Any] = {
     "shake_after_s": 30,         # unanswered prompt waits this long before shaking
     "shake_max_amp_px": 16,      # how violent: max sway (px) at full aggression
     "home_monitor": -1,          # which monitor cards spawn on; -1 = auto (primary)
+    "tamagotchi_enabled": True,  # False -> simple hook visualiser (no pet layer)
 }
 
 

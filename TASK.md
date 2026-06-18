@@ -355,6 +355,38 @@ unaffected — it governs the *face*, not card removal. +2 tests.
   south-west at y≈4, so its top fell above the canvas edge. Bars now lay out per a
   `BAR_SLOT` with the label anchored north-west at each slot's top (fully inside).
 
+#### Disable-pet toggle + upper-right popups — ✅ (PRD #21, 2026-06-18, `/grill-me`)
+A `tamagotchi_enabled` setting (default **True**) lets the card become a **simple hook
+visualiser** — the same live state faces + sub-agent badges, with the whole pet layer
+stripped. The disable is a **manager-level "don't wire the pet" gate**, not a
+per-feature kill switch:
+- **`settings.py`/`config.py`:** new `tamagotchi_enabled` default + `TAMAGOTCHI_ENABLED`
+  flag (bool, read once at startup → restart-gated like the other settings).
+- **`manager.py`:** in simple mode the pet is **never loaded, ticked, pushed, or
+  saved** (`pet.json` is left untouched, so the next enable applies decay-on-load from
+  the real `last_seen` — the off period counts as idle); cards are built with
+  `on_open_pet`/`on_pet=None` + `pet_enabled=False`; the tray is built with
+  `on_pet=None`.
+- **`tkinter_app.py`:** `MascotWindow(pet_enabled=…)` gates the hover tooltip and makes
+  a tap a **dead tap** (no hearts/coins). The mood-tinted idle faces + food/tired
+  emotes fall out for free (the manager never pushes a mood → `effective_state` stays
+  `content` → plain idle); the real-`sleeping` 💤 is unaffected (hook-driven).
+- **`tray.py`:** `_build_menu` now drops any row whose action key has no callback, and
+  `SystemTray` only registers provided callbacks — so omitting `on_pet` hides "Pet…"
+  **without changing `MENU_SPEC`**. +1 test (`test_tray.py`).
+- **`control_panel.py`:** a checkbox on the Behavior tab; it live-greys the footer
+  "Pet" button + the "Reset progress" button when off (progress preserved), and the
+  flag persists on Save & Apply.
+- **Popups repositioned:** food, 💤, and the petting/feed **heart burst** now spawn at
+  the creature's **upper-right** (right of, and above, center), drifting up-and-right
+  into empty panel space — clearing the top-left paw button — and the food/💤 emote
+  cell size is bumped `_s(2)`→`_s(3)` for legibility. Offsets use the `scale._s`
+  primitive, so they scale with small/medium/large. (Requested "upper-left" → chosen
+  **upper-right** because the paw button owns the top-left corner in pet mode.)
+- **Decisions:** default ON (existing experience unchanged); simple mode is "the card
+  minus the pet", not a redesigned layout; toggle is restart-gated; `demo.py` left
+  as-is (still showcases the full pet). GUI verified via `demo.py` + a live off-mode run.
+
 ---
 
 ## Considered & rejected

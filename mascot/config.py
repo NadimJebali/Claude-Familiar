@@ -54,6 +54,12 @@ SHAKE_MAX_AMP_PX = int(_clamp(_S["shake_max_amp_px"], 2, 60, 16))
 # out-of-range/garbage value falls back to primary, so no clamping is needed here.
 HOME_MONITOR = _S["home_monitor"]
 
+# Tamagotchi pet layer. When False the card is a *simple hook visualiser*: the same
+# pixel state faces + subagent badges, but the manager never wires or pushes the pet
+# (no paw button, tooltip, mood faces, food/zzz emotes, coins/XP, or tray "Pet…").
+# Read once at startup, so the mode is restart-gated like the other settings here.
+TAMAGOTCHI_ENABLED = bool(_S["tamagotchi_enabled"])
+
 # Per-state accent colors (R, G, B).
 STATE_COLORS = {
     "idle":     (120, 144, 168),
