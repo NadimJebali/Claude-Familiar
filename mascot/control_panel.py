@@ -149,12 +149,14 @@ class ControlPanel:
         self.shake_after_var = tk.IntVar(value=int(s["shake_after_s"]))
         self.shake_amp_var = tk.IntVar(value=int(s["shake_max_amp_px"]))
         self.home_monitor_var = tk.IntVar(value=int(s["home_monitor"]))
+        self.pet_enabled_var = tk.BooleanVar(value=bool(s["tamagotchi_enabled"]))
         self._monitors = osplatform.enumerate_work_areas()
         self.status = tk.StringVar(value="")
 
         self._build()
         self._draw_preview()
         self._refresh_hooks()
+        self._refresh_pet_controls()
 
     # --- layout -----------------------------------------------------------
     def _build(self) -> None:
@@ -179,8 +181,9 @@ class ControlPanel:
         ttk.Button(footer, text="Save & Apply", style="Accent.TButton",
                    command=self._save).pack(side="left")
         ttk.Button(footer, text="Launch widget", command=self._launch).pack(side="left", padx=6)
-        ttk.Button(footer, text="Pet", image=self._paw_btn_img, compound="left",
-                   command=self._open_pet).pack(side="left")
+        self._pet_btn = ttk.Button(footer, text="Pet", image=self._paw_btn_img,
+                                   compound="left", command=self._open_pet)
+        self._pet_btn.pack(side="left")
         ttk.Button(footer, text="Close", command=self.root.destroy).pack(side="right")
 
         ttk.Label(self.root, textvariable=self.status, style="MutedBG.TLabel",
@@ -254,6 +257,17 @@ class ControlPanel:
                   command=lambda _v: self._refresh_shake_labels()).pack(
             side="right", fill="x", expand=True, padx=10)
         self._refresh_shake_labels()
+
+        ttk.Separator(tab).pack(fill="x", pady=12)
+        ttk.Label(tab, text="TAMAGOTCHI PET", style="Section.TLabel").pack(anchor="w")
+        ttk.Checkbutton(tab, text="Enable the Tamagotchi pet",
+                        variable=self.pet_enabled_var,
+                        command=self._refresh_pet_controls).pack(anchor="w", pady=(2, 0))
+        ttk.Label(tab, text="Off = a simple hook-state visualiser: the same live faces, "
+                            "but no pet, coins, mood, or popups. Your pet's progress is "
+                            "kept for when you switch it back on.",
+                  style="Muted.TLabel", wraplength=430, justify="left").pack(
+            anchor="w", padx=(22, 0))
         return tab
 
     def _tab_setup(self, parent: ttk.Notebook) -> ttk.Frame:
@@ -283,8 +297,9 @@ class ControlPanel:
         ttk.Label(prow, text="Start over with a brand-new egg — clears coins, XP, level, "
                              "needs, name & items.", style="Muted.TLabel",
                   wraplength=300, justify="left").pack(side="left")
-        ttk.Button(prow, text="Reset progress", style="Danger.TButton",
-                   command=self._reset_pet).pack(side="right")
+        self._reset_btn = ttk.Button(prow, text="Reset progress", style="Danger.TButton",
+                                     command=self._reset_pet)
+        self._reset_btn.pack(side="right")
 
         ttk.Separator(tab).pack(fill="x", pady=6)
         ttk.Label(tab, text="DANGER ZONE", style="Section.TLabel",
@@ -350,6 +365,14 @@ class ControlPanel:
         ok = proc.returncode == 0
         self.status.set("Hooks installed." if ok else f"Hook install failed: {proc.stderr[:200]}")
 
+    def _refresh_pet_controls(self) -> None:
+        """Grey the pet-management controls (the 'Pet' button + 'Reset progress') when
+        the Tamagotchi pet is disabled. Progress is preserved — they simply re-enable
+        when the pet is switched back on."""
+        state = "normal" if self.pet_enabled_var.get() else "disabled"
+        for btn in (self._pet_btn, self._reset_btn):
+            btn.configure(state=state)
+
     def _refresh_shake_labels(self) -> None:
         """Keep the slider read-outs in sync (delay in seconds; a friendly word for
         how violent the shake gets at its peak)."""
@@ -367,6 +390,7 @@ class ControlPanel:
             "shake_after_s": int(self.shake_after_var.get()),
             "shake_max_amp_px": int(self.shake_amp_var.get()),
             "home_monitor": int(self.home_monitor_var.get()),
+            "tamagotchi_enabled": bool(self.pet_enabled_var.get()),
         })
         autostart.set_enabled(bool(self.startup_var.get()))
         self.startup_var.set(autostart.is_enabled())

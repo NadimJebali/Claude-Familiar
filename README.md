@@ -98,7 +98,8 @@ one global creature shared across all your sessions, a delight rather than a cho
   dull the mood, **never sickness or death** (the gravestone stays reserved for
   usage limits).
 - **Mood on the face.** While idle, the mascot's face reflects the pet's mood, with
-  a piece of food or a 💤 popping up now and then when it's hungry or sleepy.
+  a piece of food or a 💤 popping up at its **upper-right** now and then when it's
+  hungry or sleepy (off to the side so they're easy to read, not over its face).
 - **It grows up.** The pet earns XP, levels up, and visibly evolves —
   **egg → baby → teen → adult** (gated by both level and real age) — with a
   milestone sparkle at higher levels.
@@ -108,6 +109,12 @@ one global creature shared across all your sessions, a delight rather than a cho
 - **Glance tooltip.** Hover a card for a compact status — the three need bars,
   coins, level, and name.
 - **Reset any time.** Settings → *Reset progress* starts over with a fresh egg.
+- **Prefer just the status?** Settings → *Behavior* → uncheck **Enable the Tamagotchi
+  pet** turns the card into a **simple hook visualiser** — the same live faces and
+  sub-agent badges, but no pet, coins, mood, tooltip, or popups (and the card becomes
+  a read-only indicator: tapping it does nothing). Your pet's progress is preserved,
+  so flipping it back on picks up where you left off. Takes effect on the next widget
+  start, like the other settings.
 
 <p align="center">
   <img src="docs/images/moods.png" width="56%"
@@ -151,6 +158,7 @@ hooks, adds **application-menu and desktop shortcuts** (Start-menu `.lnk` files 
 Windows, freedesktop `.desktop` entries on Linux — so you can launch it with the
 mascot icon, just like any other app), and opens the **settings panel**. There you can pick the mascot art, choose the
 **widget size** (small / medium / large), toggle the transparent floating card,
+enable or disable the Tamagotchi pet (off = a simple hook visualiser),
 add/remove the app shortcuts, enable run-at-login, and launch the widget.
 Reopen it any time with `settings.bat` or `python -m mascot.control_panel`.
 Settings live in `~/.claude/mascot/settings.json`.

@@ -203,6 +203,17 @@ waiting ⏳ · sleeping 💤. Constants live in `mascot/config.py`
 - [x] **Phase 5** — install & docs  ✅ `scripts/install_hooks.py` rewritten to emit Claude Code's **real** hook format (matcher + hooks array, incl. `SubagentStop`), absolute interpreter + emit.py paths, idempotent (refreshes our blocks, preserves the user's other hooks), `--uninstall` removes only our blocks, backs up settings.json. `README.md` covers install/run/autostart-on-login/troubleshooting/uninstall. Tested on a temp settings file (idempotency + preservation + clean uninstall). Pushed to GitHub `Claude-Familiar` main.
 
 ### Open items / findings
+- (Post-Phase) **Disable-Tamagotchi toggle + simple hook visualiser — ADDED (PRD #21).**
+  New `tamagotchi_enabled` setting (default True) / `config.TAMAGOTCHI_ENABLED`. When
+  off, the manager never loads/ticks/pushes/saves the pet (`pet.json` untouched, so
+  re-enabling decays from the real `last_seen`), builds cards with no pet callbacks +
+  `pet_enabled=False` (no paw/tooltip; tap is a dead tap), and builds the tray with no
+  `on_pet` so `_build_menu` drops "Pet…" (MENU_SPEC unchanged; +1 test). The mood faces
+  + food/tired emotes vanish for free (no pushed mood → `effective_state` stays
+  `content`); the real-`sleeping` 💤 stays (hook-driven). Settings: a Behavior-tab
+  checkbox that greys the Pet/Reset controls when off. Also moved the food/💤/heart-burst
+  popups to the creature's **upper-right** (clears the top-left paw) and bumped the
+  emote size `_s(2)`→`_s(3)`. Restart-gated; `demo.py` unchanged.
 - (Post-Phase) **Model + session duration on the card — ADDED.** The card now shows an info line `<Model> · <duration>` under the project name. `emit.py` stamps a `started` epoch once per session (key-presence, like `owner_pid`; `compute_next_state` preserves it); the widget reads `state["model"]` (captured at `SessionStart`) and `state["started"]`, shortens the model to its family (`Opus`/`Sonnet`/`Haiku`/`Fable`), and ticks the duration live in `_animate`. Card height grew to 196 to fit.
 - (Phase 2) **RESOLVED:** PyQt6 frameless windows weren't rendering on Win11. Switched to Flask+pywebview: Flask handles state/polling/API, pywebview provides the native always-on-top window. Then **finalized on plain Tkinter** (see Phase 2 tracker).
 - (Phase 4) **Shake-to-dizzy easter egg — ADDED.** Drag-shaking the card (rapid direction reversals on **any axis** — horizontal/vertical/diagonal, detected via move-vector dot product < 0: `SHAKE_REVERSALS` flips within `SHAKE_WINDOW_S`, each move ≥ `SHAKE_MIN_DIST`) shows the 😵‍💫 `dizzy` face for `DIZZY_DURATION_S`, then reverts. Widget-only (no hook/state-logic change). `dizzy` is a top-priority *effective* state alongside `sleeping`; effective-state changes now swap the emoji **in place** (`_refresh_render`) instead of rebuilding the card, so it's flicker-free and survives an in-progress drag grab. `_animate` drives expiry.

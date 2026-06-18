@@ -154,10 +154,12 @@ BLINK_DURATION_S = 0.12
 BLINK_MIN_GAP_S = 4.0
 BLINK_MAX_GAP_S = 7.0
 
-# Mood emotes: a small popup above the creature every few seconds while it's in a
-# low-need idle mood — a piece of food when hungry, a drifting "Z" when sleepy/
-# tired. They rise and fade like the pet hearts, on the same animate clock.
-EMOTE_PX = _s(2)
+# Mood emotes: a small popup at the creature's upper-right every few seconds while
+# it's in a low-need idle mood — a piece of food when hungry, a drifting "Z" when
+# sleepy/tired. They rise and drift up-and-right, fading like the pet hearts, on the
+# same animate clock. Placed upper-right (not over the face) so they read clearly,
+# and clear of the paw button, which lives in the top-LEFT corner.
+EMOTE_PX = _s(3)                 # slightly larger than the body pixels, for legibility
 EMOTE_RISE_PX = _s(16)
 EMOTE_LIFETIME_S = 1.4
 EMOTE_MIN_GAP_S = 3.0
@@ -264,9 +266,13 @@ class MascotWindow:
     """One mascot window (Toplevel) per session, drawn on a single Canvas."""
 
     def __init__(self, manager_root: tk.Tk, session_id: str, state: dict[str, Any], index: int,
-                 on_open_pet=None, on_pet=None) -> None:
+                 on_open_pet=None, on_pet=None, pet_enabled: bool = True) -> None:
         self.session_id = session_id
         self.state = state
+        # Simple hook-visualiser mode (pet disabled): no tooltip, no tap-to-pet/hearts.
+        # The mood faces + food/tired emotes fall out on their own (the manager never
+        # pushes a pet mood); only these card-local affordances need an explicit gate.
+        self._pet_enabled = pet_enabled
         self._on_open_pet = on_open_pet
         self._on_pet = on_pet      # called when the card is petted (coin trickle)
         self._sig: tuple | None = None
@@ -473,10 +479,11 @@ class MascotWindow:
                                event.y_root - self._press_pos[1])
         self._drag_offset = None
         self._press_pos = None
-        # A tap (press+release without a real drag or shake) pets the mascot.
+        # A tap (press+release without a real drag or shake) pets the mascot. In
+        # simple mode the card is a read-only indicator, so a tap is a dead tap.
         now = time.time()
         raw = self.state.get("state", "idle")
-        if (moved < PET_TAP_MAX_DIST and now >= self._dizzy_until
+        if (self._pet_enabled and moved < PET_TAP_MAX_DIST and now >= self._dizzy_until
                 and raw not in ("waiting", "dead")):
             self._pet(now)
             if self._on_pet is not None:    # a pet earns a small coin trickle
@@ -500,13 +507,14 @@ class MascotWindow:
         self._refresh_render(now)
 
     def _emit_hearts(self, now: float) -> None:
-        """Spawn a small staggered burst of hearts above the creature."""
+        """Spawn a small staggered burst of hearts at the creature's upper-right —
+        the same origin as the mood emotes, drifting up-and-right."""
         for _ in range(3):
             self._hearts.append({
-                "x": float(CREATURE_CX + random.uniform(-14, 14)),
-                "y0": float(CREATURE_CY - _s(6)),
+                "x": float(CREATURE_CX + _s(20) + random.uniform(-4, 6)),
+                "y0": float(CREATURE_CY - _s(14)),
                 "t0": now + random.uniform(0.0, 0.15),
-                "drift": random.uniform(-10.0, 10.0),
+                "drift": random.uniform(2.0, 12.0),
             })
         self._hearts = self._hearts[-MAX_HEARTS:]
 
@@ -544,10 +552,11 @@ class MascotWindow:
         elif now >= self._next_emote:
             self._emotes.append({
                 "kind": kind,
-                "x": float(CREATURE_CX + random.uniform(-4, 10)),
-                "y0": float(CREATURE_CY - _s(12)),
+                # Upper-right of the creature, drifting up-and-right into empty panel.
+                "x": float(CREATURE_CX + _s(24) + random.uniform(-2, 6)),
+                "y0": float(CREATURE_CY - _s(20)),
                 "t0": now,
-                "drift": random.uniform(-3.0, 9.0),
+                "drift": random.uniform(2.0, 9.0),
             })
             self._emotes = self._emotes[-3:]
             self._next_emote = now + random.uniform(EMOTE_MIN_GAP_S, EMOTE_MAX_GAP_S)
@@ -733,7 +742,10 @@ class MascotWindow:
 
     # --- hover tooltip (pet status) ---------------------------------------
     def _on_enter(self, _event: tk.Event) -> None:
-        """Show the pet-status tooltip on hover (not while hidden or mid-drag)."""
+        """Show the pet-status tooltip on hover (not while hidden or mid-drag). The
+        tooltip is pet status, so it's suppressed in simple hook-visualiser mode."""
+        if not self._pet_enabled:
+            return
         if self._hidden or self._drag_offset is not None or self._tooltip is not None:
             return
         self._tooltip = StatsTooltip(self._manager_root, self._pet_data)

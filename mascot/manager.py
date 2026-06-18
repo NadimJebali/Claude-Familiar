@@ -50,6 +50,11 @@ class MascotManager:
         # System-tray icon (cross-platform via pystray). Best-effort: any failure
         # (missing deps, no tray host) leaves the widget fully working, just without
         # a tray icon. Callbacks are marshaled back onto this Tk thread by SystemTray.
+        # Tamagotchi on/off. When off the card is a *simple hook visualiser*: the pet
+        # is never loaded, ticked, pushed, or wired into the cards/tray. Read once at
+        # startup (restart-gated, like the other settings).
+        self._pet_enabled = config.TAMAGOTCHI_ENABLED
+
         self._cards_hidden = False
         self.tray = None
         try:
@@ -58,7 +63,8 @@ class MascotManager:
                 self.root,
                 tooltip="Claude Familiar",
                 on_toggle=self._on_tray_toggle,
-                on_pet=self._on_tray_pet,
+                # Omit the pet callback in simple mode so the tray drops "Pet…".
+                on_pet=self._on_tray_pet if self._pet_enabled else None,
                 on_settings=self._on_tray_settings,
                 on_quit=self._on_tray_quit,
             )
@@ -68,13 +74,19 @@ class MascotManager:
 
         # The one global pet. The widget is its SOLE writer: it applies decay and
         # derives coin/XP events from polled session-state transitions. Best-effort
-        # — any pet failure must leave the mascot itself fully working.
+        # — any pet failure must leave the mascot itself fully working. In simple mode
+        # we never touch pet.json: `default_pet` is a pure, in-memory placeholder (no
+        # file I/O) that is never ticked, pushed, or saved — so on-disk progress is
+        # preserved and the next enable applies decay-on-load from the real last_seen.
         now = time.time()
-        try:
-            self.pet = pet_store.load(pet_store.PET_PATH, now)
-        except Exception as exc:  # noqa: BLE001
-            print("[mascot] could not load pet:", exc)
-            self.pet = pet_store.default_pet(now)
+        if self._pet_enabled:
+            try:
+                self.pet = pet_store.load(pet_store.PET_PATH, now)
+            except Exception as exc:  # noqa: BLE001
+                print("[mascot] could not load pet:", exc)
+                self.pet = pet_store.default_pet(now)
+        else:
+            self.pet = pet_store.default_pet(now)   # unused placeholder; never persisted
         self._pet_prev: dict[str, dict] = {}   # sid -> last session state (transitions)
         self._pet_last_tick = now
         self._pet_last_save = now
@@ -96,9 +108,13 @@ class MascotManager:
         for index, (sid, state) in enumerate(sorted(states.items())):
             win = self.windows.get(sid)
             if win is None:
-                win = MascotWindow(self.root, sid, state, index,
-                                   on_open_pet=self._open_pet_window,
-                                   on_pet=self._on_pet_petted)
+                win = MascotWindow(
+                    self.root, sid, state, index,
+                    # Simple mode: no pet wiring -> no paw button, tooltip, or coin-on-tap.
+                    on_open_pet=self._open_pet_window if self._pet_enabled else None,
+                    on_pet=self._on_pet_petted if self._pet_enabled else None,
+                    pet_enabled=self._pet_enabled,
+                )
                 self.windows[sid] = win
                 if self._cards_hidden:        # honor a tray "hide" for new sessions
                     win.set_hidden(True)
@@ -125,7 +141,10 @@ class MascotManager:
     def _update_pet(self, states: dict[str, dict], now: float) -> None:
         """Advance the global pet from this poll: decay needs over real elapsed
         time and award coins/XP for session-state transitions, then persist
-        (throttled). Wrapped so a pet failure never disrupts the mascot."""
+        (throttled). Wrapped so a pet failure never disrupts the mascot. No-op when
+        the pet is disabled (simple hook-visualiser mode)."""
+        if not self._pet_enabled:
+            return
         try:
             # Pick up edits made by a standalone Pet window (opened from Settings):
             # if pet.json changed under us, reload it (decay-on-load brings it to now).
@@ -265,7 +284,8 @@ class MascotManager:
         try:
             self.root.mainloop()
         finally:
-            self._save_pet(time.time())      # flush the latest pet on any exit
+            if self._pet_enabled:            # flush the latest pet on any exit
+                self._save_pet(time.time())  # (simple mode never touches pet.json)
             if self.tray is not None:        # also covers a normal window-close exit
                 self.tray.dispose()
                 self.tray = None

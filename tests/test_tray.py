@@ -111,3 +111,20 @@ def test_build_menu_mirrors_the_spec_and_routes_clicks_to_callbacks():
     settings(object())
     disp.drain()
     assert fired == ["settings"]
+
+
+def test_build_menu_omits_pet_row_when_no_pet_callback_is_provided():
+    # Simple hook-visualiser mode wires no on_pet, so the "Pet…" row must disappear
+    # while every other row (and the separator) stays — without changing MENU_SPEC.
+    pystray = pytest.importorskip("pystray")
+    disp = tray._TkDispatcher()
+    actions = {k: (lambda: None) for k in ("toggle", "settings", "quit")}  # no "pet"
+
+    menu = tray._build_menu(pystray, disp, actions)
+    visible = [it.text for it in menu if it is not pystray.Menu.SEPARATOR]
+
+    assert visible == ["Show / hide cards", "Settings…", "Quit"]
+    assert "Pet…" not in visible
+    assert sum(it is pystray.Menu.SEPARATOR for it in menu) == 1  # separator preserved
+    # MENU_SPEC itself is untouched — the full-shape contract still holds.
+    assert next(label for label, _ in tray.MENU_SPEC) == "Pet…"
