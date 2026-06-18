@@ -99,6 +99,7 @@ def _build_menu(pystray, dispatcher: _TkDispatcher,
         if label is SEPARATOR:
             items.append(pystray.Menu.SEPARATOR)
         else:
+            assert action_key is not None  # a non-separator row always carries a key
             items.append(pystray.MenuItem(
                 label,
                 _make_handler(dispatcher, actions, action_key),

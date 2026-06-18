@@ -67,7 +67,7 @@ def apply(window: tk.Tk | tk.Toplevel) -> None:
     """Set the mascot as `window`'s icon (and the default for its children)."""
     try:
         photo = make_photo(window)
-        window._app_icon = photo  # type: ignore[attr-defined]  # keep a ref alive
+        window._app_icon = photo  # type: ignore[union-attr]  # keep a ref alive
         window.iconphoto(True, photo)
     except tk.TclError:
         pass  # headless / unsupported — the widget still runs fine

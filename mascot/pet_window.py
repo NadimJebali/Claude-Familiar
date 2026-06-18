@@ -20,6 +20,7 @@ import random
 import time
 import tkinter as tk
 from collections.abc import Callable
+from functools import partial
 from tkinter import ttk
 from typing import Any
 
@@ -282,7 +283,7 @@ class PetWindow:
             ok, _ = shop.can_buy(pet, item, level)
             owned_toy = item["type"] == shop.TOY and shop.owned(pet, item) >= 1
             btn = ttk.Button(row, text="Owned" if owned_toy else "Buy",
-                             command=lambda it=item: self._buy(it))
+                             command=partial(self._buy, item))
             if not ok:
                 btn.state(["disabled"])
             btn.pack(side="right")
@@ -312,14 +313,14 @@ class PetWindow:
             self._item_icon(row, item_id).pack(side="left", padx=(0, 6))
             if item["type"] == shop.FOOD:
                 ttk.Button(row, text="Feed",
-                           command=lambda it=item: self._feed(it)).pack(side="right")
+                           command=partial(self._feed, item)).pack(side="right")
                 # food stacks, so show the count
                 ttk.Label(row, text=f"{item['name']}  ×{count}",
                           style="Card.TLabel").pack(side="left")
             else:
                 # toys are one-time, reusable on a cooldown: a Play button + a live
                 # countdown label (updated by _update_cooldowns), no quantity.
-                btn = ttk.Button(row, text="Play", command=lambda it=item: self._play(it))
+                btn = ttk.Button(row, text="Play", command=partial(self._play, item))
                 btn.pack(side="right")
                 cd = ttk.Label(row, text="", style="Muted.TLabel")
                 cd.pack(side="right", padx=(0, 6))

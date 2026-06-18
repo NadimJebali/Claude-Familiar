@@ -285,9 +285,10 @@ install (and whenever autostart is enabled), so it is not checked into the repo.
 ## Tests
 
 ```bash
-pip install -r requirements-dev.txt   # pytest + hypothesis + ruff (dev-only)
+pip install -r requirements-dev.txt   # pytest + hypothesis + ruff + mypy (dev-only)
 python -m pytest -q                    # tests
 python -m ruff check .                 # lint
+python -m mypy mascot hooks            # static type-check
 ```
 
 Covers the state machine, the **pet engine** (decay, item effects, coins/XP with
@@ -301,6 +302,9 @@ and stage non-regression. GUI is excluded — verified visually via `demo.py`.
 Linting is [Ruff](https://docs.astral.sh/ruff/) (config in `ruff.toml`, line
 length 99); `ruff check` is the gate. `ruff format` is intentionally not run as a
 bulk pass — the source is hand-formatted, so the lint config leaves layout alone.
+Static typing is [mypy](https://mypy.readthedocs.io/) (config in `mypy.ini`);
+`python -m mypy mascot hooks` passes clean. Third-party deps without bundled stubs
+(pystray, plyer, psutil, pywin32) are `ignore_missing_imports` per-module.
 
 ## Troubleshooting
 

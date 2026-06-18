@@ -678,7 +678,9 @@ class MascotWindow:
     def _pet_flourish(self) -> bool:
         """Whether the pet has reached the milestone level for a sparkle flourish."""
         pet = self._pet_data
-        return bool(pet) and pet_logic.level_for_xp(pet.get("xp", 0)) >= MILESTONE_LEVEL
+        if not pet:
+            return False
+        return pet_logic.level_for_xp(pet.get("xp", 0)) >= MILESTONE_LEVEL
 
     def _schedule_blink(self, now: float) -> None:
         """Trigger an occasional blink, but only while genuinely idle (not busy,
@@ -817,11 +819,12 @@ class MascotWindow:
         ignored, the wider and faster the shake — up to a frantic maximum."""
         if self._drag_offset is not None:
             return  # the user is holding it; don't fight the drag
-        waiting = (self.state.get("state", "idle") == "waiting"
-                   and self._waiting_since is not None)
-        elapsed = (now - self._waiting_since) if waiting else 0.0
-        if not waiting or elapsed < WAITING_SHAKE_AFTER_S:
-            self._reset_shake_offset()  # settle back to rest
+        if self.state.get("state", "idle") != "waiting" or self._waiting_since is None:
+            self._reset_shake_offset()  # not waiting -> settle back to rest
+            return
+        elapsed = now - self._waiting_since
+        if elapsed < WAITING_SHAKE_AFTER_S:
+            self._reset_shake_offset()  # still within the grace window
             return
 
         intensity = min(1.0, (elapsed - WAITING_SHAKE_AFTER_S) / WAITING_SHAKE_RAMP_S)

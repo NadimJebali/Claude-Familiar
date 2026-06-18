@@ -15,6 +15,8 @@ releases the lock.
 """
 from __future__ import annotations
 
+from typing import TextIO
+
 from . import config, osplatform
 
 # Session-local namespace (the unqualified name lands in ``Local\``), so each
@@ -51,7 +53,7 @@ class _PosixGuard:
     """Holds an exclusive ``flock`` on a lock file for the process lifetime."""
 
     def __init__(self) -> None:
-        self._fd = None
+        self._fd: TextIO | None = None
 
     def acquire(self) -> bool:
         import fcntl
@@ -63,7 +65,9 @@ class _PosixGuard:
         except OSError:
             return True  # can't open the lock file — don't block startup over it
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # fcntl is POSIX-only; mypy on Windows can't see its attrs (the whole
+            # module is platform-gated). See the mypy.ini per-module override.
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # type: ignore[attr-defined]
         except OSError:
             fd.close()
             return False  # another instance already holds it

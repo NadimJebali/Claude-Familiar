@@ -495,6 +495,26 @@ round-trip (create → read back Target/Arguments/WorkingDirectory via the same 
 object) + `remove_shortcut` present/absent; all Windows + pywin32 gated (skip
 elsewhere). Suite 188 → 191 green.
 
+### #15 — static type-check pass with mypy (done)
+Added **mypy** as a dev-only tool (`mypy.ini`; `mypy>=1.8` in `requirements-dev.txt`)
+and made `python -m mypy mascot hooks` pass clean (33 files, 0 errors) at a pragmatic
+baseline (not full `--strict`). The 19 initial findings were fixed honestly, not
+blanket-ignored:
+- **Real fixes:** annotated `manager._pet_win` (`PetWindow | None` via a
+  `TYPE_CHECKING` import) and `single_instance._fd` (`TextIO | None`); narrowed
+  Optionals in `tkinter_app._pet_flourish` / `_apply_attention_shake`; asserted the
+  non-separator invariant in `tray._build_menu`; swapped three loop-capture lambdas
+  in `pet_window` for `functools.partial` (also clearer); passed the 3-point
+  `create_line` coords as a list (matches the tk stub overload); corrected a stale
+  `# type: ignore[attr-defined]` → `[union-attr]` in `icon`.
+- **Justified ignores:** `ignore_missing_imports` per-module for the stub-less deps
+  (pystray/plyer/psutil/win32com); a single `# type: ignore[attr-defined]` on the
+  POSIX-only `fcntl.flock` (with a per-module `warn_unused_ignores = False`, since
+  that ignore is used on Windows but redundant on Linux — `single_instance` uses
+  platform-only APIs on both sides).
+No runtime behavior change (lambdas→partial and coords-as-list are equivalent);
+suite stays 191 green, ruff clean.
+
 ## Notes
 - `smooth` art lacks the new faces → falls back to `idle` (acceptable; can add later).
 - Effective-state priority is the contract: `dizzy > happy > sleeping > raw`.

@@ -11,9 +11,13 @@ import sys
 import time
 import tkinter as tk
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import config, icon, notifier, pet_logic, pet_store, single_instance, state_store
 from .tkinter_app import MascotWindow
+
+if TYPE_CHECKING:
+    from .pet_window import PetWindow
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -75,7 +79,7 @@ class MascotManager:
         self._pet_last_tick = now
         self._pet_last_save = now
         self._pet_file_mtime = self._pet_mtime()
-        self._pet_win = None                   # the Pet window, when open (tray)
+        self._pet_win: PetWindow | None = None   # the Pet window, when open (tray)
         self._notify_prev: dict[str, dict] = {}  # sid -> last state (native-toast edge)
 
         self.root.after(500, self._refresh)

@@ -51,7 +51,7 @@ def draw_creature(
     # --- antenna (its bulb glows in the state accent = the familiar's "mood") --
     bulb_x, bulb_y = cx + R * 0.16, cy - R * 1.74
     c.create_line(
-        cx, cy - R * 1.0, cx - R * 0.05, cy - R * 1.4, bulb_x, bulb_y + R * 0.14,
+        [cx, cy - R * 1.0, cx - R * 0.05, cy - R * 1.4, bulb_x, bulb_y + R * 0.14],
         smooth=True, width=max(2, int(R * 0.08)), fill=BODY_DK,
         capstyle=tk.ROUND, tags=tag,
     )
