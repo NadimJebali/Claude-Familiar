@@ -379,10 +379,22 @@ new reason.
 
 ## Validation
 ```bash
-python -m pytest -q        # state_logic counters (#4) + existing suite
+pip install -r requirements-dev.txt  # pytest + hypothesis (dev-only, #13)
+python -m pytest -q        # state_logic counters (#4) + pet engine + property tests
 python demo.py             # visual: celebrate, blink, pet hearts, hover tooltip
 python -m mascot           # live with a real Claude session; tray on Windows
 ```
+
+### #13 — Hypothesis property-based tests (done)
+Added `hypothesis` as a **dev-only** dependency (`requirements-dev.txt`; never
+imported by `mascot/`/`hooks/`, which stay pure-stdlib) and `tests/test_properties.py`
+— 9 property tests that fuzz the pure cores' invariants alongside the example-based
+cases: `decay`/`apply_effects` clamping + immutability over negative/huge elapsed and
+negative deltas (needs-only, never grants coins/XP), `award`/`apply_events` daily coin
+cap + coins-only-increase + uncapped XP, `level_for_xp` monotonicity, `stage_for`
+non-regression, and `shop.buy`/`feed`/`play` immutability + inventory/cooldown
+consistency. Suite: 155 → 164 green. (A mutation check — disabling `_clamp_stat` —
+confirmed the clamping properties are non-vacuous.)
 
 ## Notes
 - `smooth` art lacks the new faces → falls back to `idle` (acceptable; can add later).

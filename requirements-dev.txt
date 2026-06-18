@@ -1,0 +1,7 @@
+# Dev/test-only dependencies. The shipped widget stays pure standard library —
+# nothing here is ever imported by mascot/ or hooks/ at runtime.
+#
+#   python -m pip install -r requirements-dev.txt
+#
+pytest
+hypothesis>=6

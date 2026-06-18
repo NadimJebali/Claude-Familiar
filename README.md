@@ -108,7 +108,8 @@ curves) are easy to tune in `mascot/pet_logic.py`, and item prices/effects in
 - **Python 3.11+** with Tkinter (bundled with the standard python.org installer;
   on Debian/Ubuntu install `python3-tk`)
 - No external dependencies — the widget is pure standard library.
-  `pytest` is only needed to run the tests.
+  The dev/test tools (`pytest`, plus `hypothesis` for the property-based tests)
+  are only needed to run the suite: `pip install -r requirements-dev.txt`.
 
 ## Install
 
@@ -274,12 +275,17 @@ install (and whenever autostart is enabled), so it is not checked into the repo.
 ## Tests
 
 ```bash
+pip install -r requirements-dev.txt   # pytest + hypothesis (dev-only)
 python -m pytest -q
 ```
 
 Covers the state machine, the **pet engine** (decay, item effects, coins/XP with
 the daily cap, mood, level, stage, and the shop buy/feed/play), and the file-I/O
-wrappers (`emit`, `pet_store`). GUI is excluded — verified visually via `demo.py`.
+wrappers (`emit`, `pet_store`). The example-based cases in `tests/test_phase1.py`
+are complemented by **property-based tests** (`tests/test_properties.py`,
+[Hypothesis](https://hypothesis.readthedocs.io/)) that fuzz the pure cores'
+invariants — stat clamping, immutability, the daily coin cap, level monotonicity,
+and stage non-regression. GUI is excluded — verified visually via `demo.py`.
 
 ## Troubleshooting
 
