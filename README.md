@@ -47,9 +47,10 @@ see the change.
   card (creature, text, badges) scales uniformly.
 - **Mascot app icon.** Windows shortcuts and the running app use an icon rendered
   straight from the pixel mascot, so the taskbar matches the card on screen.
-- **System tray (Windows).** A tray icon sits in the notification area:
-  left-click to show/hide all the cards, right-click for a menu — *Show / hide
-  cards*, *Settings…*, and *Quit*.
+- **System tray (Windows / Linux / macOS).** A tray icon (via
+  [pystray](https://github.com/moses-palmer/pystray)) sits in the notification
+  area; its menu has *Pet…*, *Show / hide cards*, *Settings…*, and *Quit*. On
+  Windows a left-click also shows/hides all the cards.
 - **Permission speech bubble.** When Claude needs you (e.g. a permission prompt),
   a comic-style speech bubble pops up over the mascot with the message.
 - **Impatient shake.** If a permission/attention prompt goes unanswered for 30s,
@@ -246,7 +247,7 @@ claude-mascot/
     pet_window.py     # the Pet window: dashboard + shop + feed/play (in-process or standalone)
     item_art.py       # pixel art for the shop items
     icon.py           # app icon (.ico/.png + iconphoto) rendered from the pixel mascot
-    tray.py           # Windows system-tray icon + menu (Win32 ctypes; Windows only)
+    tray.py           # cross-platform system-tray icon + menu (pystray)
     single_instance.py# one-widget-at-a-time guard (named mutex / flock)
     control_panel.py  # settings panel: art, size, display, install, autostart, hooks, reset pet
     settings.py       # load/save ~/.claude/mascot/settings.json
@@ -315,9 +316,11 @@ bulk pass — the source is hand-formatted, so the lint config leaves layout alo
 - **"Transparent card" does nothing on Linux.** Chroma-key transparency
   (`-transparentcolor`) is a Windows-only Tk feature; on X11/Wayland the card is
   always opaque regardless of the setting. Leave the toggle off on Linux.
-- **No system-tray icon on Linux.** The tray icon uses `Shell_NotifyIcon` via
-  Win32, so it's Windows-only; on Linux the widget runs exactly the same, just
-  without a tray icon. Open settings with `python -m mascot.control_panel` and
+- **No system-tray icon.** The tray needs `pystray` + `Pillow`
+  (`pip install -r requirements.txt`) and a notification area to host it. If
+  they're missing — or the desktop has no tray host — the widget runs exactly the
+  same, just without an icon. (On Linux, pystray's AppIndicator backend may need
+  `gir1.2-appindicator3`.) Open settings with `python -m mascot.control_panel` and
   quit the widget from its launcher/process.
 - **Only one widget runs at a time.** Launching the widget again (e.g. autostart
   plus a manual launch) is a no-op — a single-instance guard makes the second one

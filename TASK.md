@@ -383,7 +383,7 @@ pip install -r requirements-dev.txt  # pytest + hypothesis + ruff (dev-only, #13
 python -m pytest -q        # state_logic counters (#4) + pet engine + property tests
 python -m ruff check .     # lint (#14)
 python demo.py             # visual: celebrate, blink, pet hearts, hover tooltip
-python -m mascot           # live with a real Claude session; tray on Windows
+python -m mascot           # live with a real Claude session; tray (Win/Linux/macOS)
 ```
 
 ### #13 — Hypothesis property-based tests (done)
@@ -427,6 +427,26 @@ platform support; OS-specific deps are gated by environment markers
 **unblocks #17–#20** — but the ADR only *permits* deps; each issue is still judged
 on whether the dependency earns its cost over the working hand-rolled code. (The
 PyInstaller rejection stands on its own merits and is not reopened.)
+
+### #18 — cross-platform system tray via pystray (done, first dep under ADR-0001)
+Replaced the Windows-only Win32-`ctypes` tray with a single **pystray**-backed path
+that works on Windows/Linux/macOS (first runtime dep landed under [ADR-0001](docs/adr/0001-runtime-dependencies.md);
+`pystray`+`Pillow` added to `requirements.txt`).
+- **Threading:** pystray runs the tray on its own thread, so menu callbacks fire
+  off the Tk thread. They're marshaled back: the pystray thread only *enqueues*
+  onto a thread-safe `_TkDispatcher`, and an 80ms `root.after` pump (scheduled on
+  the Tk thread) drains it — so the manager's callbacks still run on the Tk thread
+  and may touch Tk safely, exactly as the old ctypes tray did. Verified live on
+  Windows (a simulated click ran the callback on `MainThread`).
+- **Menu unchanged:** Pet… / Show / hide cards / Settings… / Quit; the toggle is the
+  pystray `default` item, so a left-click still shows/hides cards on Windows (on
+  Linux it's a normal menu entry — degrades gracefully).
+- **Manager:** dropped the `osplatform.IS_WINDOWS` gate; tray construction stays
+  best-effort (missing deps / no tray host → widget runs without an icon). `tray.py`
+  keeps pystray/Pillow **lazy** so the module + its pure logic import without the deps.
+- **Tests:** +10 in `tests/test_tray.py` (menu model, `_run_guarded`, `_TkDispatcher`
+  order/error-guard, handler→dispatch routing; the live-`Menu` build skips if pystray
+  is absent). Suite 164 → 174 green.
 
 ## Notes
 - `smooth` art lacks the new faces → falls back to `idle` (acceptable; can add later).

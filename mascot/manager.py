@@ -2,7 +2,7 @@
 
 Owns the single Tk root, polls the state directory, and spawns/cleans up one
 :class:`~mascot.tkinter_app.MascotWindow` per live Claude session. Also wires the
-Windows system-tray icon. Run with: ``python -m mascot`` (or ``run_mascot.py``).
+cross-platform system-tray icon. Run with: ``python -m mascot`` (or ``run_mascot.py``).
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import time
 import tkinter as tk
 from pathlib import Path
 
-from . import config, icon, osplatform, pet_logic, pet_store, single_instance, state_store
+from . import config, icon, pet_logic, pet_store, single_instance, state_store
 from .tkinter_app import MascotWindow
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -43,23 +43,24 @@ class MascotManager:
         print("[mascot] state dir:", config.STATE_DIR)
         print("[mascot] tkinter app started")
 
-        # System-tray icon (Windows only). Best-effort: any failure leaves the
-        # widget fully working, just without a tray icon.
+        # System-tray icon (cross-platform via pystray). Best-effort: any failure
+        # (missing deps, no tray host) leaves the widget fully working, just without
+        # a tray icon. Callbacks are marshaled back onto this Tk thread by SystemTray.
         self._cards_hidden = False
         self.tray = None
-        if osplatform.IS_WINDOWS:
-            try:
-                from .tray import SystemTray
-                self.tray = SystemTray(
-                    tooltip="Claude Familiar",
-                    on_toggle=self._on_tray_toggle,
-                    on_pet=self._on_tray_pet,
-                    on_settings=self._on_tray_settings,
-                    on_quit=self._on_tray_quit,
-                )
-            except Exception as exc:  # noqa: BLE001 — never let the tray stop startup
-                print("[mascot] system tray unavailable:", exc)
-                self.tray = None
+        try:
+            from .tray import SystemTray
+            self.tray = SystemTray(
+                self.root,
+                tooltip="Claude Familiar",
+                on_toggle=self._on_tray_toggle,
+                on_pet=self._on_tray_pet,
+                on_settings=self._on_tray_settings,
+                on_quit=self._on_tray_quit,
+            )
+        except Exception as exc:  # noqa: BLE001 — never let the tray stop startup
+            print("[mascot] system tray unavailable:", exc)
+            self.tray = None
 
         # The one global pet. The widget is its SOLE writer: it applies decay and
         # derives coin/XP events from polled session-state transitions. Best-effort

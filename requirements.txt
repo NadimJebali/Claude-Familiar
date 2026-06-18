@@ -2,14 +2,11 @@
 #
 # As of ADR-0001 (docs/adr/0001-runtime-dependencies.md) the project permits
 # required third-party packages here, with OS-specific ones gated by environment
-# markers, e.g.:
-#
-#     psutil
-#     pystray
-#     Pillow
-#     pywin32; sys_platform == "win32"
-#
-# None are added yet — the core still runs on the standard library (Tkinter) alone.
-# Third-party runtime deps land as issues #17-#20 are implemented.
+# markers (e.g. `pywin32; sys_platform == "win32"`).
 #
 # Dev/test tools (pytest, hypothesis, ruff) live in requirements-dev.txt.
+
+# Cross-platform system tray (#18). pystray renders the tray icon + menu on
+# Windows / Linux / macOS; Pillow supplies the icon image.
+pystray>=0.19
+Pillow>=10
