@@ -19,3 +19,8 @@ plyer>=2.1
 # process (hooks) and pruning a session when it dies (widget). Imported lazily and
 # best-effort — if absent, owner tracking degrades to the staleness backstop.
 psutil>=5.9
+
+# Windows-only (#20): robust Start-menu / desktop / run-at-login .lnk creation via
+# WScript.Shell COM, replacing a fragile PowerShell subprocess. Lazy-imported only
+# on Windows; the Linux .desktop path needs nothing extra.
+pywin32>=306; sys_platform == "win32"

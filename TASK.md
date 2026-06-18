@@ -481,6 +481,20 @@ became a cross-platform `_is_owner_name` test + a `find_owner_pid` no-crash smok
 `pid_alive` self/None/garbage test unchanged. Verified live: `find_owner_pid()`
 returned a real PID when run under Claude Code. Suite stays 188 green.
 
+### #20 — pywin32 for Windows shortcut creation (done)
+Replaced the fragile **PowerShell-subprocess** `.lnk` creation in `shortcuts.py`
+(`create_shortcut` built a PS command by string-interpolating paths — broke on
+quotes/special chars, and spawned `powershell` each time) with **pywin32**'s
+`WScript.Shell` COM (`win32com.client.Dispatch`). Same shortcut fields
+(Target/Arguments/WorkingDirectory/Icon/Description/minimized WindowStyle), no
+subprocess, no string injection. `pywin32; sys_platform == "win32"` added to
+`requirements.txt`; imported **lazily** inside `create_shortcut` so `shortcuts.py`
+still imports on Linux (its `.desktop` path is untouched). Dropped the now-unused
+`subprocess` import. **Tests:** new `tests/test_shortcuts.py` — a real .lnk
+round-trip (create → read back Target/Arguments/WorkingDirectory via the same COM
+object) + `remove_shortcut` present/absent; all Windows + pywin32 gated (skip
+elsewhere). Suite 188 → 191 green.
+
 ## Notes
 - `smooth` art lacks the new faces → falls back to `idle` (acceptable; can add later).
 - Effective-state priority is the contract: `dizzy > happy > sleeping > raw`.

@@ -3,8 +3,8 @@
 A single home for the platform-specific logic that makes the app show up — and
 launch — like any other installed application:
 
-  * Windows: ``.lnk`` files (Start menu + desktop) via WScript.Shell, pointing
-    ``pythonw.exe`` at the target with the mascot ``.ico``, no console window.
+  * Windows: ``.lnk`` files (Start menu + desktop) via pywin32's WScript.Shell COM,
+    pointing ``pythonw.exe`` at the target with the mascot ``.ico``, no console.
   * Linux: freedesktop ``.desktop`` entries (application menu + desktop) with the
     mascot ``.png``.
 
@@ -14,7 +14,6 @@ entry (see :mod:`mascot.autostart`) launches the widget instead.
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -56,28 +55,34 @@ def _python() -> str:
 
 
 # --- Windows (.lnk) --------------------------------------------------------
+_WINDOW_STYLE_MINIMIZED = 7  # WScript.Shell shortcut WindowStyle: no console flash
+
+
 def create_shortcut(path: Path, *, target: Path | None = None,
                     arguments: str | None = None,
                     description: str = APP_NAME) -> bool:
-    """Create/overwrite a .lnk at ``path`` launching the mascot. Returns success."""
+    """Create/overwrite a .lnk at ``path`` launching the mascot. Returns success.
+
+    Uses pywin32's WScript.Shell COM object directly — no PowerShell subprocess and
+    no string-interpolated paths (which broke on quotes / special characters).
+    Best-effort: any COM failure is reported and reflected in the return value.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     ico = icon.ensure_ico()  # always keep the icon fresh / present
     target = target or Path(_python())
     arguments = arguments if arguments is not None else f'"{RUN_SCRIPT}"'
-    ps = (
-        "$ws = New-Object -ComObject WScript.Shell; "
-        f"$s = $ws.CreateShortcut('{path}'); "
-        f"$s.TargetPath = '{target}'; "
-        f"$s.Arguments = '{arguments}'; "
-        f"$s.WorkingDirectory = '{PROJECT_ROOT}'; "
-        f"$s.IconLocation = '{ico}'; "
-        f"$s.Description = '{description}'; "
-        "$s.WindowStyle = 7; $s.Save()"
-    )
-    subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-        check=False, capture_output=True,
-    )
+    try:
+        from win32com.client import Dispatch
+        link = Dispatch("WScript.Shell").CreateShortcut(str(path))
+        link.TargetPath = str(target)
+        link.Arguments = arguments
+        link.WorkingDirectory = str(PROJECT_ROOT)
+        link.IconLocation = str(ico)
+        link.Description = description
+        link.WindowStyle = _WINDOW_STYLE_MINIMIZED
+        link.Save()
+    except Exception as exc:  # noqa: BLE001 — shortcut creation must never crash a caller
+        print("[mascot] could not create shortcut:", exc)
     return path.exists()
 
 
