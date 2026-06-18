@@ -34,7 +34,7 @@ def primary_work_area() -> tuple[int, int, int, int] | None:
         if not ok:
             return None
         return (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)
-    except Exception:
+    except Exception:  # noqa: BLE001 — work-area probe is best-effort; caller handles None
         return None
 
 
@@ -78,7 +78,7 @@ def monitor_work_area_at(x: int, y: int) -> tuple[int, int, int, int] | None:
             return None
         r = info.rcWork
         return (r.left, r.top, r.right - r.left, r.bottom - r.top)
-    except Exception:
+    except Exception:  # noqa: BLE001 — monitor probe is best-effort; caller handles None
         return None
 
 
@@ -144,5 +144,5 @@ def enumerate_work_areas() -> list[tuple[int, int, int, int]]:
         user32.EnumDisplayMonitors(0, None, _PROC(_cb), 0)
         found.sort(key=lambda t: 0 if t[1] else 1)   # primary first
         return [wa for wa, _ in found]
-    except Exception:
+    except Exception:  # noqa: BLE001 — monitor enumeration is best-effort; fall back to []
         return []

@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import copy
 
-from hypothesis import given, strategies as st
+from hypothesis import given
+from hypothesis import strategies as st
 
 from mascot import pet_logic, shop
 
@@ -42,7 +43,8 @@ def _in_range(value: float) -> bool:
 # --- decay ----------------------------------------------------------------
 
 @given(hunger=stats, happiness=stats, energy=stats, secs=elapsed, working=st.booleans())
-def test_decay_keeps_every_stat_in_range_and_never_mutates(hunger, happiness, energy, secs, working):
+def test_decay_keeps_every_stat_in_range_and_never_mutates(
+        hunger, happiness, energy, secs, working):
     pet = _pet(hunger=hunger, happiness=happiness, energy=energy)
     before = copy.deepcopy(pet)
     out = pet_logic.decay(pet, secs, working=working)
@@ -55,12 +57,14 @@ def test_decay_keeps_every_stat_in_range_and_never_mutates(hunger, happiness, en
 # --- apply_effects --------------------------------------------------------
 # Effects map arbitrary stat names (needs + junk) to arbitrary deltas.
 _effect_keys = st.sampled_from(["hunger", "happiness", "energy", "coins", "xp", "level", "bogus"])
-_effect_deltas = st.floats(min_value=-1000.0, max_value=1000.0, allow_nan=False, allow_infinity=False)
+_effect_deltas = st.floats(min_value=-1000.0, max_value=1000.0,
+                           allow_nan=False, allow_infinity=False)
 effects = st.dictionaries(_effect_keys, _effect_deltas, max_size=7)
 
 
 @given(hunger=stats, happiness=stats, energy=stats, fx=effects)
-def test_apply_effects_clamps_needs_touches_only_needs_and_never_mutates(hunger, happiness, energy, fx):
+def test_apply_effects_clamps_needs_touches_only_needs_and_never_mutates(
+        hunger, happiness, energy, fx):
     pet = _pet(hunger=hunger, happiness=happiness, energy=energy, coins=50, xp=50)
     before = copy.deepcopy(pet)
     out = pet_logic.apply_effects(pet, fx)
@@ -79,7 +83,8 @@ xp_award = st.integers(min_value=-100, max_value=100_000)  # uncapped; negative 
 
 
 @given(start_today=coins_today, lifetime=st.integers(0, 10_000), coins=coin_award, xp=xp_award)
-def test_award_respects_daily_cap_grows_coins_and_leaves_xp_uncapped(start_today, lifetime, coins, xp):
+def test_award_respects_daily_cap_grows_coins_and_leaves_xp_uncapped(
+        start_today, lifetime, coins, xp):
     pet = _pet(coins=lifetime, coins_today=start_today, last_award_date=_TODAY, xp=0)
     before = copy.deepcopy(pet)
     out = pet_logic.award(pet, coins=coins, xp=xp, today=_TODAY)
@@ -91,7 +96,7 @@ def test_award_respects_daily_cap_grows_coins_and_leaves_xp_uncapped(start_today
 
 
 # --- apply_events ---------------------------------------------------------
-_event_names = st.sampled_from(list(pet_logic.EVENT_REWARDS) + ["nonsense", ""])
+_event_names = st.sampled_from([*pet_logic.EVENT_REWARDS, "nonsense", ""])
 event_streams = st.lists(_event_names, max_size=200)
 
 
@@ -117,7 +122,8 @@ def test_level_is_monotonic_non_decreasing_in_xp(pair):
 # --- stage_for ------------------------------------------------------------
 # Ascending life stages: a pet must never evolve *backwards* as level/age grow.
 _STAGE_ORDER = ("egg", "baby", "teen", "adult")
-_age = st.floats(min_value=0.0, max_value=30 * pet_logic.DAY_S, allow_nan=False, allow_infinity=False)
+_age = st.floats(min_value=0.0, max_value=30 * pet_logic.DAY_S,
+                 allow_nan=False, allow_infinity=False)
 
 
 @given(levels=st.tuples(st.integers(0, 60), st.integers(0, 60)),
@@ -150,9 +156,12 @@ def test_buy_spends_price_floored_adds_one_and_never_mutates(item, coins, held):
     assert pet == before
 
 
-@given(item=food_items, hunger=stats, happiness=stats, energy=stats, held=owned_count, xp=st.integers(0, 10_000))
-def test_feed_consumes_one_clamps_needs_grants_xp_and_never_mutates(item, hunger, happiness, energy, held, xp):
-    pet = _pet(hunger=hunger, happiness=happiness, energy=energy, xp=xp, inventory={item["id"]: held})
+@given(item=food_items, hunger=stats, happiness=stats, energy=stats,
+       held=owned_count, xp=st.integers(0, 10_000))
+def test_feed_consumes_one_clamps_needs_grants_xp_and_never_mutates(
+        item, hunger, happiness, energy, held, xp):
+    pet = _pet(hunger=hunger, happiness=happiness, energy=energy, xp=xp,
+               inventory={item["id"]: held})
     before = copy.deepcopy(pet)
     out = shop.feed(pet, item)
     for need in pet_logic.NEED_STATS:
@@ -164,8 +173,10 @@ def test_feed_consumes_one_clamps_needs_grants_xp_and_never_mutates(item, hunger
 
 @given(item=toy_items, hunger=stats, happiness=stats, energy=stats, held=owned_count,
        xp=st.integers(0, 10_000), played_at=now)
-def test_play_keeps_toy_clamps_needs_sets_cooldown_and_never_mutates(item, hunger, happiness, energy, held, xp, played_at):
-    pet = _pet(hunger=hunger, happiness=happiness, energy=energy, xp=xp, inventory={item["id"]: held})
+def test_play_keeps_toy_clamps_needs_sets_cooldown_and_never_mutates(
+        item, hunger, happiness, energy, held, xp, played_at):
+    pet = _pet(hunger=hunger, happiness=happiness, energy=energy, xp=xp,
+               inventory={item["id"]: held})
     before = copy.deepcopy(pet)
     out = shop.play(pet, item, now=played_at)
     for need in pet_logic.NEED_STATS:

@@ -64,8 +64,10 @@ def draw_creature(
 
     # --- arms (little side nubs) --------------------------------------------
     arm_y = cy + R * 0.2
-    _oval(c, cx - R * 0.98, arm_y, R * 0.2, R * 0.24, fill=BODY, outline=BODY_DK, width=1, tags=tag)
-    _oval(c, cx + R * 0.98, arm_y, R * 0.2, R * 0.24, fill=BODY, outline=BODY_DK, width=1, tags=tag)
+    _oval(c, cx - R * 0.98, arm_y, R * 0.2, R * 0.24,
+          fill=BODY, outline=BODY_DK, width=1, tags=tag)
+    _oval(c, cx + R * 0.98, arm_y, R * 0.2, R * 0.24,
+          fill=BODY, outline=BODY_DK, width=1, tags=tag)
 
     # --- body + belly --------------------------------------------------------
     c.create_oval(cx - R, cy - R * 1.04, cx + R, cy + R * 1.12,
@@ -76,7 +78,8 @@ def draw_creature(
 
 
 # --- faces -----------------------------------------------------------------
-def _draw_face(c: tk.Canvas, cx: float, cy: float, R: float, state: str, accent: str, tag: str) -> None:
+def _draw_face(c: tk.Canvas, cx: float, cy: float, R: float,
+               state: str, accent: str, tag: str) -> None:
     ey = cy - R * 0.16          # eye line
     ex = R * 0.42               # eye x offset from center
     er = R * 0.24               # eye radius
@@ -107,7 +110,8 @@ def _draw_face(c: tk.Canvas, cx: float, cy: float, R: float, state: str, accent:
         _eyes_open(c, lx, rx, ey, er, look=(0, 0.15), squint=True, tag=tag)
         _brows(c, lx, rx, ey - er * 1.1, R, "focus", tag)
         _mouth_line(c, cx, my, R * 0.3, tag)
-        _oval(c, rx + er * 1.1, ey - er * 0.6, R * 0.07, fill=accent, outline="", tags=tag)  # focus spark
+        _oval(c, rx + er * 1.1, ey - er * 0.6, R * 0.07,
+              fill=accent, outline="", tags=tag)  # focus spark
         return
 
     if state == "thinking":
@@ -160,11 +164,15 @@ def _brows(c, lx, rx, y, R, kind, tag="creature") -> None:
             c.create_arc(x - w, y - R * 0.05, x + w, y + R * 0.3, start=20, extent=140,
                          style=tk.ARC, width=2, outline=BODY_DK, tags=tag)
     elif kind == "focus":  # angled inward = concentration
-        c.create_line(lx - w, y, lx + w, y + R * 0.12, width=2, fill=BODY_DK, capstyle=tk.ROUND, tags=tag)
-        c.create_line(rx - w, y + R * 0.12, rx + w, y, width=2, fill=BODY_DK, capstyle=tk.ROUND, tags=tag)
+        c.create_line(lx - w, y, lx + w, y + R * 0.12, width=2, fill=BODY_DK,
+                      capstyle=tk.ROUND, tags=tag)
+        c.create_line(rx - w, y + R * 0.12, rx + w, y, width=2, fill=BODY_DK,
+                      capstyle=tk.ROUND, tags=tag)
     elif kind == "curious":  # one raised
-        c.create_line(lx - w, y + R * 0.08, lx + w, y - R * 0.02, width=2, fill=BODY_DK, capstyle=tk.ROUND, tags=tag)
-        c.create_line(rx - w, y - R * 0.08, rx + w, y - R * 0.12, width=2, fill=BODY_DK, capstyle=tk.ROUND, tags=tag)
+        c.create_line(lx - w, y + R * 0.08, lx + w, y - R * 0.02, width=2, fill=BODY_DK,
+                      capstyle=tk.ROUND, tags=tag)
+        c.create_line(rx - w, y - R * 0.08, rx + w, y - R * 0.12, width=2, fill=BODY_DK,
+                      capstyle=tk.ROUND, tags=tag)
 
 
 def _cheeks(c, cx, cy, R, tag="creature") -> None:

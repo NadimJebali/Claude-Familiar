@@ -15,8 +15,8 @@ Use ``ensure_app_icon`` to get the right file for the current platform.
 from __future__ import annotations
 
 import struct
-import zlib
 import tkinter as tk
+import zlib
 from pathlib import Path
 
 from . import osplatform, sprite_pixel
@@ -58,7 +58,8 @@ def make_photo(master: tk.Misc, px: int = 2) -> tk.PhotoImage:
         for x, cell in enumerate(row):
             if cell is None:
                 continue
-            img.put("#%02x%02x%02x" % cell, to=(x * px, y * px, (x + 1) * px, (y + 1) * px))
+            box = (x * px, y * px, (x + 1) * px, (y + 1) * px)
+            img.put("#{:02x}{:02x}{:02x}".format(*cell), to=box)
     return img
 
 

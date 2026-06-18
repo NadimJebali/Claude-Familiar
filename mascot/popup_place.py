@@ -42,7 +42,7 @@ def above(
     """Top-left for a popup horizontally centered over the card and sitting just
     above it (dropping below it if it would clear the monitor's top) — clamped to
     `bounds` so it stays on the card's own monitor."""
-    bx, by, bw, bh = bounds
+    bx, by, bw, _bh = bounds
     x = card_x + card_w // 2 - popup_w // 2
     x = _clamp(x, bx, bx + bw - popup_w)
     y = card_y - popup_h - gap

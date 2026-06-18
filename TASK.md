@@ -379,8 +379,9 @@ new reason.
 
 ## Validation
 ```bash
-pip install -r requirements-dev.txt  # pytest + hypothesis (dev-only, #13)
+pip install -r requirements-dev.txt  # pytest + hypothesis + ruff (dev-only, #13/#14)
 python -m pytest -q        # state_logic counters (#4) + pet engine + property tests
+python -m ruff check .     # lint (#14)
 python demo.py             # visual: celebrate, blink, pet hearts, hover tooltip
 python -m mascot           # live with a real Claude session; tray on Windows
 ```
@@ -395,6 +396,25 @@ cap + coins-only-increase + uncapped XP, `level_for_xp` monotonicity, `stage_for
 non-regression, and `shop.buy`/`feed`/`play` immutability + inventory/cooldown
 consistency. Suite: 155 → 164 green. (A mutation check — disabling `_clamp_stat` —
 confirmed the clamping properties are non-vacuous.)
+
+### #14 — Ruff lint config + fixes (done)
+Added `ruff` as a **dev-only** dependency and `ruff.toml` (line-length 99,
+`target-version py311`). `ruff check .` now passes clean across `mascot/`/`hooks/`/
+`scripts/`/`tests/`. Rule selection is deliberate:
+- **Selected:** E, F, W, I, UP, B, C4, BLE, RUF — real bugs + cleanup. Fixed the
+  findings: sorted imports, removed unused imports, wrapped 28 over-length lines,
+  modernized a `%`-format/`int(round())`/`dict()`/concat, and annotated 11 more
+  blind-`except` sites with `# noqa: BLE001 — reason` (matching the author's
+  existing convention).
+- **Excluded with rationale (style, not bugs):** `PLC0415` (the codebase imports the
+  pure cores lazily inside functions, and every test imports its module locally —
+  ~116 intentional sites), `SIM` (SIM105 would rewrite the explicit commented
+  `try/except`; SIM115 flags the intentionally long-lived lock-file handle in
+  `single_instance`), and `RUF001` (the UI deliberately uses the `×` glyph).
+- **Format:** `ruff format` is *not* run as a bulk pass — the source is hand-aligned
+  (dict literals, sprite grids, comment columns); `ruff check` is the enforced gate.
+No behavior change (verified: `.format`/`%` byte-identical, `round`==`int(round)`);
+suite stays 164 green.
 
 ## Notes
 - `smooth` art lacks the new faces → falls back to `idle` (acceptable; can add later).

@@ -2,16 +2,19 @@
 
 Payloads mirror the real Phase 0 captures (docs/PLAN.md).
 """
-import sys
 import json
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "hooks"))
 
-from state_logic import compute_next_state, default_state  # noqa: E402
-import emit  # noqa: E402
-from mascot import popup_place  # noqa: E402
-from mascot import effective_state  # noqa: E402
+import emit
+from state_logic import compute_next_state, default_state
+
+from mascot import (
+    effective_state,
+    popup_place,
+)
 
 SID = "4a6ff882-6153-4b83-bd9a-1017fdd10aee"
 
@@ -252,7 +255,8 @@ def test_stopfailure_clears_tool_and_subagents():
 
 def test_stopfailure_death_revives_on_next_prompt():
     # A StopFailure gravestone comes back to life on the next prompt; bubble cleared.
-    dead = compute_next_state(base(), "StopFailure", {"session_id": SID, "error_type": "rate_limit"})
+    dead = compute_next_state(
+        base(), "StopFailure", {"session_id": SID, "error_type": "rate_limit"})
     assert dead["state"] == "dead"
     revived = compute_next_state(dead, "UserPromptSubmit", {"session_id": SID})
     assert revived["state"] == "thinking"
@@ -263,7 +267,7 @@ def test_installer_includes_stopfailure_event():
     # The widget can't receive StopFailure unless the installer wires the hook.
     scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
     sys.path.insert(0, str(scripts_dir))
-    import install_hooks  # noqa: PLC0415
+    import install_hooks
     assert "StopFailure" in install_hooks.EVENTS
 
 
@@ -340,7 +344,7 @@ def test_missing_session_id_is_noop(tmp_path):
 # --- cross-platform support (Linux port) ----------------------------------
 
 def test_parse_proc_stat_handles_comm_with_spaces_and_parens():
-    import proc as hooks_proc  # noqa: PLC0415  (hooks dir already on sys.path)
+    import proc as hooks_proc
     # Real /proc/<pid>/stat: comm is parenthesized and may contain ')' and spaces.
     line = "4242 (claude) S 4200 4242 4200 0 -1 4194304 100 0"
     assert hooks_proc._parse_stat(line) == (4200, "claude")
@@ -349,7 +353,7 @@ def test_parse_proc_stat_handles_comm_with_spaces_and_parens():
 
 
 def test_linux_owner_matcher_accepts_claude_comm():
-    import proc as hooks_proc  # noqa: PLC0415
+    import proc as hooks_proc
     assert hooks_proc._is_owner_linux("claude")
     assert hooks_proc._is_owner_linux("claude-code")
     assert not hooks_proc._is_owner_linux("bash")
@@ -357,6 +361,7 @@ def test_linux_owner_matcher_accepts_claude_comm():
 
 def test_pid_alive_true_for_self_and_safe_on_unknown():
     import os
+
     from mascot import proc as mascot_proc
     assert mascot_proc.pid_alive(os.getpid()) is True
     assert mascot_proc.pid_alive(None) is True          # unknown owner -> keep
@@ -367,6 +372,7 @@ def test_live_owner_keeps_card_even_when_heartbeat_is_stale():
     # Sleep is energy recovery now, not death: a quiet-but-live session must keep
     # its card. A live, trackable owner PID overrides the staleness timeout.
     import os
+
     from mascot import state_store
     state = {"session_id": SID, "owner_pid": os.getpid(), "ts": 0.0}
     assert state_store.is_session_live(state, now=10_000.0, timeout=300.0) is True
@@ -420,7 +426,7 @@ def test_grid_for_unknown_stage_falls_back_to_baby():
 
 def test_every_shop_item_has_valid_pixel_art():
     # Every catalog item is showcased with its own 12x12 art in the Pet window.
-    from mascot import shop, item_art
+    from mascot import item_art, shop
     for it in shop.CATALOG:
         assert item_art.has_art(it["id"]), it["id"]
     for item_id, grid in item_art._ITEMS.items():
@@ -469,7 +475,7 @@ _LEFT = (-1920, 0, 1920, 1080)        # second monitor to the left of primary
 
 def test_tooltip_beside_prefers_left_within_primary():
     # Card mid-primary: tooltip sits just to its left, fully on-screen.
-    x, y = popup_place.beside(800, 500, 158, 196, 120, 40, _PRIMARY, gap=6)
+    x, _ = popup_place.beside(800, 500, 158, 196, 120, 40, _PRIMARY, gap=6)
     assert x == 800 - 120 - 6
     assert _PRIMARY[0] <= x <= _PRIMARY[0] + _PRIMARY[2] - 120
 
@@ -542,9 +548,9 @@ def test_nested_post_tool_use_keeps_caption_tool():
 # --- effective state (pure watchdog / overlay logic) ----------------------
 
 def _eff(raw, now=100.0, **over):
-    kw = dict(ts=now, dizzy_until=0.0, celebrate_until=0.0, waiting_since=None,
-              idle_since=None, blink_until=0.0, sleep_after_idle_s=60.0,
-              shake_after_s=30.0, thinking_stall_s=180.0, working_stall_s=240.0)
+    kw = {"ts": now, "dizzy_until": 0.0, "celebrate_until": 0.0, "waiting_since": None,
+          "idle_since": None, "blink_until": 0.0, "sleep_after_idle_s": 60.0,
+          "shake_after_s": 30.0, "thinking_stall_s": 180.0, "working_stall_s": 240.0}
     kw.update(over)
     return effective_state.compute(raw, now, **kw)
 
@@ -891,7 +897,8 @@ def test_transition_counts_each_vanished_subagent():
 
 def test_transition_new_subagent_appearing_is_not_rewarded():
     from mascot import pet_logic
-    assert pet_logic.events_for_transition(_sess("working", []), _sess("working", [_sub("a")])) == []
+    assert pet_logic.events_for_transition(
+        _sess("working", []), _sess("working", [_sub("a")])) == []
 
 
 def test_transition_turn_end_clearing_badges_awards_turn_and_each_subagent():
@@ -1050,7 +1057,7 @@ def test_stage_is_age_gated_a_young_high_level_pet_is_not_yet_adult():
 # --- Tamagotchi persistence wrapper (pet_store, file I/O) ------------------
 
 def test_default_pet_is_full_and_fresh():
-    from mascot import pet_store, pet_logic
+    from mascot import pet_logic, pet_store
     pet = pet_store.default_pet(now=1000.0)
     assert pet["hunger"] == pet_logic.MAX_STAT
     assert pet["happiness"] == pet_logic.MAX_STAT
@@ -1072,7 +1079,7 @@ def test_pet_round_trips_through_save_then_load(tmp_path):
 
 
 def test_load_missing_file_yields_a_fresh_default_pet(tmp_path):
-    from mascot import pet_store, pet_logic
+    from mascot import pet_logic, pet_store
     loaded = pet_store.load(tmp_path / "nope.json", now=1000.0)
     assert loaded["coins"] == 0
     assert loaded["hunger"] == pet_logic.MAX_STAT
@@ -1080,7 +1087,7 @@ def test_load_missing_file_yields_a_fresh_default_pet(tmp_path):
 
 
 def test_load_corrupt_file_yields_a_fresh_default_pet(tmp_path):
-    from mascot import pet_store, pet_logic
+    from mascot import pet_logic, pet_store
     path = tmp_path / "pet.json"
     path.write_text("{ this is not valid json", encoding="utf-8")
     loaded = pet_store.load(path, now=1000.0)
@@ -1193,7 +1200,8 @@ def test_can_buy_allows_stacking_food():
 
 def test_buy_spends_coins_and_adds_to_inventory():
     from mascot import shop
-    item = {"id": "snack", "name": "Snack", "price": 30, "type": shop.FOOD, "effects": {}, "min_level": 1}
+    item = {"id": "snack", "name": "Snack", "price": 30, "type": shop.FOOD,
+            "effects": {}, "min_level": 1}
     out = shop.buy(_pet(coins=100), item)
     assert out["coins"] == 70
     assert out["inventory"]["snack"] == 1
@@ -1201,7 +1209,8 @@ def test_buy_spends_coins_and_adds_to_inventory():
 
 def test_buy_does_not_mutate_input():
     from mascot import shop
-    item = {"id": "snack", "name": "Snack", "price": 30, "type": shop.FOOD, "effects": {}, "min_level": 1}
+    item = {"id": "snack", "name": "Snack", "price": 30, "type": shop.FOOD,
+            "effects": {}, "min_level": 1}
     pet = _pet(coins=100)
     shop.buy(pet, item)
     assert pet["coins"] == 100 and pet["inventory"] == {}

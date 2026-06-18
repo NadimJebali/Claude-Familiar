@@ -1,0 +1,32 @@
+# Ruff config — dev-only linter (issue #14). Ruff is never imported by the shipped
+# widget; it only runs over the source. Line length matches the code's existing
+# ~99-col wrap. The enforced gate is `ruff check` (lint); `ruff format` is NOT run
+# as a bulk pass — the source is hand-formatted (aligned dict literals, sprite
+# grids, comment columns) and a blanket reformat would fight that established style.
+target-version = "py311"
+line-length = 99
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes (unused imports / names)
+    "W",    # pycodestyle warnings
+    "I",    # isort (import ordering)
+    "UP",   # pyupgrade (modern syntax for the target version)
+    "B",    # flake8-bugbear (likely bugs)
+    "C4",   # flake8-comprehensions
+    "BLE",  # flake8-blind-except (the author annotates deliberate blind catches)
+    "RUF",  # ruff-specific (incl. RUF100 unused-noqa)
+]
+
+# Deliberately NOT selected, because they fight this codebase's established style
+# rather than catch bugs:
+#   PLC0415 (import-outside-top-level) — the pure cores are imported lazily inside
+#     functions throughout (platform-specific modules, circular-import avoidance)
+#     and every test imports its module locally; ~116 intentional sites.
+#   SIM      (flake8-simplify) — SIM105 would rewrite the author's explicit, commented
+#     try/except into contextlib.suppress, and SIM115 flags the intentionally
+#     long-lived lock-file handle in single_instance.py. Both are by design.
+ignore = [
+    "RUF001",  # the UI deliberately uses typographic glyphs (e.g. the "×3" count)
+]

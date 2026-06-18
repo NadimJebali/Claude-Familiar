@@ -9,17 +9,17 @@ only thing that does I/O and stamps the heartbeat `ts`.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
-import json
 import time
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from state_logic import compute_next_state, default_state  # noqa: E402
-from proc import find_owner_pid  # noqa: E402
+from proc import find_owner_pid
+from state_logic import compute_next_state, default_state
 
 STATE_DIR = Path.home() / ".claude" / "mascot" / "state"
 _SAFE = re.compile(r"[^A-Za-z0-9._-]")
@@ -97,7 +97,7 @@ def _debug_log(event: str, payload: dict[str, Any]) -> None:
         log.parent.mkdir(parents=True, exist_ok=True)
         with log.open("a", encoding="utf-8") as fh:
             fh.write(line)
-    except Exception:
+    except Exception:  # noqa: BLE001 — debug logging must never crash the hook
         pass
 
 
@@ -106,7 +106,7 @@ def main() -> None:
     try:
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}
-    except Exception:
+    except Exception:  # noqa: BLE001 — malformed stdin JSON falls back to an empty payload
         payload = {}
     _debug_log(event, payload)
     update_state(STATE_DIR, event, payload, time.time())
@@ -115,6 +115,6 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
+    except Exception:  # noqa: BLE001 — the hook must never crash the Claude run
         pass
     sys.exit(0)

@@ -134,7 +134,7 @@ class MascotManager:
                 if (pet_logic.started_prompt(prev, state)
                         and self.pet.get("last_prompt_date") != today):
                     self.pet = {**self.pet, "last_prompt_date": today}
-                    events = events + [pet_logic.FIRST_PROMPT_OF_DAY]
+                    events = [*events, pet_logic.FIRST_PROMPT_OF_DAY]
                 if events:
                     self.pet = pet_logic.apply_events(self.pet, events, today=today)
                     awarded = True

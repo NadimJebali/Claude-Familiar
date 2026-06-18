@@ -19,12 +19,17 @@ from __future__ import annotations
 import random
 import time
 import tkinter as tk
+from collections.abc import Callable
 from tkinter import ttk
-from typing import Any, Callable
+from typing import Any
 
 from . import config, item_art, pet_logic, pet_store, shop, sprite_pixel, ui_icons
-from .control_panel import (ACCENT, BG, BORDER, DANGER, FG, MUTED, OK, PANEL,
-                            PANEL_HI, WARN, _apply_theme)
+from .control_panel import (
+    BG,
+    MUTED,
+    PANEL,
+    _apply_theme,
+)
 from .tkinter_app import MILESTONE_LEVEL, round_rect
 
 NAME_MAX = 16
@@ -73,7 +78,8 @@ class PetWindow:
         self._hearts: list[dict[str, float]] = []
         self._list_sig: tuple | None = None
         self._cached_pet: dict[str, Any] = {}   # latest pet for the 25fps sprite loop
-        self._cooldowns: dict[str, tuple] = {}  # toy_id -> (item, play_btn, label) for live countdown
+        # toy_id -> (item, play_btn, label) for the live cooldown countdown
+        self._cooldowns: dict[str, tuple] = {}
 
         self.root = tk.Toplevel(parent)
         self.root.title("Claude Familiar — Pet")
@@ -305,9 +311,11 @@ class PetWindow:
             row.pack(fill="x", pady=3)
             self._item_icon(row, item_id).pack(side="left", padx=(0, 6))
             if item["type"] == shop.FOOD:
-                ttk.Button(row, text="Feed", command=lambda it=item: self._feed(it)).pack(side="right")
+                ttk.Button(row, text="Feed",
+                           command=lambda it=item: self._feed(it)).pack(side="right")
                 # food stacks, so show the count
-                ttk.Label(row, text=f"{item['name']}  ×{count}", style="Card.TLabel").pack(side="left")
+                ttk.Label(row, text=f"{item['name']}  ×{count}",
+                          style="Card.TLabel").pack(side="left")
             else:
                 # toys are one-time, reusable on a cooldown: a Play button + a live
                 # countdown label (updated by _update_cooldowns), no quantity.

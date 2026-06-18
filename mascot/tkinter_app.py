@@ -17,7 +17,8 @@ from typing import Any
 
 from . import config, effective_state, osplatform, pet_logic, sprite_pixel, sprite_smooth, ui_icons
 from .popups import BubbleWindow, StatsTooltip
-from .scale import font as _font, s as _s
+from .scale import font as _font
+from .scale import s as _s
 
 # Mascot art modules, selectable via config.ART_STYLE. The smooth blob is kept
 # on the side; the pixel creature is the default.
@@ -193,7 +194,7 @@ WAITING_SHAKE_FREQ_MAX = 11.0    # sways/sec when frantic
 
 
 def _hex(rgb: tuple[int, int, int]) -> str:
-    r, g, b = (max(0, min(255, int(round(c)))) for c in rgb)
+    r, g, b = (max(0, min(255, round(c))) for c in rgb)
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
@@ -825,7 +826,8 @@ class MascotWindow:
 
         intensity = min(1.0, (elapsed - WAITING_SHAKE_AFTER_S) / WAITING_SHAKE_RAMP_S)
         amp = WAITING_SHAKE_AMP_MIN + (WAITING_SHAKE_AMP_MAX - WAITING_SHAKE_AMP_MIN) * intensity
-        freq = WAITING_SHAKE_FREQ_MIN + (WAITING_SHAKE_FREQ_MAX - WAITING_SHAKE_FREQ_MIN) * intensity
+        freq = (WAITING_SHAKE_FREQ_MIN
+                + (WAITING_SHAKE_FREQ_MAX - WAITING_SHAKE_FREQ_MIN) * intensity)
         phase = (now - self._anim_t0) * freq * 2 * math.pi
         # A steady horizontal sway, plus a jitter that grows with intensity so it
         # reads as a gentle wobble at first and a violent buzz once ignored a while.

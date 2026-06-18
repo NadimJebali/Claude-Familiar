@@ -42,7 +42,7 @@ def pid_alive(pid: Any) -> bool:
             return kernel32.WaitForSingleObject(handle, 0) == _WAIT_TIMEOUT
         finally:
             kernel32.CloseHandle(handle)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return True  # never prune on an unexpected error
 
 

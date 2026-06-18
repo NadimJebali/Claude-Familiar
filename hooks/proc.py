@@ -30,7 +30,7 @@ def find_owner_pid() -> int | None:
         return None
     try:
         procs = snapshot()  # {pid: (ppid, name)}
-    except Exception:
+    except Exception:  # noqa: BLE001 — a snapshot failure just means "owner unknown"
         return None
 
     pid = os.getpid()

@@ -9,7 +9,8 @@ from __future__ import annotations
 import tkinter as tk
 
 from . import config, pet_logic, popup_place
-from .scale import font as _font, s as _s
+from .scale import font as _font
+from .scale import s as _s
 
 # Comic speech bubble (shown above the card while Claude needs the user).
 BUBBLE_W = _s(196)

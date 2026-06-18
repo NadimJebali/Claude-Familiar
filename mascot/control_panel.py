@@ -17,8 +17,17 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
-from . import (autostart, icon, osplatform, pet_store, settings as settings_mod,
-               shortcuts, sprite_pixel, sprite_smooth, ui_icons)
+from . import (
+    autostart,
+    icon,
+    osplatform,
+    pet_store,
+    shortcuts,
+    sprite_pixel,
+    sprite_smooth,
+    ui_icons,
+)
+from . import settings as settings_mod
 from .tkinter_app import _accent, round_rect
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -330,7 +339,8 @@ class ControlPanel:
             self.status.set("Removed Claude Familiar shortcuts.")
         else:
             created = shortcuts.install_app_shortcuts()
-            self.status.set(f"Added {len(created)} shortcut(s). Find it in the Start menu / on your desktop.")
+            self.status.set(
+                f"Added {len(created)} shortcut(s). Find it in the Start menu / on your desktop.")
         self._refresh_install()
 
     def _install_hooks(self) -> None:
@@ -398,6 +408,7 @@ class ControlPanel:
 
     def _uninstall(self) -> None:
         from tkinter import messagebox
+
         from . import uninstall as uninstall_mod
         if not messagebox.askyesno(
             "Uninstall Claude Familiar",

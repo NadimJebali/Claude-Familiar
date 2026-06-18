@@ -296,18 +296,18 @@ class SystemTray:
         if self._added and self._nid is not None:
             try:
                 _shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(self._nid))
-            except Exception:
+            except Exception:  # noqa: BLE001 — teardown must never raise
                 pass
             self._added = False
         if self._hwnd:
             try:
                 _user32.DestroyWindow(self._hwnd)
-            except Exception:
+            except Exception:  # noqa: BLE001 — teardown must never raise
                 pass
             self._hwnd = None
         if self._class_name:
             try:
                 _user32.UnregisterClassW(self._class_name, self._hinstance)
-            except Exception:
+            except Exception:  # noqa: BLE001 — teardown must never raise
                 pass
             self._class_name = ""
