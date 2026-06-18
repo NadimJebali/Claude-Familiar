@@ -51,8 +51,12 @@ see the change.
   [pystray](https://github.com/moses-palmer/pystray)) sits in the notification
   area; its menu has *Pet…*, *Show / hide cards*, *Settings…*, and *Quit*. On
   Windows a left-click also shows/hides all the cards.
-- **Permission speech bubble.** When Claude needs you (e.g. a permission prompt),
-  a comic-style speech bubble pops up over the mascot with the message.
+- **Permission speech bubble + native toast.** When Claude needs you (e.g. a
+  permission prompt) or hits a usage limit, a comic-style speech bubble pops up
+  over the mascot with the message — and a **native OS notification** (via
+  [plyer](https://github.com/kivy/plyer)) fires too, so you notice even with the
+  card off-screen or while you're in another app. It's edge-triggered, so a prompt
+  toasts once, not on every poll.
 - **Impatient shake.** If a permission/attention prompt goes unanswered for 30s,
   the card starts to shake — and the longer you ignore it, the more frantic it
   gets, until you respond.
@@ -248,6 +252,7 @@ claude-mascot/
     item_art.py       # pixel art for the shop items
     icon.py           # app icon (.ico/.png + iconphoto) rendered from the pixel mascot
     tray.py           # cross-platform system-tray icon + menu (pystray)
+    notifier.py       # native OS toast notifications (plyer; pure core + thin shell)
     single_instance.py# one-widget-at-a-time guard (named mutex / flock)
     control_panel.py  # settings panel: art, size, display, install, autostart, hooks, reset pet
     settings.py       # load/save ~/.claude/mascot/settings.json

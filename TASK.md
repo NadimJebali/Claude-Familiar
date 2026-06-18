@@ -448,6 +448,24 @@ that works on Windows/Linux/macOS (first runtime dep landed under [ADR-0001](doc
   order/error-guard, handler→dispatch routing; the live-`Menu` build skips if pystray
   is absent). Suite 164 → 174 green.
 
+### #19 — native OS notifications via plyer (done)
+A native OS toast now fires **alongside** the in-app speech bubble whenever a
+session's `notify` (permission/attention or a usage/session limit) first appears —
+so you notice even with the card off-screen (`plyer` added to `requirements.txt`).
+- **New `mascot/notifier.py`** — pure core + thin shell, mirroring the other cores:
+  `fresh_notifications(prev, next)` is **edge-triggered** (a notify persists across
+  the 500ms polls, so it toasts once, not every poll; clears-then-returns or a
+  changed message re-fires), `toast_for(notify)` formats the title (usage-limit vs
+  permission vs generic attention) + message, and `emit(notify, show=…)` routes to
+  `notify_native`, which runs `plyer` on a **daemon thread** so a toast never blocks
+  Tk and is best-effort (missing dep / no notifier daemon → silent no-op).
+- **Manager:** a best-effort `_notify_sessions(states)` step each poll, with its own
+  `_notify_prev` edge tracker (parallel to the pet's `_pet_prev`). The bubble is
+  untouched — this only adds. Verified live on Windows (a real toast fired) + an
+  edge-trigger glue check (2 toasts across appear/repeat/clear/re-ask).
+- **Tests:** +14 in `tests/test_notifier.py` (edge cases + formatting + `emit`
+  routing via an injected `show`). Suite 174 → 188 green.
+
 ## Notes
 - `smooth` art lacks the new faces → falls back to `idle` (acceptable; can add later).
 - Effective-state priority is the contract: `dizzy > happy > sleeping > raw`.

@@ -12,7 +12,7 @@ import time
 import tkinter as tk
 from pathlib import Path
 
-from . import config, icon, pet_logic, pet_store, single_instance, state_store
+from . import config, icon, notifier, pet_logic, pet_store, single_instance, state_store
 from .tkinter_app import MascotWindow
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -76,6 +76,7 @@ class MascotManager:
         self._pet_last_save = now
         self._pet_file_mtime = self._pet_mtime()
         self._pet_win = None                   # the Pet window, when open (tray)
+        self._notify_prev: dict[str, dict] = {}  # sid -> last state (native-toast edge)
 
         self.root.after(500, self._refresh)
 
@@ -100,8 +101,21 @@ class MascotManager:
             else:
                 win.update_state(state, now)
 
+        self._notify_sessions(states)
         self._update_pet(states, now)
         self.root.after(500, self._refresh)
+
+    # --- native OS notifications (#19) ------------------------------------
+    def _notify_sessions(self, states: dict[str, dict]) -> None:
+        """Raise a native OS toast when a session's ``notify`` first appears, to
+        complement the in-app bubble. Edge-triggered (so repeated polls don't
+        re-toast) and best-effort (a toast failure never disrupts the widget)."""
+        try:
+            for _sid, notify in notifier.fresh_notifications(self._notify_prev, states):
+                notifier.emit(notify)
+        except Exception as exc:  # noqa: BLE001 — a toast must never crash the widget
+            print("[mascot] notification failed:", exc)
+        self._notify_prev = dict(states)
 
     # --- pet (Tamagotchi) -------------------------------------------------
     def _update_pet(self, states: dict[str, dict], now: float) -> None:
