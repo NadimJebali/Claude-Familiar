@@ -32,10 +32,9 @@ LABEL_HEIGHT = 16
 WINDOW_MARGIN = 12             # gap from screen edge
 WINDOW_SPACING = 8             # gap between stacked per-session mascots
 
-# Mascot art style ("pixel" / "smooth") and transparent floating card. Both are
-# user-configurable via the settings panel (mascot/control_panel.py); change
-# them there, or edit ~/.claude/mascot/settings.json directly.
-ART_STYLE = _S["art_style"]
+# Transparent floating card. User-configurable via the settings panel
+# (mascot/control_panel.py); change it there, or edit
+# ~/.claude/mascot/settings.json directly.
 TRANSPARENT_BG = _S["transparent_bg"]
 
 # Widget size: scales the whole card (geometry, creature, fonts). "small" is the
@@ -59,6 +58,18 @@ HOME_MONITOR = _S["home_monitor"]
 # (no paw button, tooltip, mood faces, food/zzz emotes, coins/XP, or tray "Pet…").
 # Read once at startup, so the mode is restart-gated like the other settings here.
 TAMAGOTCHI_ENABLED = bool(_S["tamagotchi_enabled"])
+
+# Simple-mode look. With the pet disabled the mascot never evolves, so it shows a
+# fixed life-stage look chosen in Settings ("egg"/"baby"/"teen"/"adult"). An unknown
+# value falls back to the baby look (sprite_pixel tolerates it; we clamp for cleanliness).
+SIMPLE_STAGE = _S["simple_stage"] if _S["simple_stage"] in (
+    "egg", "baby", "teen", "adult") else "baby"
+
+# Native OS toast notifications (#19). When False the manager never raises a system
+# toast for a session's notify — the in-app speech bubble (and any shake) is unchanged;
+# this only silences the OS-level pop. Read once at startup, so it's restart-gated like
+# the other settings here.
+NATIVE_NOTIFICATIONS_ENABLED = bool(_S["native_notifications"])
 
 # Per-state accent colors (R, G, B).
 STATE_COLORS = {
