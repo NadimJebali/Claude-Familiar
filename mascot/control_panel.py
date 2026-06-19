@@ -1,9 +1,9 @@
 """Settings / control panel for Claude Familiar.
 
-A small titled window to configure the mascot: pick the art style with a live,
-size-aware preview, tune the attention shake, manage install / startup / hooks,
-and run a full uninstall. Built on a cohesive dark ``ttk`` theme and grouped into
-tabs. Run with:
+A small titled window to configure the mascot: size the widget and (for simple
+mode) pick its life-stage look with a live preview, tune the attention shake,
+manage install / startup / hooks, and run a full uninstall. Built on a cohesive
+dark ``ttk`` theme and grouped into tabs. Run with:
 
     python -m mascot.control_panel
 """
@@ -24,7 +24,6 @@ from . import (
     pet_store,
     shortcuts,
     sprite_pixel,
-    sprite_smooth,
     ui_icons,
 )
 from . import settings as settings_mod
@@ -53,8 +52,7 @@ DANGER = "#e06c75"
 
 # Per-widget-size preview scaling (mirrors the config.UI_SCALE buckets, clamped so
 # the largest creature still fits the preview canvas).
-_PREVIEW_PX = {"small": 4, "medium": 5, "large": 6}       # pixel art: per-cell px
-_PREVIEW_R = {"small": 24.0, "medium": 30.0, "large": 36.0}  # smooth art: body radius
+_PREVIEW_PX = {"small": 4, "medium": 5, "large": 6}       # per-cell px
 
 
 def _hooks_installed() -> bool:
@@ -142,14 +140,15 @@ class ControlPanel:
         self.style = _apply_theme(self.root)
         icon.apply(self.root)
 
-        self.style_var = tk.StringVar(value=s["art_style"])
         self.size_var = tk.StringVar(value=s["widget_size"])
+        self.simple_stage_var = tk.StringVar(value=s["simple_stage"])
         self.transp_var = tk.BooleanVar(value=s["transparent_bg"])
         self.startup_var = tk.BooleanVar(value=autostart.is_enabled())
         self.shake_after_var = tk.IntVar(value=int(s["shake_after_s"]))
         self.shake_amp_var = tk.IntVar(value=int(s["shake_max_amp_px"]))
         self.home_monitor_var = tk.IntVar(value=int(s["home_monitor"]))
         self.pet_enabled_var = tk.BooleanVar(value=bool(s["tamagotchi_enabled"]))
+        self.notify_var = tk.BooleanVar(value=bool(s["native_notifications"]))
         self._monitors = osplatform.enumerate_work_areas()
         self.status = tk.StringVar(value="")
 
@@ -197,16 +196,26 @@ class ControlPanel:
 
         left = ttk.Frame(row, style="Card.TFrame")
         left.pack(side="left", fill="y")
-        ttk.Label(left, text="MASCOT ART", style="Section.TLabel").pack(anchor="w", pady=(0, 4))
-        for label, val in (("Pixel (Claude-style)", "pixel"), ("Smooth (blob)", "smooth")):
-            ttk.Radiobutton(left, text=label, value=val, variable=self.style_var,
-                            command=self._draw_preview).pack(anchor="w", pady=1)
-        ttk.Label(left, text="WIDGET SIZE", style="Section.TLabel").pack(anchor="w", pady=(14, 4))
+        ttk.Label(left, text="WIDGET SIZE", style="Section.TLabel").pack(anchor="w", pady=(0, 4))
         size_row = ttk.Frame(left, style="Card.TFrame")
         size_row.pack(anchor="w")
         for label, val in (("Small", "small"), ("Medium", "medium"), ("Large", "large")):
             ttk.Radiobutton(size_row, text=label, value=val, variable=self.size_var,
                             command=self._draw_preview).pack(side="left", padx=(0, 10))
+
+        ttk.Label(left, text="MASCOT LOOK", style="Section.TLabel").pack(anchor="w", pady=(14, 0))
+        ttk.Label(left, text="Used when the Tamagotchi pet is off (Behavior tab) — "
+                            "pick which life stage the mascot shows.",
+                  style="Muted.TLabel", wraplength=210, justify="left").pack(
+            anchor="w", pady=(0, 4))
+        self._look_radios: list[ttk.Radiobutton] = []
+        look_row = ttk.Frame(left, style="Card.TFrame")
+        look_row.pack(anchor="w")
+        for label, val in (("Egg", "egg"), ("Baby", "baby"), ("Teen", "teen"), ("Adult", "adult")):
+            rb = ttk.Radiobutton(look_row, text=label, value=val,
+                                 variable=self.simple_stage_var, command=self._draw_preview)
+            rb.pack(side="left", padx=(0, 8))
+            self._look_radios.append(rb)
 
         self.preview = tk.Canvas(row, width=PREVIEW_W, height=PREVIEW_H, bg=PANEL,
                                  highlightthickness=0, bd=0)
@@ -257,6 +266,15 @@ class ControlPanel:
                   command=lambda _v: self._refresh_shake_labels()).pack(
             side="right", fill="x", expand=True, padx=10)
         self._refresh_shake_labels()
+
+        ttk.Separator(tab).pack(fill="x", pady=12)
+        ttk.Label(tab, text="NOTIFICATIONS", style="Section.TLabel").pack(anchor="w")
+        ttk.Checkbutton(tab, text="Show native system notifications",
+                        variable=self.notify_var).pack(anchor="w", pady=(2, 0))
+        ttk.Label(tab, text="Off = the in-app speech bubble only — no OS toast pops up "
+                            "when a session needs your attention or hits a limit.",
+                  style="Muted.TLabel", wraplength=430, justify="left").pack(
+            anchor="w", padx=(22, 0))
 
         ttk.Separator(tab).pack(fill="x", pady=12)
         ttk.Label(tab, text="TAMAGOTCHI PET", style="Section.TLabel").pack(anchor="w")
@@ -324,11 +342,14 @@ class ControlPanel:
         round_rect(c, m, m, PREVIEW_W - m, PREVIEW_H - m, 16, fill=PREVIEW_BG, outline="")
         round_rect(c, m, m, PREVIEW_W - m, PREVIEW_H - m, 16, fill="", outline=accent, width=2)
         cx, cy = PREVIEW_W // 2, PREVIEW_H // 2 - 8
-        if self.style_var.get() == "pixel":
-            sprite_pixel.draw_creature(c, cx, cy, "idle", accent, _PREVIEW_PX.get(size, 5))
-        else:
-            sprite_smooth.draw_creature(c, cx, cy, "idle", accent, _PREVIEW_R.get(size, 30.0))
-        c.create_text(PREVIEW_W // 2, PREVIEW_H - 16, text=f"idle · {size}",
+        # With the pet on it evolves with play, so preview the just-hatched baby;
+        # with the pet off it holds the fixed life-stage look chosen below.
+        pet_on = self.pet_enabled_var.get()
+        stage = "baby" if pet_on else self.simple_stage_var.get()
+        sprite_pixel.draw_creature(c, cx, cy, "idle", accent, _PREVIEW_PX.get(size, 5),
+                                   stage=stage)
+        caption = f"idle · {size}" if pet_on else f"{stage} · {size}"
+        c.create_text(PREVIEW_W // 2, PREVIEW_H - 16, text=caption,
                       fill=accent, font=("Segoe UI", 8, "bold"))
 
     # --- actions ----------------------------------------------------------
@@ -368,10 +389,15 @@ class ControlPanel:
     def _refresh_pet_controls(self) -> None:
         """Grey the pet-management controls (the 'Pet' button + 'Reset progress') when
         the Tamagotchi pet is disabled. Progress is preserved — they simply re-enable
-        when the pet is switched back on."""
-        state = "normal" if self.pet_enabled_var.get() else "disabled"
+        when the pet is switched back on. The simple-mode look radios are the inverse:
+        only meaningful (so only enabled) when the pet is off. Redraw the preview so it
+        reflects the current mode."""
+        pet_on = self.pet_enabled_var.get()
         for btn in (self._pet_btn, self._reset_btn):
-            btn.configure(state=state)
+            btn.configure(state="normal" if pet_on else "disabled")
+        for rb in self._look_radios:
+            rb.configure(state="disabled" if pet_on else "normal")
+        self._draw_preview()
 
     def _refresh_shake_labels(self) -> None:
         """Keep the slider read-outs in sync (delay in seconds; a friendly word for
@@ -384,13 +410,14 @@ class ControlPanel:
 
     def _save(self) -> None:
         settings_mod.save_settings({
-            "art_style": self.style_var.get(),
             "widget_size": self.size_var.get(),
+            "simple_stage": self.simple_stage_var.get(),
             "transparent_bg": bool(self.transp_var.get()),
             "shake_after_s": int(self.shake_after_var.get()),
             "shake_max_amp_px": int(self.shake_amp_var.get()),
             "home_monitor": int(self.home_monitor_var.get()),
             "tamagotchi_enabled": bool(self.pet_enabled_var.get()),
+            "native_notifications": bool(self.notify_var.get()),
         })
         autostart.set_enabled(bool(self.startup_var.get()))
         self.startup_var.set(autostart.is_enabled())

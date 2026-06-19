@@ -15,14 +15,10 @@ import tkinter as tk
 from pathlib import Path
 from typing import Any
 
-from . import config, effective_state, osplatform, pet_logic, sprite_pixel, sprite_smooth, ui_icons
+from . import config, effective_state, osplatform, pet_logic, sprite_pixel, ui_icons
 from .popups import BubbleWindow, StatsTooltip
 from .scale import font as _font
 from .scale import s as _s
-
-# Mascot art modules, selectable via config.ART_STYLE. The smooth blob is kept
-# on the side; the pixel creature is the default.
-_ART = {"pixel": sprite_pixel, "smooth": sprite_smooth}
 
 
 def _draw_gravestone(c, cx, cy) -> None:
@@ -42,19 +38,15 @@ def _draw_gravestone(c, cx, cy) -> None:
 
 
 def _draw_creature(c, cx, cy, state, accent, stage="baby", flourish=False) -> None:
-    """Draw the mascot using the configured art style, scaled to the widget size.
+    """Draw the mascot (pixel art), scaled to the widget size.
 
-    For the pixel art the creature also grows with its evolution `stage` and gets a
-    milestone `flourish` at higher levels; the smooth art has no stages (it falls
-    back to its single blob), matching how it lacks the per-state faces too."""
+    The creature grows with its evolution `stage` and gets a milestone `flourish`
+    at higher levels."""
     if state == "dead":
         _draw_gravestone(c, cx, cy)
         return
-    if config.ART_STYLE == "pixel":
-        px = max(1, round(CREATURE_PX * sprite_pixel.STAGE_SCALE.get(stage, 1.0)))
-        sprite_pixel.draw_creature(c, cx, cy, state, accent, px, stage=stage, flourish=flourish)
-    else:
-        sprite_smooth.draw_creature(c, cx, cy, state, accent, CREATURE_R)
+    px = max(1, round(CREATURE_PX * sprite_pixel.STAGE_SCALE.get(stage, 1.0)))
+    sprite_pixel.draw_creature(c, cx, cy, state, accent, px, stage=stage, flourish=flourish)
 
 
 def round_rect(c, x1, y1, x2, y2, r, **kw) -> int:
@@ -102,8 +94,7 @@ PANEL_RADIUS = _s(20)
 
 CREATURE_CX = CARD_W // 2
 CREATURE_CY = _s(64)
-CREATURE_PX = _s(5)         # pixel size of the main creature (pixel art)
-CREATURE_R = _s(30)         # body radius of the main creature (smooth art)
+CREATURE_PX = _s(5)         # pixel size of the main creature
 
 CAPTION_Y = _s(114)
 BADGE_Y = _s(136)
@@ -117,8 +108,7 @@ INFO_FONT = _font(7)
 LABEL_FG = "#8b8fa3"
 INFO_FG = "#6b6f82"
 BADGE_GAP = _s(26)          # spacing between sub-agent mini-mascots
-MINI_PIXEL_PX = _s(1)       # pixel size for a mini sub-agent (pixel art) -> ~16px
-MINI_SMOOTH_R = _s(7)       # body radius for a mini sub-agent (smooth art)
+MINI_PIXEL_PX = _s(1)       # pixel size for a mini sub-agent -> ~16px
 
 # Animation
 BOB_AMPLITUDE = _s(4)
@@ -422,14 +412,13 @@ class MascotWindow:
         subs = (self.state.get("subagents") or [])[:4]
         if not subs:
             return
-        module = _ART.get(config.ART_STYLE, sprite_pixel)
-        size = MINI_PIXEL_PX if config.ART_STYLE == "pixel" else MINI_SMOOTH_R
         accent = _hex(config.SUBAGENT_COLOR)
         total = (len(subs) - 1) * BADGE_GAP
         x0 = CREATURE_CX - total / 2
         for i in range(len(subs)):
             x = x0 + i * BADGE_GAP
-            module.draw_creature(c, x, BADGE_Y, "working", accent, size, tag="subagent")
+            sprite_pixel.draw_creature(c, x, BADGE_Y, "working", accent, MINI_PIXEL_PX,
+                                       tag="subagent")
 
     # --- positioning ------------------------------------------------------
     def _place_initial(self, index: int) -> None:
@@ -676,7 +665,12 @@ class MascotWindow:
         self._render()
 
     def _pet_stage(self) -> str:
-        """The pet's evolution stage from its level + age (egg/baby/teen/adult)."""
+        """The pet's evolution stage from its level + age (egg/baby/teen/adult).
+
+        In simple hook-visualiser mode (pet disabled) the pet never evolves, so the
+        look is the fixed life stage the user picked in Settings."""
+        if not self._pet_enabled:
+            return config.SIMPLE_STAGE
         pet = self._pet_data
         if not pet:
             return "baby"

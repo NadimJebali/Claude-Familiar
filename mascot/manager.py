@@ -54,6 +54,9 @@ class MascotManager:
         # is never loaded, ticked, pushed, or wired into the cards/tray. Read once at
         # startup (restart-gated, like the other settings).
         self._pet_enabled = config.TAMAGOTCHI_ENABLED
+        # Native OS toasts on/off (the in-app bubble is unaffected). Read once at
+        # startup, restart-gated like the pet toggle above.
+        self._notify_enabled = config.NATIVE_NOTIFICATIONS_ENABLED
 
         self._cards_hidden = False
         self.tray = None
@@ -129,7 +132,10 @@ class MascotManager:
     def _notify_sessions(self, states: dict[str, dict]) -> None:
         """Raise a native OS toast when a session's ``notify`` first appears, to
         complement the in-app bubble. Edge-triggered (so repeated polls don't
-        re-toast) and best-effort (a toast failure never disrupts the widget)."""
+        re-toast) and best-effort (a toast failure never disrupts the widget).
+        No-op when native notifications are switched off in Settings."""
+        if not self._notify_enabled:
+            return
         try:
             for _sid, notify in notifier.fresh_notifications(self._notify_prev, states):
                 notifier.emit(notify)

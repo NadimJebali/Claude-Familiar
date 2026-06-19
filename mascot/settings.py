@@ -13,14 +13,15 @@ from typing import Any
 SETTINGS_PATH = Path.home() / ".claude" / "mascot" / "settings.json"
 
 DEFAULTS: dict[str, Any] = {
-    "art_style": "pixel",        # "pixel" | "smooth"
     "transparent_bg": True,      # float the rounded card
     "sleep_after_idle_s": 90,    # idle this long -> sleeping sprite (blinks until then)
     "widget_size": "small",      # "small" | "medium" | "large"
+    "simple_stage": "baby",      # pet-off look: "egg" | "baby" | "teen" | "adult"
     "shake_after_s": 30,         # unanswered prompt waits this long before shaking
     "shake_max_amp_px": 16,      # how violent: max sway (px) at full aggression
     "home_monitor": -1,          # which monitor cards spawn on; -1 = auto (primary)
     "tamagotchi_enabled": True,  # False -> simple hook visualiser (no pet layer)
+    "native_notifications": True,  # False -> no native OS toasts (in-app bubble only)
 }
 
 

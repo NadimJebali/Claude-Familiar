@@ -24,14 +24,10 @@ When idle, the face also reflects the **pet's mood** (see below) — droopy when
 hungry, sad, sleepy, or sparkly when well cared-for — but Claude-activity states
 always take priority, so the mascot never lies about what Claude is doing.
 
-Two art styles ship in the box, selectable via `ART_STYLE` in
-`mascot/config.py`:
-
-- `"pixel"` (default) — the Claude-style blocky creature (`mascot/sprite_pixel.py`)
-- `"smooth"` — an original rounded vector character (`mascot/sprite_smooth.py`)
-
-The pixel faces are plain 16×16 ASCII grids in `sprite_pixel.py` — edit a grid,
-see the change.
+The mascot is a Claude-style blocky pixel creature (`mascot/sprite_pixel.py`).
+Its faces are plain 16×16 ASCII grids — edit a grid, see the change. With the
+Tamagotchi pet switched off, you can pick which life-stage look it wears (egg /
+baby / teen / adult) in **Settings → Appearance → Mascot Look**.
 
 ## What it does
 
@@ -251,7 +247,7 @@ Claude Code session ──hooks──▶ emit.py ──atomic write──▶ ~/.
 - **`mascot/manager.py`** (`MascotManager`) polls the state directory every second
   and creates/destroys one native Tkinter window (`mascot/tkinter_app.py`) per
   active session. Each card is a single Canvas; the mascot is drawn by
-  **`mascot/sprite_pixel.py`** (or `sprite_smooth.py`, per `config.ART_STYLE`). The
+  **`mascot/sprite_pixel.py`**. The
   manager is also the single writer of the pet (`pet.json`), applying decay and
   awarding coins/XP from the polled state transitions.
 
@@ -270,7 +266,6 @@ claude-mascot/
     popup_place.py    # pure multi-monitor popup placement (tested)
     scale.py          # widget-size scaling primitives
     sprite_pixel.py   # Claude-style pixel creature: faces + evolution stages + hearts/emotes
-    sprite_smooth.py  # original rounded vector character (kept on the side)
     pet_logic.py      # PURE pet core: decay, item effects, coins/XP, mood, level, stage (tested)
     pet_store.py      # pet.json wrapper: load/save + decay-on-load (single source of truth)
     shop.py           # data-driven shop catalog + buy/feed/play (pure, tested)
