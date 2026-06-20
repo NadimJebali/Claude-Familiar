@@ -80,7 +80,10 @@ STATE_CAPTIONS = {
 # Measurements are authored at the "small" size and scaled by `_s` (mascot.scale)
 # so "medium"/"large" scale the whole card uniformly.
 CARD_W = _s(158)
-CARD_H = _s(196)
+# Height carries enough headroom above the caption for the *adult* sprite (the
+# tallest stage at 16x7px); the creature zone (margin..caption) is sized to it so
+# the grown-up's ears clear the top border and its feet clear the caption text.
+CARD_H = _s(211)
 WIN_BG = "#101117"          # window backdrop (blends with the panel's corners)
 CHROMA = "#ff00ff"          # chroma key -> transparent when TRANSPARENT_BG (unused elsewhere)
 # Chroma-key transparency (-transparentcolor) is a Windows-only Tk feature; on
@@ -93,13 +96,15 @@ PANEL_MARGIN = _s(7)
 PANEL_RADIUS = _s(20)
 
 CREATURE_CX = CARD_W // 2
-CREATURE_CY = _s(64)
+# Centered in the creature zone (margin..caption) so the adult grows symmetrically
+# into the headroom rather than crowding the top edge or the caption below.
+CREATURE_CY = _s(68)
 CREATURE_PX = _s(5)         # pixel size of the main creature
 
-CAPTION_Y = _s(114)
-BADGE_Y = _s(136)
-LABEL_Y = _s(160)
-INFO_Y = _s(178)            # model · session duration
+CAPTION_Y = _s(129)
+BADGE_Y = _s(151)
+LABEL_Y = _s(175)
+INFO_Y = _s(193)            # model · session duration
 
 CAPTION_FONT = _font(9, "bold")
 LABEL_FONT = _font(7)
