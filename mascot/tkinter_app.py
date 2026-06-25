@@ -15,7 +15,7 @@ import tkinter as tk
 from pathlib import Path
 from typing import Any
 
-from . import config, osplatform, pet_logic, sprite_pixel, ui_icons
+from . import config, osplatform, particles, pet_logic, shake, sprite_pixel, ui_icons
 from . import overlay as overlay_mod
 from .popups import BubbleWindow, StatsTooltip
 from .scale import font as _font
@@ -223,6 +223,55 @@ GRAVESTONE_EDGE = _hex(_lerp(_GRAVE_BASE, _BLACK, 0.35))
 GRAVESTONE_ENGRAVE = _hex(_lerp(_GRAVE_BASE, _BLACK, 0.6))
 GRAVE_GROUND = "#39473b"
 
+# --- particle kinds (hearts + mood emotes) --------------------------------
+# The thin per-kind sprite shells the particle field calls. Each adapts the
+# generic (canvas, x, y, px, rgb-or-None) draw signature to the sprite call,
+# resolving the fade RGB to a hex string where the sprite wants one. The shared
+# lifetime/position/fade math lives in mascot/particles.py.
+_ZZZ_FADE_RGB = (247, 243, 238)   # the "Z" starts near-white and fades to the panel
+
+
+def _draw_heart_sprite(c, x, y, px, rgb) -> None:
+    sprite_pixel.draw_heart(c, x, y, px, _hex(rgb))
+
+
+def _draw_food_sprite(c, x, y, px, _rgb) -> None:
+    sprite_pixel.draw_food(c, x, y, px)
+
+
+def _draw_zzz_sprite(c, x, y, px, rgb) -> None:
+    sprite_pixel.draw_zzz(c, x, y, px, color=_hex(rgb))
+
+
+_PARTICLE_KINDS = {
+    "heart": particles.ParticleKind(
+        name="heart", lifetime_s=HEART_LIFETIME_S, rise_px=HEART_RISE_PX,
+        pixel_px=HEART_PX, tag="heart", max_count=MAX_HEARTS,
+        draw_sprite=_draw_heart_sprite, fade_from=config.STATE_COLORS["happy"],
+    ),
+    "food": particles.ParticleKind(
+        name="food", lifetime_s=EMOTE_LIFETIME_S, rise_px=EMOTE_RISE_PX,
+        pixel_px=EMOTE_PX, tag="emote", max_count=3,
+        draw_sprite=_draw_food_sprite, fade_from=None,
+    ),
+    "zzz": particles.ParticleKind(
+        name="zzz", lifetime_s=EMOTE_LIFETIME_S, rise_px=EMOTE_RISE_PX,
+        pixel_px=EMOTE_PX, tag="emote", max_count=3,
+        draw_sprite=_draw_zzz_sprite, fade_from=_ZZZ_FADE_RGB,
+    ),
+}
+
+# The attention-shake recipe (intensity ramp + amplitude/frequency bands), fed to
+# the Shake seam that owns the absolute-from-rest offset math.
+_SHAKE_CONFIG = shake.ShakeConfig(
+    after_s=WAITING_SHAKE_AFTER_S,
+    ramp_s=WAITING_SHAKE_RAMP_S,
+    amp_min=WAITING_SHAKE_AMP_MIN,
+    amp_max=WAITING_SHAKE_AMP_MAX,
+    freq_min=WAITING_SHAKE_FREQ_MIN,
+    freq_max=WAITING_SHAKE_FREQ_MAX,
+)
+
 
 def _accent(state: str) -> str:
     return _hex(config.STATE_COLORS.get(state, config.STATE_COLORS["idle"]))
@@ -300,25 +349,28 @@ class MascotWindow:
         # built once the raw state is known below); only the blink *scheduler*
         # clock stays here, as it drives when to ASK the overlay for a blink.
         self._next_blink = 0.0
-        self._hearts: list[dict[str, float]] = []
-        self._emotes: list[dict[str, Any]] = []   # mood popups (food / zzz)
+        # The rising-particle field (hearts from a pet, food/zzz mood emotes) owns
+        # the lifetime math and the two formerly-parallel state lists.
+        self._particles = particles.Particles(_PARTICLE_KINDS, panel_fill=_PANEL_FILL_RGB)
         self._next_emote = 0.0
         self._press_pos: tuple[int, int] | None = None
         self._last_shake_pos: tuple[int, int] | None = None
         self._last_move: tuple[int, int] | None = None
         self._reversals: list[float] = []
-        # Attention-shake bookkeeping: when the current "waiting" began, and the
-        # window offset we've currently applied (so we can shake relative to wherever
-        # the card rests — and settle it back — without drifting). The resting
-        # position is captured once when a shake begins; every frame then sets an
-        # absolute geometry of rest+offset (see _set_shake_offset for why).
+        # Attention-shake: the Shake seam owns the intensity ramp, the amplitude/
+        # frequency derivation and the absolute-from-rest offset (it captures the
+        # resting position once when a shake begins; every frame then sets an
+        # absolute geometry of rest+offset — see mascot/shake.py for why). The
+        # last applied offset is tracked here only to skip redundant geometry calls.
         self._shake_offset: tuple[int, int] = (0, 0)
-        self._rest_pos: tuple[int, int] | None = None
 
         raw = state.get("state", "idle")
         self._overlay = overlay_mod.Overlay(_OVERLAY_CONFIG, raw=raw, now=time.time())
         self._effective_state = self._compute_effective_state(time.time())
         self._anim_t0 = time.time()
+        # The shake's phase clock is aligned with the animation clock so the sway is
+        # continuous (the original derived its phase from ``now - self._anim_t0``).
+        self._shake = shake.Shake(_SHAKE_CONFIG, t0=self._anim_t0)
 
         # canvas item ids we animate / restyle in place
         self._border_id: int | None = None
@@ -516,35 +568,11 @@ class MascotWindow:
     def _emit_hearts(self, now: float) -> None:
         """Spawn a small staggered burst of hearts at the creature's upper-right —
         the same origin as the mood emotes, drifting up-and-right."""
+        origin = (float(CREATURE_CX + _s(20)), float(CREATURE_CY - _s(14)))
         for _ in range(3):
-            self._hearts.append({
-                "x": float(CREATURE_CX + _s(20) + random.uniform(-4, 6)),
-                "y0": float(CREATURE_CY - _s(14)),
-                "t0": now + random.uniform(0.0, 0.15),
-                "drift": random.uniform(2.0, 12.0),
-            })
-        self._hearts = self._hearts[-MAX_HEARTS:]
-
-    def _animate_hearts(self, now: float) -> None:
-        """Move active hearts up while fading them toward the panel; drop expired."""
-        self.canvas.delete("heart")
-        if not self._hearts:
-            return
-        base = config.STATE_COLORS["happy"]
-        alive: list[dict[str, float]] = []
-        for h in self._hearts:
-            prog = (now - h["t0"]) / HEART_LIFETIME_S
-            if prog < 0.0:        # staggered start: not visible yet
-                alive.append(h)
-                continue
-            if prog >= 1.0:       # finished
-                continue
-            x = h["x"] + h["drift"] * prog
-            y = h["y0"] - prog * HEART_RISE_PX
-            color = _hex(_lerp(base, _PANEL_FILL_RGB, prog))
-            sprite_pixel.draw_heart(self.canvas, x, y, HEART_PX, color)
-            alive.append(h)
-        self._hearts = alive
+            jitter = (origin[0] + random.uniform(-4, 6), origin[1])
+            self._particles.emit("heart", jitter, now,
+                                  stagger_s=0.15, drift_range=(2.0, 12.0))
 
     # --- mood emotes (food / zzz popups) ----------------------------------
     def _schedule_emote(self, now: float) -> None:
@@ -557,37 +585,11 @@ class MascotWindow:
         if self._next_emote == 0.0:
             self._next_emote = now + random.uniform(EMOTE_MIN_GAP_S, EMOTE_MAX_GAP_S)
         elif now >= self._next_emote:
-            self._emotes.append({
-                "kind": kind,
-                # Upper-right of the creature, drifting up-and-right into empty panel.
-                "x": float(CREATURE_CX + _s(24) + random.uniform(-2, 6)),
-                "y0": float(CREATURE_CY - _s(20)),
-                "t0": now,
-                "drift": random.uniform(2.0, 9.0),
-            })
-            self._emotes = self._emotes[-3:]
+            # Upper-right of the creature, drifting up-and-right into empty panel.
+            origin = (float(CREATURE_CX + _s(24) + random.uniform(-2, 6)),
+                      float(CREATURE_CY - _s(20)))
+            self._particles.emit(kind, origin, now, drift_range=(2.0, 9.0))
             self._next_emote = now + random.uniform(EMOTE_MIN_GAP_S, EMOTE_MAX_GAP_S)
-
-    def _animate_emotes(self, now: float) -> None:
-        """Rise + fade the active mood emotes; drop expired ones."""
-        self.canvas.delete("emote")
-        if not self._emotes:
-            return
-        alive: list[dict[str, Any]] = []
-        for e in self._emotes:
-            prog = (now - e["t0"]) / EMOTE_LIFETIME_S
-            if prog >= 1.0:
-                continue
-            x = e["x"] + e["drift"] * prog
-            y = e["y0"] - prog * EMOTE_RISE_PX
-            if e["kind"] == "food":
-                sprite_pixel.draw_food(self.canvas, x, y, EMOTE_PX)
-            else:
-                # the "Z" fades toward the panel as it drifts up
-                color = _hex(_lerp((247, 243, 238), _PANEL_FILL_RGB, prog))
-                sprite_pixel.draw_zzz(self.canvas, x, y, EMOTE_PX, color=color)
-            alive.append(e)
-        self._emotes = alive
 
     def _track_shake(self, x_root: int, y_root: int) -> None:
         """Count rapid direction reversals on any axis; enough -> go dizzy."""
@@ -782,12 +784,14 @@ class MascotWindow:
             self.canvas.move("creature", 0, target - self._bob_y)
             self._bob_y = target
 
-            # Rising heart particles from a pet.
-            self._animate_hearts(now)
-
-            # Mood popups (food when hungry, "Z" when sleepy), every few seconds.
+            # Mood popups (food when hungry, "Z" when sleepy), every few seconds —
+            # scheduled before the field is drawn so a freshly emitted emote shows
+            # this frame, as before.
             self._schedule_emote(now)
-            self._animate_emotes(now)
+
+            # Rising particles: pet hearts + the mood emotes, one shared lifetime
+            # path (mascot/particles.py). Repaints the live ones, drops the expired.
+            self._particles.draw(self.canvas, now)
 
             # Gentle border pulse while the raw state needs the user's attention.
             if self._border_id is not None:
@@ -831,34 +835,27 @@ class MascotWindow:
             self._reset_shake_offset()  # still within the grace window
             return
 
-        intensity = min(1.0, (elapsed - WAITING_SHAKE_AFTER_S) / WAITING_SHAKE_RAMP_S)
-        amp = WAITING_SHAKE_AMP_MIN + (WAITING_SHAKE_AMP_MAX - WAITING_SHAKE_AMP_MIN) * intensity
-        freq = (WAITING_SHAKE_FREQ_MIN
-                + (WAITING_SHAKE_FREQ_MAX - WAITING_SHAKE_FREQ_MIN) * intensity)
-        phase = (now - self._anim_t0) * freq * 2 * math.pi
-        # A steady horizontal sway, plus a jitter that grows with intensity so it
-        # reads as a gentle wobble at first and a violent buzz once ignored a while.
-        ox = amp * math.sin(phase) + random.uniform(-1.0, 1.0) * amp * 0.5 * intensity
-        oy = random.uniform(-1.0, 1.0) * amp * 0.6
-        self._set_shake_offset(round(ox), round(oy))
+        ox, oy = self._shake.offset(now, elapsed)
+        self._set_shake_offset(ox, oy)
 
     def _set_shake_offset(self, ox: int, oy: int) -> None:
-        """Offset the card from its resting position by (ox, oy).
+        """Apply the Shake seam's (ox, oy) as an *absolute* geometry of rest+(ox, oy).
 
-        The rest position is captured once, the moment the shake begins, and every
-        frame then sets an *absolute* geometry of rest+(ox, oy). An earlier version
-        moved by deltas off ``winfo_x()``; because that value lags a frame behind a
-        just-applied ``geometry`` on Windows, the error accumulated on every shake
-        reversal and slowly walked a frantically shaking card clean off-screen."""
+        The seam holds the resting position (captured here, once, the moment the
+        shake begins) and the offset math; the card just reads ``winfo_x/y`` to seed
+        the anchor and pushes the geometry — see mascot/shake.py for why this avoids
+        the old Windows delta-drift that walked a frantic card off-screen."""
         if (ox, oy) == self._shake_offset:
             return
-        if self._rest_pos is None:        # starting to shake: remember where it rests
+        if not self._shake.is_shaking:    # starting to shake: remember where it rests
             try:
-                self._rest_pos = (self.root.winfo_x(), self.root.winfo_y())
+                self._shake.begin((self.root.winfo_x(), self.root.winfo_y()))
             except tk.TclError:
                 return
+        rest = self._shake.rest_pos
+        assert rest is not None           # begin() succeeded, so rest is captured
         try:
-            self.root.geometry(f"+{self._rest_pos[0] + ox}+{self._rest_pos[1] + oy}")
+            self.root.geometry(f"+{rest[0] + ox}+{rest[1] + oy}")
         except tk.TclError:
             return
         self._shake_offset = (ox, oy)
@@ -867,13 +864,14 @@ class MascotWindow:
         """Settle the card back onto its captured resting position (zero shake)."""
         if self._shake_offset == (0, 0):
             return
-        if self._rest_pos is not None:
+        rest = self._shake.rest_pos
+        if rest is not None:
             try:
-                self.root.geometry(f"+{self._rest_pos[0]}+{self._rest_pos[1]}")
+                self.root.geometry(f"+{rest[0]}+{rest[1]}")
             except tk.TclError:
                 pass
         self._shake_offset = (0, 0)
-        self._rest_pos = None
+        self._shake.end()
 
     def set_hidden(self, hidden: bool) -> None:
         """Withdraw or restore this card (and its speech bubble) for the tray's
