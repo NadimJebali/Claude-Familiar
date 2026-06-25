@@ -15,7 +15,8 @@ import tkinter as tk
 from pathlib import Path
 from typing import Any
 
-from . import config, effective_state, osplatform, pet_logic, sprite_pixel, ui_icons
+from . import config, osplatform, pet_logic, sprite_pixel, ui_icons
+from . import overlay as overlay_mod
 from .popups import BubbleWindow, StatsTooltip
 from .scale import font as _font
 from .scale import s as _s
@@ -189,6 +190,19 @@ WAITING_SHAKE_AMP_MIN = min(_s(2), WAITING_SHAKE_AMP_MAX)  # gentle start, never
 WAITING_SHAKE_FREQ_MIN = 4.0     # sways/sec when gentle
 WAITING_SHAKE_FREQ_MAX = 11.0    # sways/sec when frantic
 
+# The fixed thresholds every card's effective-state overlay feeds into the pure
+# core: overlay durations (dizzy/celebrate/blink) plus the sleep / watchdog /
+# shake delays. Shared by all cards — the timers themselves are per-card.
+_OVERLAY_CONFIG = overlay_mod.OverlayConfig(
+    dizzy_duration_s=DIZZY_DURATION_S,
+    celebrate_duration_s=CELEBRATE_DURATION_S,
+    blink_duration_s=BLINK_DURATION_S,
+    sleep_after_idle_s=config.SLEEP_AFTER_IDLE_S,
+    shake_after_s=WAITING_SHAKE_AFTER_S,
+    thinking_stall_s=THINKING_STALL_S,
+    working_stall_s=WORKING_STALL_S,
+)
+
 
 def _hex(rgb: tuple[int, int, int]) -> str:
     r, g, b = (max(0, min(255, round(c))) for c in rgb)
@@ -281,10 +295,10 @@ class MascotWindow:
         self._pet_data: dict[str, Any] | None = None
         self._tooltip: StatsTooltip | None = None
 
-        # effective-state / shake bookkeeping (must exist before first compute)
-        self._dizzy_until = 0.0
-        self._celebrate_until = 0.0
-        self._blink_until = 0.0
+        # effective-state / shake bookkeeping (must exist before first compute).
+        # The five expiry timers now live in the overlay (see `self._overlay`,
+        # built once the raw state is known below); only the blink *scheduler*
+        # clock stays here, as it drives when to ASK the overlay for a blink.
         self._next_blink = 0.0
         self._hearts: list[dict[str, float]] = []
         self._emotes: list[dict[str, Any]] = []   # mood popups (food / zzz)
@@ -302,8 +316,7 @@ class MascotWindow:
         self._rest_pos: tuple[int, int] | None = None
 
         raw = state.get("state", "idle")
-        self._idle_since: float | None = time.time() if raw == "idle" else None
-        self._waiting_since: float | None = time.time() if raw == "waiting" else None
+        self._overlay = overlay_mod.Overlay(_OVERLAY_CONFIG, raw=raw, now=time.time())
         self._effective_state = self._compute_effective_state(time.time())
         self._anim_t0 = time.time()
 
@@ -477,7 +490,7 @@ class MascotWindow:
         # simple mode the card is a read-only indicator, so a tap is a dead tap.
         now = time.time()
         raw = self.state.get("state", "idle")
-        if (self._pet_enabled and moved < PET_TAP_MAX_DIST and now >= self._dizzy_until
+        if (self._pet_enabled and moved < PET_TAP_MAX_DIST and not self._overlay.is_dizzy(now)
                 and raw not in ("waiting", "dead")):
             self._pet(now)
             if self._on_pet is not None:    # a pet earns a small coin trickle
@@ -496,7 +509,7 @@ class MascotWindow:
 
     def _pet(self, now: float) -> None:
         """Reward a tap with a happy face and a few rising pixel hearts."""
-        self._celebrate_until = now + CELEBRATE_DURATION_S
+        self._overlay.note_celebrate(now)
         self._emit_hearts(now)
         self._refresh_render(now)
 
@@ -600,28 +613,17 @@ class MascotWindow:
         self._last_move = (dx, dy)
 
     def _trigger_dizzy(self, now: float) -> None:
-        self._dizzy_until = now + DIZZY_DURATION_S
+        self._overlay.note_dizzy(now)
         self._refresh_render(now)
 
     # --- effective state --------------------------------------------------
     def _compute_effective_state(self, now: float) -> str:
-        """Thin wrapper over the pure effective_state.compute, fed this card's
-        live timers, the configured thresholds, and the pet's mood (idle-only)."""
+        """Ask the overlay for the displayed state: it owns this card's live timers
+        and thresholds and delegates to the pure core, layering the pet's mood
+        (idle-only) on top."""
         mood = pet_logic.mood(self._pet_data) if self._pet_data else "content"
-        return effective_state.compute(
-            self.state.get("state", "idle"), now,
-            ts=self.state.get("ts"),
-            dizzy_until=self._dizzy_until,
-            celebrate_until=self._celebrate_until,
-            waiting_since=self._waiting_since,
-            idle_since=self._idle_since,
-            blink_until=self._blink_until,
-            sleep_after_idle_s=config.SLEEP_AFTER_IDLE_S,
-            shake_after_s=WAITING_SHAKE_AFTER_S,
-            thinking_stall_s=THINKING_STALL_S,
-            working_stall_s=WORKING_STALL_S,
-            mood=mood,
-        )
+        return self._overlay.effective(
+            self.state.get("state", "idle"), now, ts=self.state.get("ts"), mood=mood)
 
     def set_pet(self, pet: dict[str, Any]) -> None:
         """Receive the latest global pet from the manager: drives the idle-face mood
@@ -643,19 +645,10 @@ class MascotWindow:
         # Celebrate briefly when Claude finishes an active turn (working/thinking
         # -> idle). Not on waiting->idle (the user just answered) or dead.
         if prev_raw in ("working", "thinking") and raw == "idle":
-            self._celebrate_until = now + CELEBRATE_DURATION_S
-        if raw == "idle":
-            if self._idle_since is None:
-                self._idle_since = now
-        else:
-            self._idle_since = None
-
-        # Track how long an attention prompt has gone unanswered (drives the shake).
-        if raw == "waiting":
-            if self._waiting_since is None:
-                self._waiting_since = now
-        else:
-            self._waiting_since = None
+            self._overlay.note_celebrate(now)
+        # Track the raw-state clocks (how long idle -> dozing; how long an attention
+        # prompt has gone unanswered -> shake/glare).
+        self._overlay.note_raw(raw, now)
 
         self._refresh_render(now)
         self._sync_bubble(state.get("notify"))
@@ -701,7 +694,7 @@ class MascotWindow:
         if self._next_blink == 0.0:
             self._next_blink = now + random.uniform(BLINK_MIN_GAP_S, BLINK_MAX_GAP_S)
         elif now >= self._next_blink:
-            self._blink_until = now + BLINK_DURATION_S
+            self._overlay.note_blink(now)
             self._next_blink = (now + BLINK_DURATION_S
                                 + random.uniform(BLINK_MIN_GAP_S, BLINK_MAX_GAP_S))
 
@@ -830,10 +823,10 @@ class MascotWindow:
         ignored, the wider and faster the shake — up to a frantic maximum."""
         if self._drag_offset is not None:
             return  # the user is holding it; don't fight the drag
-        if self.state.get("state", "idle") != "waiting" or self._waiting_since is None:
+        elapsed = self._overlay.waiting_elapsed(now)
+        if self.state.get("state", "idle") != "waiting" or elapsed is None:
             self._reset_shake_offset()  # not waiting -> settle back to rest
             return
-        elapsed = now - self._waiting_since
         if elapsed < WAITING_SHAKE_AFTER_S:
             self._reset_shake_offset()  # still within the grace window
             return

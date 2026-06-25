@@ -1418,3 +1418,101 @@ def test_play_does_not_mutate_input():
     pet = _pet(happiness=40, inventory={"ball": 1})
     shop.play(pet, _BALL, now=1000.0)
     assert pet["happiness"] == 40 and pet["cooldowns"] == {}
+
+
+# --- effective-state overlay (the stateful seam over the pure core, #26) ---
+# The overlay OWNS the five expiry timers + thresholds; its `effective(now, mood)`
+# read must return EXACTLY what bare `compute` returns for the same timers. These
+# tests pin that equivalence across the whole priority ladder, plus the intent
+# writes and the two narrow timer reads the card relies on (tap gate, shake).
+
+_OVER_CFG = {"dizzy_duration_s": 2.0, "celebrate_duration_s": 1.5, "blink_duration_s": 0.12,
+             "sleep_after_idle_s": 60.0, "shake_after_s": 30.0,
+             "thinking_stall_s": 180.0, "working_stall_s": 240.0}
+
+
+def _overlay(raw="idle", now=0.0):
+    from mascot import overlay as overlay_mod
+    return overlay_mod.Overlay(overlay_mod.OverlayConfig(**_OVER_CFG), raw=raw, now=now)
+
+
+def test_overlay_matches_bare_compute_across_the_full_ladder():
+    # Each row drives the overlay with intent writes to set up one rung of the
+    # ladder, then asserts effective() == the rung's expected displayed state.
+    o_dizzy = _overlay()
+    o_dizzy.note_dizzy(100.0)
+    assert o_dizzy.effective("working", 100.5, ts=100.5) == "dizzy"
+
+    o_happy = _overlay()
+    o_happy.note_celebrate(100.0)
+    assert o_happy.effective("idle", 100.5, ts=100.5) == "happy"
+
+    o_wait = _overlay("waiting", now=0.0)
+    o_wait.note_raw("waiting", 0.0)
+    assert o_wait.effective("waiting", 100.0, ts=100.0) == "waiting_angry"   # 100 >= shake 30
+
+    # stall watchdog: a stale busy state falls to idle (ts far behind now).
+    assert _overlay().effective("working", 1000.0, ts=700.0) == "idle"       # 300 > 240
+
+    # sleeping: idle long enough to doze.
+    o_sleep = _overlay("idle", now=0.0)
+    o_sleep.note_raw("idle", 0.0)
+    assert o_sleep.effective("idle", 100.0, ts=100.0) == "sleeping"          # 100 >= 60
+
+    # blink: a brief idle blink window (idle, but not long enough to doze).
+    o_blink = _overlay("idle", now=95.0)
+    o_blink.note_raw("idle", 95.0)
+    o_blink.note_blink(99.95)
+    assert o_blink.effective("idle", 100.0, ts=100.0) == "idle_blink"        # within 0.12
+
+    # mood-idle: a quiet idle tints the face by mood.
+    o_mood = _overlay("idle", now=100.0)
+    o_mood.note_raw("idle", 100.0)
+    assert o_mood.effective("idle", 100.0, ts=100.0, mood="hungry") == "idle_hungry"
+
+    # raw pass-through: a fresh busy state shows as-is.
+    assert _overlay().effective("working", 100.0, ts=100.0) == "working"
+
+
+def test_overlay_effective_equals_compute_for_identical_timers():
+    # The overlay is a thin home over the pure core: after the same intent writes,
+    # effective() agrees with compute() called directly with the equivalent timers.
+    from mascot import effective_state
+    o = _overlay("waiting", now=10.0)
+    o.note_dizzy(50.0)          # dizzy_until = 52.0
+    o.note_celebrate(40.0)      # celebrate_until = 41.5
+    o.note_raw("waiting", 10.0)  # waiting_since stays 10.0
+    bare = effective_state.compute(
+        "waiting", 100.0, ts=100.0, dizzy_until=52.0, celebrate_until=41.5,
+        waiting_since=10.0, idle_since=None, blink_until=0.0, sleep_after_idle_s=60.0,
+        shake_after_s=30.0, thinking_stall_s=180.0, working_stall_s=240.0, mood="content")
+    assert o.effective("waiting", 100.0, ts=100.0) == bare
+
+
+def test_overlay_note_raw_clears_idle_clock_on_leaving_idle():
+    # Leaving idle clears the doze clock, so a brief busy blip can't doze off later.
+    o = _overlay("idle", now=0.0)
+    o.note_raw("idle", 0.0)
+    o.note_raw("working", 5.0)   # left idle
+    o.note_raw("idle", 6.0)      # re-entered idle: clock restarts at 6.0, not 0.0
+    assert o.effective("idle", 50.0, ts=50.0) == "idle"          # only 44s idle < 60
+    assert o.effective("idle", 70.0, ts=70.0) == "sleeping"      # 64s >= 60
+
+
+def test_overlay_is_dizzy_gates_only_while_dizzy():
+    # The tap gate: petting is suppressed only while the dizzy overlay is active.
+    o = _overlay()
+    assert o.is_dizzy(100.0) is False
+    o.note_dizzy(100.0)
+    assert o.is_dizzy(101.0) is True       # within the 2.0s window
+    assert o.is_dizzy(103.0) is False      # expired
+
+
+def test_overlay_waiting_elapsed_tracks_unanswered_prompt():
+    # The shake reads elapsed-since-waiting; None when nothing is waiting.
+    o = _overlay()
+    assert o.waiting_elapsed(100.0) is None
+    o.note_raw("waiting", 100.0)
+    assert o.waiting_elapsed(140.0) == 40.0
+    o.note_raw("idle", 150.0)              # prompt answered
+    assert o.waiting_elapsed(160.0) is None
