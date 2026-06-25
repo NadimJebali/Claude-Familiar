@@ -145,10 +145,12 @@ class MascotManager:
 
     # --- pet (Tamagotchi) -------------------------------------------------
     def _update_pet(self, states: dict[str, dict], now: float) -> None:
-        """Advance the global pet from this poll: decay needs over real elapsed
-        time and award coins/XP for session-state transitions, then persist
-        (throttled). Wrapped so a pet failure never disrupts the mascot. No-op when
-        the pet is disabled (simple hook-visualiser mode)."""
+        """Advance the global pet from this poll. This method owns only the I/O:
+        pick up external pet.json edits via mtime, compute elapsed / working / today,
+        call the pure `pet_logic.tick` seam (decay -> first-prompt gate -> award),
+        push the result to every card, and save (throttled, forced on award).
+        Wrapped so a pet failure never disrupts the mascot. No-op when the pet is
+        disabled (simple hook-visualiser mode)."""
         if not self._pet_enabled:
             return
         try:
@@ -164,24 +166,13 @@ class MascotManager:
             self._pet_last_tick = now
             # Energy drains while any session is busy and refills while all idle.
             working = any(s.get("state") in ("working", "thinking") for s in states.values())
-            self.pet = pet_logic.decay(self.pet, elapsed, working)
-
             today = time.strftime("%Y-%m-%d", time.localtime(now))
-            awarded = False
-            for sid, state in states.items():
-                prev = self._pet_prev.get(sid)
-                if prev is None:
-                    continue   # a new session has no transition yet
-                events = pet_logic.events_for_transition(prev, state)
-                # Daily first-prompt streak: the first new prompt of the day pays a
-                # bonus. Claim it once per calendar day (persisted in last_prompt_date).
-                if (pet_logic.started_prompt(prev, state)
-                        and self.pet.get("last_prompt_date") != today):
-                    self.pet = {**self.pet, "last_prompt_date": today}
-                    events = [*events, pet_logic.FIRST_PROMPT_OF_DAY]
-                if events:
-                    self.pet = pet_logic.apply_events(self.pet, events, today=today)
-                    awarded = True
+            # The pure per-poll seam owns decay -> first-prompt gate -> award; we
+            # feed it our last-seen snapshot so only sessions still present can fire.
+            self.pet, awarded = pet_logic.tick(
+                self.pet, self._pet_prev, states,
+                elapsed=elapsed, working=working, today=today,
+            )
             # Track only live sessions, so a closed card can't fire a stale transition.
             self._pet_prev = dict(states)
 
