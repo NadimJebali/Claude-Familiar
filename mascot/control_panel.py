@@ -9,19 +9,16 @@ dark ``ttk`` theme and grouped into tabs. Run with:
 """
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
-import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
 from . import (
     icon,
-    launcher,
     osplatform,
-    pet_store,
+    setup,
     sprite_pixel,
     ui_icons,
 )
@@ -29,8 +26,6 @@ from . import settings as settings_mod
 from .tkinter_app import _accent, round_rect
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-EMIT_PY = PROJECT_ROOT / "hooks" / "emit.py"
-INSTALL_HOOKS = PROJECT_ROOT / "scripts" / "install_hooks.py"
 RUN_SCRIPT = PROJECT_ROOT / "run_mascot.py"
 
 PREVIEW_W, PREVIEW_H = 132, 150
@@ -52,22 +47,6 @@ DANGER = "#e06c75"
 # Per-widget-size preview scaling (mirrors the config.UI_SCALE buckets, clamped so
 # the largest creature still fits the preview canvas).
 _PREVIEW_PX = {"small": 4, "medium": 5, "large": 6}       # per-cell px
-
-
-def _hooks_installed() -> bool:
-    """True if our emit.py is referenced by a hook command in settings.json."""
-    path = Path.home() / ".claude" / "settings.json"
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    needle = str(EMIT_PY)
-    for entries in (data.get("hooks") or {}).values():
-        for entry in entries if isinstance(entries, list) else []:
-            for hook in entry.get("hooks", []):
-                if needle in hook.get("command", ""):
-                    return True
-    return False
 
 
 def _pythonw() -> Path:
@@ -142,7 +121,7 @@ class ControlPanel:
         self.size_var = tk.StringVar(value=s["widget_size"])
         self.simple_stage_var = tk.StringVar(value=s["simple_stage"])
         self.transp_var = tk.BooleanVar(value=s["transparent_bg"])
-        self.startup_var = tk.BooleanVar(value=launcher.autostart_enabled())
+        self.startup_var = tk.BooleanVar(value=setup.autostart_enabled())
         self.shake_after_var = tk.IntVar(value=int(s["shake_after_s"]))
         self.shake_amp_var = tk.IntVar(value=int(s["shake_max_amp_px"]))
         self.home_monitor_var = tk.IntVar(value=int(s["home_monitor"]))
@@ -353,14 +332,14 @@ class ControlPanel:
 
     # --- actions ----------------------------------------------------------
     def _refresh_hooks(self) -> None:
-        if _hooks_installed():
+        if setup.hooks_installed():
             self.hooks_label.config(text=" Installed", image=self._check_img,
                                     compound="left", foreground=OK)
         else:
             self.hooks_label.config(text="Not installed", image="", foreground=WARN)
 
     def _refresh_install(self) -> None:
-        if launcher.is_installed():
+        if setup.shortcuts_installed():
             self.install_label.config(text=" Added to Start menu", image=self._check_img,
                                       compound="left", foreground=OK)
             self.install_btn.config(text="Remove")
@@ -369,21 +348,14 @@ class ControlPanel:
             self.install_btn.config(text="Add to Start menu")
 
     def _toggle_install(self) -> None:
-        if launcher.is_installed():
-            launcher.uninstall()
-            self.status.set("Removed Claude Familiar shortcuts.")
-        else:
-            created = launcher.install()
-            self.status.set(
-                f"Added {len(created)} shortcut(s). Find it in the Start menu / on your desktop.")
+        _installed, msg = setup.toggle_shortcuts()
+        self.status.set(msg)
         self._refresh_install()
 
     def _install_hooks(self) -> None:
-        proc = subprocess.run([sys.executable, str(INSTALL_HOOKS)],
-                              capture_output=True, text=True)
+        _ok, msg = setup.install_hooks()
         self._refresh_hooks()
-        ok = proc.returncode == 0
-        self.status.set("Hooks installed." if ok else f"Hook install failed: {proc.stderr[:200]}")
+        self.status.set(msg)
 
     def _refresh_pet_controls(self) -> None:
         """Grey the pet-management controls (the 'Pet' button + 'Reset progress') when
@@ -418,8 +390,7 @@ class ControlPanel:
             "tamagotchi_enabled": bool(self.pet_enabled_var.get()),
             "native_notifications": bool(self.notify_var.get()),
         })
-        launcher.set_autostart(bool(self.startup_var.get()))
-        self.startup_var.set(launcher.autostart_enabled())
+        self.startup_var.set(setup.set_autostart(bool(self.startup_var.get())))
         self.status.set("Saved. Restart the widget for these changes to take effect.")
 
     def _launch(self) -> None:
@@ -438,9 +409,7 @@ class ControlPanel:
             self.status.set(f"Could not open Pet window: {exc}")
 
     def _reset_pet(self) -> None:
-        """Overwrite pet.json with a fresh egg. A running widget picks this up via
-        its external-change reload (it's the single writer; this is a deliberate
-        out-of-band reset from Settings)."""
+        """Confirm, then reset pet.json to a fresh egg via the setup seam."""
         from tkinter import messagebox
         if not messagebox.askyesno(
             "Reset pet progress",
@@ -449,17 +418,11 @@ class ControlPanel:
             icon="warning", parent=self.root,
         ):
             return
-        try:
-            now = time.time()
-            pet_store.save(pet_store.PET_PATH, pet_store.default_pet(now), now)
-            self.status.set("Pet progress reset — a fresh egg is on the way.")
-        except OSError as exc:
-            self.status.set(f"Could not reset pet: {exc}")
+        _ok, msg = setup.reset_pet()
+        self.status.set(msg)
 
     def _uninstall(self) -> None:
         from tkinter import messagebox
-
-        from . import uninstall as uninstall_mod
         if not messagebox.askyesno(
             "Uninstall Claude Familiar",
             "This removes the Claude Code hooks, Start-menu/desktop and run-at-login "
@@ -468,7 +431,7 @@ class ControlPanel:
             icon="warning", parent=self.root,
         ):
             return
-        actions = uninstall_mod.full_uninstall()
+        actions = setup.uninstall()
         messagebox.showinfo(
             "Claude Familiar uninstalled",
             "Done:\n\n" + "\n".join(f"• {a}" for a in actions),
