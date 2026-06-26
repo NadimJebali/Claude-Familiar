@@ -18,11 +18,10 @@ from pathlib import Path
 from tkinter import ttk
 
 from . import (
-    autostart,
     icon,
+    launcher,
     osplatform,
     pet_store,
-    shortcuts,
     sprite_pixel,
     ui_icons,
 )
@@ -143,7 +142,7 @@ class ControlPanel:
         self.size_var = tk.StringVar(value=s["widget_size"])
         self.simple_stage_var = tk.StringVar(value=s["simple_stage"])
         self.transp_var = tk.BooleanVar(value=s["transparent_bg"])
-        self.startup_var = tk.BooleanVar(value=autostart.is_enabled())
+        self.startup_var = tk.BooleanVar(value=launcher.autostart_enabled())
         self.shake_after_var = tk.IntVar(value=int(s["shake_after_s"]))
         self.shake_amp_var = tk.IntVar(value=int(s["shake_max_amp_px"]))
         self.home_monitor_var = tk.IntVar(value=int(s["home_monitor"]))
@@ -361,7 +360,7 @@ class ControlPanel:
             self.hooks_label.config(text="Not installed", image="", foreground=WARN)
 
     def _refresh_install(self) -> None:
-        if shortcuts.is_installed():
+        if launcher.is_installed():
             self.install_label.config(text=" Added to Start menu", image=self._check_img,
                                       compound="left", foreground=OK)
             self.install_btn.config(text="Remove")
@@ -370,11 +369,11 @@ class ControlPanel:
             self.install_btn.config(text="Add to Start menu")
 
     def _toggle_install(self) -> None:
-        if shortcuts.is_installed():
-            shortcuts.uninstall_app_shortcuts()
+        if launcher.is_installed():
+            launcher.uninstall()
             self.status.set("Removed Claude Familiar shortcuts.")
         else:
-            created = shortcuts.install_app_shortcuts()
+            created = launcher.install()
             self.status.set(
                 f"Added {len(created)} shortcut(s). Find it in the Start menu / on your desktop.")
         self._refresh_install()
@@ -419,8 +418,8 @@ class ControlPanel:
             "tamagotchi_enabled": bool(self.pet_enabled_var.get()),
             "native_notifications": bool(self.notify_var.get()),
         })
-        autostart.set_enabled(bool(self.startup_var.get()))
-        self.startup_var.set(autostart.is_enabled())
+        launcher.set_autostart(bool(self.startup_var.get()))
+        self.startup_var.set(launcher.autostart_enabled())
         self.status.set("Saved. Restart the widget for these changes to take effect.")
 
     def _launch(self) -> None:

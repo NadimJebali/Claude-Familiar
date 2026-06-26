@@ -362,7 +362,7 @@ Static typing is [mypy](https://mypy.readthedocs.io/) (config in `mypy.ini`);
 
 ```bash
 python scripts/install_hooks.py --uninstall   # remove hooks
-python -c "from mascot import shortcuts; shortcuts.uninstall_app_shortcuts()"  # remove Start-menu/desktop shortcuts
+python -c "from mascot import launcher; launcher.uninstall()"  # remove Start-menu/desktop shortcuts
 ```
 
 (You can also remove the shortcuts from the settings panel's **Install** section.)

@@ -1,15 +1,17 @@
-"""App-launcher shortcut creation for Claude Familiar (Windows + Linux).
+"""App-launcher shortcut primitives + destinations for Claude Familiar.
 
-A single home for the platform-specific logic that makes the app show up — and
-launch — like any other installed application:
+The low-level building blocks the platform launcher adapters
+(:mod:`mascot.launchers`) call — not a platform fork itself. The fork lives once,
+in :mod:`mascot.launcher`; this module just provides the primitives and the
+destination paths:
 
-  * Windows: ``.lnk`` files (Start menu + desktop) via pywin32's WScript.Shell COM,
-    pointing ``pythonw.exe`` at the target with the mascot ``.ico``, no console.
-  * Linux: freedesktop ``.desktop`` entries (application menu + desktop) with the
-    mascot ``.png``.
+  * Windows: ``.lnk`` files via pywin32's WScript.Shell COM, pointing
+    ``pythonw.exe`` at the target with the mascot ``.ico``, no console.
+  * Linux: freedesktop ``.desktop`` entries (via :mod:`mascot.desktop_entry`) with
+    the mascot ``.png``.
 
 The user-facing app icon opens the Settings / control panel; the run-at-login
-entry (see :mod:`mascot.autostart`) launches the widget instead.
+entry launches the widget instead.
 """
 from __future__ import annotations
 
@@ -107,40 +109,3 @@ def create_desktop_entry(path: Path, *, exec_args: str = SETTINGS_ARGS,
         path, name=APP_NAME, exec_cmd=exec_cmd, comment=comment,
         icon=str(png), path=str(PROJECT_ROOT),
     )
-
-
-# --- platform-dispatching public API ---------------------------------------
-def install_app_shortcuts(desktop: bool = True) -> list[Path]:
-    """Register the app: menu entry (always) + optional desktop icon.
-
-    These open the Settings / control panel (the run-at-login entry, created
-    separately, is what launches the widget). Returns the shortcuts that exist.
-    """
-    created: list[Path] = []
-    if osplatform.IS_WINDOWS:
-        targets = [START_MENU_SHORTCUT] + ([DESKTOP_SHORTCUT] if desktop else [])
-        for shortcut in targets:
-            if create_shortcut(shortcut, arguments=SETTINGS_ARGS,
-                               description=f"{APP_NAME} — Settings"):
-                created.append(shortcut)
-    else:
-        targets = [MENU_ENTRY] + ([DESKTOP_ENTRY] if desktop else [])
-        for entry in targets:
-            if create_desktop_entry(entry):
-                created.append(entry)
-    return created
-
-
-def uninstall_app_shortcuts() -> None:
-    """Remove the menu and desktop shortcuts for the current platform."""
-    if osplatform.IS_WINDOWS:
-        remove_shortcut(START_MENU_SHORTCUT)
-        remove_shortcut(DESKTOP_SHORTCUT)
-    else:
-        remove_shortcut(MENU_ENTRY)
-        remove_shortcut(DESKTOP_ENTRY)
-
-
-def is_installed() -> bool:
-    """True if the menu shortcut exists (the app is 'installed')."""
-    return (START_MENU_SHORTCUT if osplatform.IS_WINDOWS else MENU_ENTRY).exists()

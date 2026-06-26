@@ -31,8 +31,8 @@ def main() -> None:
     print(f"Adding Claude Familiar to the {_MENU} and desktop...")
     result = subprocess.run(
         [sys.executable, "-c",
-         "from mascot import shortcuts; "
-         "print('\\n'.join(str(p) for p in shortcuts.install_app_shortcuts()))"],
+         "from mascot import launcher; "
+         "print('\\n'.join(str(p) for p in launcher.install()))"],
         cwd=str(ROOT), check=False, capture_output=True, text=True,
     )
     for line in result.stdout.splitlines():
