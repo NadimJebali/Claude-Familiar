@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import autostart, icon, shortcuts
+from . import icon, launcher
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 INSTALL_HOOKS = PROJECT_ROOT / "scripts" / "install_hooks.py"
@@ -40,14 +40,14 @@ def full_uninstall() -> list[str]:
 
     # 3) Remove Start-menu + desktop shortcuts.
     try:
-        shortcuts.uninstall_app_shortcuts()
+        launcher.uninstall()
         done.append("Removed Start-menu and desktop shortcuts")
     except OSError as exc:
         done.append(f"Could not remove shortcuts: {exc}")
 
     # 4) Disable run-at-login.
     try:
-        autostart.disable()
+        launcher.set_autostart(False)
         done.append("Disabled run-at-login")
     except OSError as exc:
         done.append(f"Could not disable run-at-login: {exc}")

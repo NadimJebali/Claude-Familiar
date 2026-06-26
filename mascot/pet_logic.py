@@ -158,6 +158,54 @@ def apply_events(pet: dict[str, Any], events: list[str], *, today: str) -> dict[
     return pet
 
 
+def tick(
+    pet: dict[str, Any],
+    prev_states: dict[str, dict[str, Any]],
+    next_states: dict[str, dict[str, Any]],
+    *,
+    elapsed: float,
+    working: bool,
+    today: str,
+) -> tuple[dict[str, Any], bool]:
+    """Advance the pet one poll and report whether anything was awarded.
+
+    This is the single pure seam the widget runs every poll. It owns the whole
+    per-poll *sequencing* so the manager keeps only the I/O around it:
+
+    1. ``decay`` needs over ``elapsed`` seconds (energy drains while ``working``).
+    2. For each session that has a previous state, derive earnable events from its
+       transition (``events_for_transition``) and, when the session just began a
+       new prompt (``started_prompt``), claim the once-per-calendar-day first-prompt
+       streak bonus — gated here on the pet's ``last_prompt_date`` so it pays at most
+       once per ``today`` no matter how many idle->thinking transitions occur.
+    3. ``apply_events`` funnels every event through the daily-capped ``award``.
+
+    ``working`` is the manager's aggregate "any session busy" flag (any session in
+    ``working``/``thinking``); it is computed there but its meaning is fixed here, so
+    tests and production agree. Replay protection is structural: only sessions
+    present in BOTH ``prev_states`` and ``next_states`` can fire, so a closed session
+    can't replay a stale transition, and the same transition can't double-award
+    because ``prev_states`` is the manager's last-seen snapshot. ``pet`` is not
+    mutated; a NEW pet and the ``awarded`` flag are returned.
+    """
+    pet = decay(pet, elapsed, working)
+    awarded = False
+    for sid, nxt in next_states.items():
+        prev = prev_states.get(sid)
+        if prev is None:
+            continue   # a new session has no transition yet
+        events = events_for_transition(prev, nxt)
+        # Daily first-prompt streak: the first new prompt of the day pays a bonus.
+        # Claim it once per calendar day (persisted in last_prompt_date on the pet).
+        if started_prompt(prev, nxt) and pet.get("last_prompt_date") != today:
+            pet = {**pet, "last_prompt_date": today}
+            events = [*events, FIRST_PROMPT_OF_DAY]
+        if events:
+            pet = apply_events(pet, events, today=today)
+            awarded = True
+    return pet, awarded
+
+
 # Mood thresholds (tuning, not structural). A need at/below LOW_NEED drags the
 # mood down; all needs at/above HIGH_NEED make the pet sparkle.
 LOW_NEED = 25

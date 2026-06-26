@@ -972,6 +972,119 @@ def test_apply_events_does_not_mutate_input():
     assert pet["coins"] == 0
 
 
+# --- pet tick: the pure per-poll seam (#25) -------------------------------
+# Behavioral tests for tick(pet, prev_states, next_states, *, elapsed, working,
+# today) -> (pet, awarded). They assert the SEQUENCING and replay guarantees the
+# manager relies on, not the manager's I/O. prev_states is the manager's last-seen
+# snapshot; next_states is this poll's states.
+
+
+def test_tick_decays_then_awards_in_one_poll():
+    # A poll both ages the needs (decay) and pays out a finished turn (award): a
+    # working->idle session over an hour of elapsed time lowers hunger AND adds coins.
+    from mascot import pet_logic
+    prev = {"s1": _sess("working")}
+    nxt = {"s1": _sess("idle")}
+    out, awarded = pet_logic.tick(
+        _pet(), prev, nxt, elapsed=_HOUR, working=False, today="2026-06-17")
+    coins, _ = pet_logic.EVENT_REWARDS[pet_logic.TURN_COMPLETED]
+    assert out["hunger"] < 100          # decay ran
+    assert out["coins"] == coins        # the completed turn paid out
+    assert awarded is True
+
+
+def test_tick_with_no_transition_only_decays_and_reports_no_award():
+    from mascot import pet_logic
+    # Same session, same state -> no earnable event, but decay still happens.
+    out, awarded = pet_logic.tick(
+        _pet(), {"s1": _sess("idle")}, {"s1": _sess("idle")},
+        elapsed=_HOUR, working=True, today="2026-06-17")
+    assert out["coins"] == 0
+    assert out["hunger"] < 100
+    assert awarded is False
+
+
+def test_tick_first_prompt_fires_once_per_calendar_day():
+    from mascot import pet_logic
+    bonus = pet_logic.EVENT_REWARDS[pet_logic.FIRST_PROMPT_OF_DAY][0]
+    # First idle->thinking of the day pays the streak bonus and stamps the date.
+    first, awarded = pet_logic.tick(
+        _pet(), {"s1": _sess("idle")}, {"s1": _sess("thinking")},
+        elapsed=0.0, working=True, today="2026-06-17")
+    assert awarded is True
+    assert first["coins"] == bonus
+    assert first["last_prompt_date"] == "2026-06-17"
+    # A second idle->thinking the SAME day must NOT pay the bonus again.
+    second, _ = pet_logic.tick(
+        first, {"s2": _sess("idle")}, {"s2": _sess("thinking")},
+        elapsed=0.0, working=True, today="2026-06-17")
+    assert second["coins"] == bonus     # unchanged: no second streak bonus
+
+
+def test_tick_first_prompt_pays_again_on_a_new_day():
+    from mascot import pet_logic
+    bonus = pet_logic.EVENT_REWARDS[pet_logic.FIRST_PROMPT_OF_DAY][0]
+    day1, _ = pet_logic.tick(
+        _pet(), {"s1": _sess("idle")}, {"s1": _sess("thinking")},
+        elapsed=0.0, working=True, today="2026-06-17")
+    day2, awarded = pet_logic.tick(
+        day1, {"s1": _sess("idle")}, {"s1": _sess("thinking")},
+        elapsed=0.0, working=True, today="2026-06-18")
+    assert awarded is True
+    assert day2["coins"] == 2 * bonus
+    assert day2["last_prompt_date"] == "2026-06-18"
+
+
+def test_tick_replay_guard_a_closed_session_cannot_fire_a_stale_transition():
+    # A session present in prev_states but GONE this poll (its card closed) must
+    # not replay its old working->idle as a fresh completed turn.
+    from mascot import pet_logic
+    out, awarded = pet_logic.tick(
+        _pet(), {"gone": _sess("working")}, {},
+        elapsed=0.0, working=False, today="2026-06-17")
+    assert out["coins"] == 0
+    assert awarded is False
+
+
+def test_tick_does_not_double_award_when_prev_equals_next():
+    # The manager feeds last-seen as prev; once a transition is recorded, replaying
+    # the SAME state pair yields no further award (no double-pay across polls).
+    from mascot import pet_logic
+    settled = {"s1": _sess("idle")}
+    out, awarded = pet_logic.tick(
+        _pet(), settled, settled, elapsed=0.0, working=False, today="2026-06-17")
+    assert out["coins"] == 0
+    assert awarded is False
+
+
+def test_tick_working_aggregate_controls_energy_direction():
+    # The manager's working flag is documented at the seam: energy drains when
+    # working is True and refills when False, all else equal.
+    from mascot import pet_logic
+    busy, _ = pet_logic.tick(
+        _pet(energy=50), {"s1": _sess("idle")}, {"s1": _sess("idle")},
+        elapsed=_HOUR, working=True, today="2026-06-17")
+    rested, _ = pet_logic.tick(
+        _pet(energy=50), {"s1": _sess("idle")}, {"s1": _sess("idle")},
+        elapsed=_HOUR, working=False, today="2026-06-17")
+    assert busy["energy"] < 50
+    assert rested["energy"] > 50
+
+
+def test_tick_does_not_mutate_input_pet_or_states():
+    from mascot import pet_logic
+    pet = _pet(hunger=50)
+    prev = {"s1": _sess("working")}
+    nxt = {"s1": _sess("idle")}
+    pet_snapshot = json.dumps(pet, sort_keys=True)
+    prev_snapshot = json.dumps(prev, sort_keys=True)
+    nxt_snapshot = json.dumps(nxt, sort_keys=True)
+    pet_logic.tick(pet, prev, nxt, elapsed=_HOUR, working=True, today="2026-06-17")
+    assert json.dumps(pet, sort_keys=True) == pet_snapshot
+    assert json.dumps(prev, sort_keys=True) == prev_snapshot
+    assert json.dumps(nxt, sort_keys=True) == nxt_snapshot
+
+
 def test_mood_all_needs_high_is_happy():
     from mascot import pet_logic
     assert pet_logic.mood(_pet(hunger=100, happiness=100, energy=100)) == "happy"
@@ -1305,3 +1418,101 @@ def test_play_does_not_mutate_input():
     pet = _pet(happiness=40, inventory={"ball": 1})
     shop.play(pet, _BALL, now=1000.0)
     assert pet["happiness"] == 40 and pet["cooldowns"] == {}
+
+
+# --- effective-state overlay (the stateful seam over the pure core, #26) ---
+# The overlay OWNS the five expiry timers + thresholds; its `effective(now, mood)`
+# read must return EXACTLY what bare `compute` returns for the same timers. These
+# tests pin that equivalence across the whole priority ladder, plus the intent
+# writes and the two narrow timer reads the card relies on (tap gate, shake).
+
+_OVER_CFG = {"dizzy_duration_s": 2.0, "celebrate_duration_s": 1.5, "blink_duration_s": 0.12,
+             "sleep_after_idle_s": 60.0, "shake_after_s": 30.0,
+             "thinking_stall_s": 180.0, "working_stall_s": 240.0}
+
+
+def _overlay(raw="idle", now=0.0):
+    from mascot import overlay as overlay_mod
+    return overlay_mod.Overlay(overlay_mod.OverlayConfig(**_OVER_CFG), raw=raw, now=now)
+
+
+def test_overlay_matches_bare_compute_across_the_full_ladder():
+    # Each row drives the overlay with intent writes to set up one rung of the
+    # ladder, then asserts effective() == the rung's expected displayed state.
+    o_dizzy = _overlay()
+    o_dizzy.note_dizzy(100.0)
+    assert o_dizzy.effective("working", 100.5, ts=100.5) == "dizzy"
+
+    o_happy = _overlay()
+    o_happy.note_celebrate(100.0)
+    assert o_happy.effective("idle", 100.5, ts=100.5) == "happy"
+
+    o_wait = _overlay("waiting", now=0.0)
+    o_wait.note_raw("waiting", 0.0)
+    assert o_wait.effective("waiting", 100.0, ts=100.0) == "waiting_angry"   # 100 >= shake 30
+
+    # stall watchdog: a stale busy state falls to idle (ts far behind now).
+    assert _overlay().effective("working", 1000.0, ts=700.0) == "idle"       # 300 > 240
+
+    # sleeping: idle long enough to doze.
+    o_sleep = _overlay("idle", now=0.0)
+    o_sleep.note_raw("idle", 0.0)
+    assert o_sleep.effective("idle", 100.0, ts=100.0) == "sleeping"          # 100 >= 60
+
+    # blink: a brief idle blink window (idle, but not long enough to doze).
+    o_blink = _overlay("idle", now=95.0)
+    o_blink.note_raw("idle", 95.0)
+    o_blink.note_blink(99.95)
+    assert o_blink.effective("idle", 100.0, ts=100.0) == "idle_blink"        # within 0.12
+
+    # mood-idle: a quiet idle tints the face by mood.
+    o_mood = _overlay("idle", now=100.0)
+    o_mood.note_raw("idle", 100.0)
+    assert o_mood.effective("idle", 100.0, ts=100.0, mood="hungry") == "idle_hungry"
+
+    # raw pass-through: a fresh busy state shows as-is.
+    assert _overlay().effective("working", 100.0, ts=100.0) == "working"
+
+
+def test_overlay_effective_equals_compute_for_identical_timers():
+    # The overlay is a thin home over the pure core: after the same intent writes,
+    # effective() agrees with compute() called directly with the equivalent timers.
+    from mascot import effective_state
+    o = _overlay("waiting", now=10.0)
+    o.note_dizzy(50.0)          # dizzy_until = 52.0
+    o.note_celebrate(40.0)      # celebrate_until = 41.5
+    o.note_raw("waiting", 10.0)  # waiting_since stays 10.0
+    bare = effective_state.compute(
+        "waiting", 100.0, ts=100.0, dizzy_until=52.0, celebrate_until=41.5,
+        waiting_since=10.0, idle_since=None, blink_until=0.0, sleep_after_idle_s=60.0,
+        shake_after_s=30.0, thinking_stall_s=180.0, working_stall_s=240.0, mood="content")
+    assert o.effective("waiting", 100.0, ts=100.0) == bare
+
+
+def test_overlay_note_raw_clears_idle_clock_on_leaving_idle():
+    # Leaving idle clears the doze clock, so a brief busy blip can't doze off later.
+    o = _overlay("idle", now=0.0)
+    o.note_raw("idle", 0.0)
+    o.note_raw("working", 5.0)   # left idle
+    o.note_raw("idle", 6.0)      # re-entered idle: clock restarts at 6.0, not 0.0
+    assert o.effective("idle", 50.0, ts=50.0) == "idle"          # only 44s idle < 60
+    assert o.effective("idle", 70.0, ts=70.0) == "sleeping"      # 64s >= 60
+
+
+def test_overlay_is_dizzy_gates_only_while_dizzy():
+    # The tap gate: petting is suppressed only while the dizzy overlay is active.
+    o = _overlay()
+    assert o.is_dizzy(100.0) is False
+    o.note_dizzy(100.0)
+    assert o.is_dizzy(101.0) is True       # within the 2.0s window
+    assert o.is_dizzy(103.0) is False      # expired
+
+
+def test_overlay_waiting_elapsed_tracks_unanswered_prompt():
+    # The shake reads elapsed-since-waiting; None when nothing is waiting.
+    o = _overlay()
+    assert o.waiting_elapsed(100.0) is None
+    o.note_raw("waiting", 100.0)
+    assert o.waiting_elapsed(140.0) == 40.0
+    o.note_raw("idle", 150.0)              # prompt answered
+    assert o.waiting_elapsed(160.0) is None
