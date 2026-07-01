@@ -38,7 +38,11 @@ def _rgb(hex_color: str) -> tuple[int, int, int]:
 
 def _creature(stage: str, state: str, accent: tuple[int, int, int], scale: int) -> Image.Image:
     """The pixel creature as a transparent RGBA image, NEAREST-upscaled by `scale`."""
-    grid = sp.grid_for(stage, state)
+    if state == "dead":
+        # The gravestone is a full grid with its own palette, not a composed face.
+        grid, colors = sp._GRAVE, sp.GRAVE_COLORS
+    else:
+        grid, colors = sp.grid_for(stage, state), sp.COLORS
     base = Image.new("RGBA", (sp.GRID_W, sp.GRID_H), (0, 0, 0, 0))
     px = base.load()
     spot = _rgb(sp.EGG_SPECKLE) if stage == "egg" else accent
@@ -46,7 +50,7 @@ def _creature(stage: str, state: str, accent: tuple[int, int, int], scale: int) 
         for x, ch in enumerate(row):
             if ch == ".":
                 continue
-            color = spot if ch == "a" else _rgb(sp.COLORS[ch])
+            color = spot if ch == "a" else _rgb(colors[ch])
             px[x, y] = (*color, 255)
     return base.resize((sp.GRID_W * scale, sp.GRID_H * scale), Image.NEAREST)
 
@@ -96,6 +100,12 @@ def main() -> None:
     # The Claude-activity faces, each in its state accent (the hero strip).
     states = ["idle", "thinking", "working", "waiting", "happy", "sleeping"]
     _strip("states", [_tile("baby", s, _BASE) for s in states])
+
+    # The expressive faces: per-tool working looks, plan mode, compaction, the
+    # post-error stumble, and the pixel gravestone.
+    expressions = ["working_read", "working_edit", "working_run", "working_web",
+                   "planning", "compacting", "stumble", "dead"]
+    _strip("expressions", [_tile("baby", s, _BASE) for s in expressions])
 
     # egg -> baby -> teen -> adult, growing as it goes.
     stages = ["egg", "baby", "teen", "adult"]

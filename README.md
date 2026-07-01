@@ -11,13 +11,23 @@ driven entirely by Claude Code's [hooks](https://docs.anthropic.com/en/docs/clau
   <em>The face changes live as Claude works:&nbsp; idle · thinking · working · waiting · happy · sleeping</em>
 </p>
 
+<p align="center">
+  <img src="docs/images/expressions.png" width="100%"
+       alt="Eight more looks — reading, editing, running, browsing, planning, compacting, a teary stumble, and a pixel gravestone">
+  <br>
+  <em>…and it wears the work on its face:&nbsp; reading · editing · running · browsing · planning · compacting · oops · out of usage</em>
+</p>
+
 One mascot per Claude session. Sub-agents show up as little badges underneath.
 
 The mascot is a **pixel-art creature** styled after Claude's blocky terminal
 mascot — drawn cell-by-cell on a Tkinter canvas (no image files, no GPU at
 runtime). Each state has its own face with a sparkle that glows in the state's
-accent color — plus a `dizzy` shake easter egg and a `dead` gravestone when usage
-runs out. _(The images in this README are baked from that same sprite by
+accent color. While working, the eyes match the tool (reading / editing /
+running / browsing); plan mode gets a pondering `planning` face; compaction a
+squeezed-shut `compacting` one. There's a `dizzy` shake easter egg, a teary
+`stumble` when a turn dies on an API error, and a pixel-art gravestone when
+usage runs out. _(The images in this README are baked from that same sprite by
 [`scripts/gen_readme_art.py`](scripts/gen_readme_art.py), so they can't drift.)_
 
 When idle, the face also reflects the **pet's mood** (see below) — droopy when
