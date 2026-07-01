@@ -11,6 +11,11 @@ from typing import Any
 from . import config
 from .proc import pid_alive
 
+# emit.py's atomic writes go through "<session>.<pid>.tmp" files; a crash (or an
+# exhausted replace-retry) can strand one. Sweep strays older than this while
+# polling, so the state dir stays clean without ever racing a live write.
+TMP_SWEEP_AGE_S = 300.0
+
 
 def is_stale(state: dict[str, Any], now: float, timeout: float = config.STALE_TIMEOUT_S) -> bool:
     """A mascot's heartbeat is older than `timeout` seconds.
@@ -69,6 +74,7 @@ def load_states(
     live: dict[str, dict[str, Any]] = {}
     if not state_dir.exists():
         return live
+    _sweep_stale_tmp(state_dir, now)
     for path in state_dir.glob("*.json"):
         try:
             state = json.loads(path.read_text(encoding="utf-8"))
@@ -78,3 +84,13 @@ def load_states(
         if is_session_live(state, now, timeout):
             live[sid] = state
     return live
+
+
+def _sweep_stale_tmp(state_dir: Path, now: float) -> None:
+    """Best-effort removal of stranded emit temp files (never a fresh in-flight one)."""
+    for tmp in state_dir.glob("*.tmp"):
+        try:
+            if now - tmp.stat().st_mtime > TMP_SWEEP_AGE_S:
+                tmp.unlink(missing_ok=True)
+        except OSError:
+            continue

@@ -15,36 +15,29 @@ import tkinter as tk
 from pathlib import Path
 from typing import Any
 
-from . import config, osplatform, particles, pet_logic, shake, sprite_pixel, ui_icons
+from . import (
+    config,
+    effective_state,
+    osplatform,
+    particles,
+    pet_logic,
+    shake,
+    sprite_pixel,
+    ui_icons,
+)
 from . import overlay as overlay_mod
 from .popups import BubbleWindow, StatsTooltip
 from .scale import font as _font
 from .scale import s as _s
 
 
-def _draw_gravestone(c, cx, cy) -> None:
-    """A simple tombstone, drawn with canvas primitives (art-style independent)."""
-    hw = _s(24)
-    top = cy - _s(34)
-    bottom = cy + _s(28)
-    # grassy mound at the base
-    c.create_oval(cx - _s(34), bottom - _s(5), cx + _s(34), bottom + _s(9),
-                  fill=GRAVE_GROUND, outline="", tags="creature")
-    # rounded-top stone tablet
-    round_rect(c, cx - hw, top, cx + hw, bottom, _s(16),
-               fill=GRAVESTONE_FILL, outline=GRAVESTONE_EDGE, width=_s(2), tags="creature")
-    # engraved RIP
-    c.create_text(cx, cy - _s(2), text="R.I.P", fill=GRAVESTONE_ENGRAVE,
-                  font=_font(10, "bold"), tags="creature")
-
-
 def _draw_creature(c, cx, cy, state, accent, stage="baby", flourish=False) -> None:
     """Draw the mascot (pixel art), scaled to the widget size.
 
     The creature grows with its evolution `stage` and gets a milestone `flourish`
-    at higher levels."""
+    at higher levels; the "dead" state is the pixel gravestone (stage-independent)."""
     if state == "dead":
-        _draw_gravestone(c, cx, cy)
+        sprite_pixel.draw_gravestone(c, cx, cy, CREATURE_PX)
         return
     px = max(1, round(CREATURE_PX * sprite_pixel.STAGE_SCALE.get(stage, 1.0)))
     sprite_pixel.draw_creature(c, cx, cy, state, accent, px, stage=stage, flourish=flourish)
@@ -69,6 +62,13 @@ STATE_CAPTIONS = {
     "idle_tired": "idle",
     "thinking": "thinking…",
     "working": "working…",
+    "working_read": "working…",    # per-tool faces are still "working" to the caption
+    "working_edit": "working…",    # (the tool name itself takes over when running)
+    "working_run": "working…",
+    "working_web": "working…",
+    "planning": "planning…",       # plan mode: pondering, not yet building
+    "stumble": "oops…",            # a turn died on a transient API error
+    "compacting": "tidying memories…",  # Claude Code is compacting its context
     "waiting": "needs you!",
     "waiting_angry": "needs you!",   # angry variant once the card starts shaking
     "sleeping": "zzz…",
@@ -133,6 +133,10 @@ DIZZY_DURATION_S = 2.0
 # Celebrate (happy) reaction: brief joy when Claude finishes a turn, and when the
 # mascot is petted. A widget-side effective state, like dizzy/sleeping.
 CELEBRATE_DURATION_S = 1.5
+
+# Stumble: how long the embarrassed "oops" face lingers after a turn dies on a
+# transient API error (measured from the state file's heartbeat at that moment).
+STUMBLE_FACE_S = 8.0
 
 # Evolution: the pet earns a milestone flourish (extra sparkles) at this level.
 MILESTONE_LEVEL = 10
@@ -213,16 +217,6 @@ def _lerp(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[i
     return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))  # type: ignore[return-value]
 
 
-# Gravestone palette derived from the shared "dead" state color so it tracks
-# config.STATE_COLORS; edge/engrave are progressively darker shades of it. The
-# grassy mound is its own hue (not a state color).
-_BLACK = (0, 0, 0)
-_GRAVE_BASE = config.STATE_COLORS["dead"]
-GRAVESTONE_FILL = _hex(_GRAVE_BASE)
-GRAVESTONE_EDGE = _hex(_lerp(_GRAVE_BASE, _BLACK, 0.35))
-GRAVESTONE_ENGRAVE = _hex(_lerp(_GRAVE_BASE, _BLACK, 0.6))
-GRAVE_GROUND = "#39473b"
-
 # --- particle kinds (hearts + mood emotes) --------------------------------
 # The thin per-kind sprite shells the particle field calls. Each adapts the
 # generic (canvas, x, y, px, rgb-or-None) draw signature to the sprite call,
@@ -300,24 +294,32 @@ def _format_duration(seconds: float) -> str:
     return f"{h}h {m}m"
 
 
-def _render_sig(state: dict[str, Any], effective_state: str, stage: str = "baby",
+def _render_sig(state: dict[str, Any], effective: str, face: str, stage: str = "baby",
                 flourish: bool = False) -> tuple:
     """Signature of the *visible* content (excludes the `ts` heartbeat)."""
     subs = tuple((s.get("type") or "?") for s in (state.get("subagents") or []))
     # Include the active tool so the caption refreshes as it changes (only while
     # working, where it's surfaced — see _caption).
-    tool = state.get("tool") if effective_state == "working" else None
-    # Include evolution stage/flourish so the card redraws when the pet evolves,
-    # even if the face (effective state) is unchanged.
-    return (effective_state, stage, flourish, subs, state.get("cwd", ""), tool)
+    tool = state.get("tool") if effective == "working" else None
+    # Include the display face (it can change while the effective state doesn't —
+    # e.g. the tool kind swaps mid-working) and the evolution stage/flourish so the
+    # card redraws when the pet evolves, even if the face is unchanged.
+    return (effective, face, stage, flourish, subs, state.get("cwd", ""), tool)
 
 
-def _caption(effective_state: str, tool: str | None) -> str:
+# Faces whose caption is superseded by the running tool's name (the working family
+# — plus planning, where a running tool is still the more informative caption).
+_TOOL_CAPTION_FACES = frozenset(
+    {"working", "working_read", "working_edit", "working_run", "working_web",
+     "planning"})
+
+
+def _caption(face: str, tool: str | None) -> str:
     """Caption under the creature. While a tool is actively running, name it
     (e.g. 'Bash…') instead of the generic 'working…'."""
-    if effective_state == "working" and tool:
+    if tool and face in _TOOL_CAPTION_FACES:
         return f"{tool}…"
-    return STATE_CAPTIONS.get(effective_state, "—")
+    return STATE_CAPTIONS.get(face, "—")
 
 
 class MascotWindow:
@@ -367,6 +369,7 @@ class MascotWindow:
         raw = state.get("state", "idle")
         self._overlay = overlay_mod.Overlay(_OVERLAY_CONFIG, raw=raw, now=time.time())
         self._effective_state = self._compute_effective_state(time.time())
+        self._display_face = self._compute_display_face(time.time())
         self._anim_t0 = time.time()
         # The shake's phase clock is aligned with the animation clock so the sway is
         # continuous (the original derived its phase from ``now - self._anim_t0``).
@@ -433,7 +436,7 @@ class MascotWindow:
         binding survives — safe to call mid-drag and on any visible change."""
         c = self.canvas
         c.delete("all")
-        accent = _accent(self._effective_state)
+        accent = _accent(self._display_face)
 
         # rounded panel + accent border (the border pulses while waiting)
         round_rect(c, PANEL_MARGIN, PANEL_MARGIN, CARD_W - PANEL_MARGIN,
@@ -445,12 +448,12 @@ class MascotWindow:
 
         stage = self._pet_stage()
         flourish = self._pet_flourish()
-        _draw_creature(c, CREATURE_CX, CREATURE_CY, self._effective_state, accent,
+        _draw_creature(c, CREATURE_CX, CREATURE_CY, self._display_face, accent,
                        stage, flourish)
         self._bob_y = 0.0
 
         c.create_text(CREATURE_CX, CAPTION_Y,
-                      text=_caption(self._effective_state, self.state.get("tool")),
+                      text=_caption(self._display_face, self.state.get("tool")),
                       font=CAPTION_FONT, fill=accent)
 
         self._draw_badges(c)
@@ -465,7 +468,8 @@ class MascotWindow:
         self._info_id = c.create_text(CREATURE_CX, INFO_Y, text=self._info_text_val,
                                       font=INFO_FONT, fill=INFO_FG)
 
-        self._sig = _render_sig(self.state, self._effective_state, stage, flourish)
+        self._sig = _render_sig(self.state, self._effective_state, self._display_face,
+                                stage, flourish)
 
     def _info_line(self, now: float) -> str:
         """'<model> · <duration>' — either part omitted if unknown."""
@@ -645,8 +649,9 @@ class MascotWindow:
 
         raw = state.get("state", "idle")
         # Celebrate briefly when Claude finishes an active turn (working/thinking
-        # -> idle). Not on waiting->idle (the user just answered) or dead.
-        if prev_raw in ("working", "thinking") and raw == "idle":
+        # -> idle). Not on waiting->idle (the user just answered), dead, or a
+        # stumble (a turn that died on an API error is nothing to cheer).
+        if effective_state.should_celebrate(prev_raw, raw, bool(state.get("stumbled"))):
             self._overlay.note_celebrate(now)
         # Track the raw-state clocks (how long idle -> dozing; how long an attention
         # prompt has gone unanswered -> shake/glare).
@@ -656,13 +661,26 @@ class MascotWindow:
         self._sync_bubble(state.get("notify"))
 
     def _refresh_render(self, now: float) -> None:
-        """Recompute effective state; redraw only if the visible content changed."""
+        """Recompute effective state + display face; redraw only if the visible
+        content changed."""
         self._effective_state = self._compute_effective_state(now)
-        new_sig = _render_sig(self.state, self._effective_state,
+        self._display_face = self._compute_display_face(now)
+        new_sig = _render_sig(self.state, self._effective_state, self._display_face,
                               self._pet_stage(), self._pet_flourish())
         if new_sig == self._sig:
             return
         self._render()
+
+    def _compute_display_face(self, now: float) -> str:
+        """The face to draw for the current effective state (per-tool working
+        variants, plan-mode planning, the brief post-stumble "oops"). Purely
+        visual — captions/emotes key off the effective state where they should."""
+        stumbled_recent = (bool(self.state.get("stumbled"))
+                           and now - (self.state.get("ts") or 0.0) < STUMBLE_FACE_S)
+        return effective_state.display_face(
+            self._effective_state, tool=self.state.get("tool"),
+            permission_mode=self.state.get("permission_mode", ""),
+            stumbled_recent=stumbled_recent)
 
     def _pet_stage(self) -> str:
         """The pet's evolution stage from its level + age (egg/baby/teen/adult).

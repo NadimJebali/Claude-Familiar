@@ -56,12 +56,14 @@ def compute(
     # Don't sit frozen on a busy state if the turn died with no closing hook (e.g.
     # a usage/session-limit hit): after a long stale stretch with no new event,
     # fall the display back to idle. `working` gets a longer grace than `thinking`
-    # so a single long-running tool isn't cut off early. Return idle *directly* —
-    # not via `raw = "idle"` fall-through — so a stalled busy state can never reach
-    # the idle->sleeping/blink overlay below and "doze off" mid-build.
+    # so a single long-running tool isn't cut off early; `compacting` gets the
+    # thinking grace (compaction may emit no closing hook of its own). Return idle
+    # *directly* — not via `raw = "idle"` fall-through — so a stalled busy state
+    # can never reach the idle->sleeping/blink overlay below and "doze off"
+    # mid-build.
     if ts is not None:
         stale = now - ts
-        if (raw == "thinking" and stale > thinking_stall_s) or (
+        if (raw in ("thinking", "compacting") and stale > thinking_stall_s) or (
                 raw == "working" and stale > working_stall_s):
             return "idle"
     if raw == "idle":
@@ -73,3 +75,62 @@ def compute(
         # Otherwise the idle face reflects the pet's mood (default: plain idle).
         return _MOOD_IDLE_FACE.get(mood, "idle")
     return raw
+
+
+# --- display face (the face DRAWN for an effective state) --------------------
+# The effective state is semantic (it drives captions, emotes, animation); the
+# display face is purely visual. While working, the face reflects what KIND of
+# tool is running — the caption already names the tool, now the eyes match.
+_TOOL_FACES = {
+    "Read": "working_read", "Glob": "working_read", "Grep": "working_read",
+    "NotebookRead": "working_read",
+    "Edit": "working_edit", "Write": "working_edit", "MultiEdit": "working_edit",
+    "NotebookEdit": "working_edit",
+    "Bash": "working_run", "PowerShell": "working_run", "BashOutput": "working_run",
+    "WebSearch": "working_web", "WebFetch": "working_web",
+}
+
+
+def working_face_for(tool: str | None) -> str:
+    """The working-face variant for the active tool (exact hook `tool_name`).
+
+    Unknown tools — and no tool at all — keep the classic focused-squint
+    ``working`` face, so a brand-new tool name can never break the render.
+    """
+    return _TOOL_FACES.get(tool or "", "working")
+
+
+# The idle family a recent stumble may override. Dozing and the blink stay out —
+# they're distinct ladder states and outrank the embarrassed face on purpose.
+_IDLE_MOOD_FACES = frozenset(
+    {"idle", "idle_happy", "idle_hungry", "idle_sad", "idle_tired"})
+
+
+def display_face(effective: str, *, tool: str | None = None,
+                 permission_mode: str = "", stumbled_recent: bool = False) -> str:
+    """The face to DRAW for an effective state.
+
+    A recent stumble (a turn that died on a transient API error) shows a brief
+    embarrassed face over the idle family. Plan mode outranks the tool variants —
+    while ``permission_mode == "plan"`` a busy mascot wears the pondering
+    ``planning`` face (in plan mode Claude only reads and searches, so "planning"
+    says more than the tool kind). Otherwise the working face varies by tool;
+    every other effective state is its own face. (The render falls back to the
+    idle face for any unknown key, so a missing sprite can never crash a card.)
+    """
+    if stumbled_recent and effective in _IDLE_MOOD_FACES:
+        return "stumble"
+    if permission_mode == "plan" and effective in ("thinking", "working"):
+        return "planning"
+    if effective == "working":
+        return working_face_for(tool)
+    return effective
+
+
+def should_celebrate(prev_raw: str, raw: str, stumbled: bool) -> bool:
+    """Whether an active->idle transition earns the happy hop.
+
+    A turn that ended on a transient API error (``stumbled``) is not a finished
+    turn — celebrating it read as the mascot cheering a failure.
+    """
+    return prev_raw in ("working", "thinking") and raw == "idle" and not stumbled

@@ -5,7 +5,8 @@ as a grid of square "pixels" on the Canvas. Designing in ASCII means the art is
 readable and editable right here in the source: tweak a grid, see the change.
 
 Legend:  '.' transparent · 'o' outline · 'O' body (Claude orange) ·
-         'w' eye white · 'k' pupil · 'm' mouth · 'a' state accent (sparkle/mood)
+         'w' eye white · 'k' pupil · 'm' mouth · 't' tear (always blue) ·
+         'a' state accent (sparkle/mood)
 """
 from __future__ import annotations
 
@@ -17,8 +18,9 @@ OUTLINE = "#b05a34"
 WHITE = "#f7f3ee"
 PUPIL = "#2c2433"
 MOUTH = "#7a3322"
+TEAR = "#6db3e8"   # a soft sky blue — tears stay blue whatever the state accent
 
-COLORS = {"o": OUTLINE, "O": BODY, "w": WHITE, "k": PUPIL, "m": MOUTH}
+COLORS = {"o": OUTLINE, "O": BODY, "w": WHITE, "k": PUPIL, "m": MOUTH, "t": TEAR}
 
 GRID_W = 16
 GRID_H = 16
@@ -110,6 +112,42 @@ EGG_SPECKLE = "#6f7486"   # dino-egg spots: a steady grey, independent of mood
 # the base cell size by the renderer. Tuning/visual, not structural.
 STAGE_SCALE = {"egg": 0.85, "baby": 1.0, "teen": 1.2, "adult": 1.4}
 
+# The gravestone (the "dead" state — out of usage): a full 16-row grid like the
+# egg, with its own muted palette. Legend: 'e' stone edge · 's' stone · 'v' the
+# engraved cross · 'd' a weathering crack · 'g' earth mound · 'G' grass tufts.
+_GRAVE = [
+    "................",
+    ".....eeeeee.....",
+    "....esssssse....",
+    "...esssssssse...",
+    "...esssvvssse...",
+    "...esvvvvvvse...",
+    "...esssvvssse...",
+    "...esssvvssse...",
+    "...esssssssse...",
+    "...essssssdse...",
+    "...esssssdsse...",
+    "..GesssssssseG..",
+    "..gggggggggggg..",
+    ".gggggggggggggg.",
+    "................",
+    "................",
+]
+GRAVE_COLORS = {
+    "e": "#4f535d",   # stone edge (the dead accent, darkened)
+    "s": "#7a8090",   # stone face — matches STATE_COLORS["dead"]
+    "v": "#303339",   # engraved cross
+    "d": "#5f6472",   # weathering crack
+    "g": "#39473b",   # earth mound
+    "G": "#55684f",   # grass tufts
+}
+
+
+def draw_gravestone(c: tk.Canvas, cx: float, cy: float, px: int = 5,
+                    tag: str = "creature") -> None:
+    """Draw the pixel gravestone centered at (cx, cy) — the mascot's 'dead' look."""
+    _draw_grid(c, _GRAVE, GRAVE_COLORS, cx, cy, px, tag)
+
 # Per-state face (the 5 middle rows: eyes + mouth).
 _FACES = {
     "idle": [
@@ -131,6 +169,42 @@ _FACES = {
         "..oOkkkOOkkkOo..",   # squint — focused
         "..oOOOOOOOOOOo..",
         "..oOOmmmmmmOOo..",
+        "..oOOOOOOOOOOo..",
+    ],
+    # --- per-tool working variants (chosen by effective_state.working_face_for) --
+    "working_read": [
+        "..oOwwwOOwwwOo..",   # eyes cast down the middle — reading a page
+        "..oOwwkOOkwwOo..",
+        "..oOOOOOOOOOOo..",
+        "..oOOOmmmmOOOo..",   # small absorbed line
+        "..oOOOOOOOOOOo..",
+    ],
+    "working_edit": [
+        "..oOOOOOwwwwOo..",   # left brow knitted flat, right eye wide open
+        "..oOkkkOOwkwOo..",   # asymmetric concentration
+        "..oOOOOOOOOOOo..",
+        "..oOOOmmOOOOOo..",   # bitten lip, off-center
+        "..oOOOOOOOOOOo..",
+    ],
+    "working_run": [
+        "..oOkOOOOOOkOo..",   # brow tips angled in — effort
+        "..oOOkkOOkkOOo..",   # tight determined squint
+        "..oOOOOOOOOOOo..",
+        "..oOmwmwwmwmOo..",   # gritted teeth (white glints)
+        "..oOOOOOOOOOOo..",
+    ],
+    "working_web": [
+        "..oOwwwOOOwwOo..",   # one eye wider than the other — scanning
+        "..oOkwwOOOwkOo..",   # pupils darting to opposite edges
+        "..oOOOOOOOOOOo..",
+        "..oOOOmmmOOOOo..",   # slightly-open browsing mouth
+        "..oOOOOOOOOOOo..",
+    ],
+    "planning": [
+        "..oOkwwOOkwwOo..",   # pupils up-and-left — gazing off into the plan
+        "..oOwwwOOwwwOo..",
+        "..oOOOOOOOOaOo..",   # a little idea spark at the temple
+        "..oOOOOmmOOOOo..",   # small pondering hum
         "..oOOOOOOOOOOo..",
     ],
     "waiting": [
@@ -167,6 +241,20 @@ _FACES = {
         "..oOOOOOOOOOOo..",
         "..oOmOOOOOOmOo..",   # smile corners turned up
         "..oOOmmmmmmOOo..",   # big grin
+    ],
+    "compacting": [
+        "..oOaOOOOOOOOo..",   # a bead of effort at the temple (accent)
+        "..oOOkkOOkkOOo..",   # eyes screwed tightly shut…
+        "..oOkOOkkOOkOo..",   # …with strain lines underneath
+        "..oOOOmmmmOOOo..",   # tight flat mouth — squeezing memories together
+        "..oOOOOOOOOOOo..",
+    ],
+    "stumble": [
+        "..oOwwwOOwwwOo..",   # eyes blown wide…
+        "..oOwwwOOwwwOo..",   # …pupils gone — caught out
+        "..oOtOOOOOOtOo..",   # a blue tear at each eye corner…
+        "..oOtOOmmOOtOo..",   # …rolling down past a tiny gasp
+        "..oOOOOOOOOOOo..",
     ],
     "idle_blink": [
         "..oOOOOOOOOOOo..",
@@ -230,6 +318,12 @@ def grid_for(stage: str, state: str) -> list[str]:
 for _stage in (*_BODIES, "egg"):
     for _s in _FACES:
         grid_for(_stage, _s)
+
+# The gravestone gets the same import-time self-check as the faces.
+assert len(_GRAVE) == GRID_H, f"grave: {len(_GRAVE)} rows"
+for _row in _GRAVE:
+    assert len(_row) == GRID_W, f"grave: bad row width {len(_row)!r}"
+    assert set(_row) <= {*GRAVE_COLORS, "."}, f"grave: unknown cell in {_row!r}"
 
 
 def draw_creature(
