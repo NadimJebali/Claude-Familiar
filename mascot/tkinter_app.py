@@ -82,6 +82,7 @@ STATE_CAPTIONS = {
     "working_edit": "working…",    # (the tool name itself takes over when running)
     "working_run": "working…",
     "working_web": "working…",
+    "planning": "planning…",       # plan mode: pondering, not yet building
     "waiting": "needs you!",
     "waiting_angry": "needs you!",   # angry variant once the card starts shaking
     "sleeping": "zzz…",
@@ -326,9 +327,11 @@ def _render_sig(state: dict[str, Any], effective: str, face: str, stage: str = "
     return (effective, face, stage, flourish, subs, state.get("cwd", ""), tool)
 
 
-# Faces whose caption is superseded by the running tool's name (the working family).
+# Faces whose caption is superseded by the running tool's name (the working family
+# — plus planning, where a running tool is still the more informative caption).
 _TOOL_CAPTION_FACES = frozenset(
-    {"working", "working_read", "working_edit", "working_run", "working_web"})
+    {"working", "working_read", "working_edit", "working_run", "working_web",
+     "planning"})
 
 
 def _caption(face: str, tool: str | None) -> str:
@@ -688,11 +691,12 @@ class MascotWindow:
         self._render()
 
     def _compute_display_face(self) -> str:
-        """The face to draw for the current effective state (e.g. the per-tool
-        working variants). Purely visual — captions/emotes key off the effective
-        state where they should."""
+        """The face to draw for the current effective state (per-tool working
+        variants, plan-mode planning). Purely visual — captions/emotes key off
+        the effective state where they should."""
         return effective_state.display_face(
-            self._effective_state, tool=self.state.get("tool"))
+            self._effective_state, tool=self.state.get("tool"),
+            permission_mode=self.state.get("permission_mode", ""))
 
     def _pet_stage(self) -> str:
         """The pet's evolution stage from its level + age (egg/baby/teen/adult).

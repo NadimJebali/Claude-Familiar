@@ -48,9 +48,29 @@ def test_display_face_leaves_other_states_alone():
         assert effective_state.display_face(state, tool="Read") == state
 
 
+# --- planning (plan mode) -----------------------------------------------------
+def test_display_face_is_planning_while_busy_in_plan_mode():
+    assert effective_state.display_face("thinking", permission_mode="plan") == "planning"
+    # In plan mode Claude only reads/searches — planning outranks the tool face.
+    assert effective_state.display_face(
+        "working", tool="Read", permission_mode="plan") == "planning"
+
+
+def test_display_face_ignores_plan_mode_when_not_busy():
+    for state in ("idle", "waiting", "sleeping", "dead", "happy"):
+        assert effective_state.display_face(state, permission_mode="plan") == state
+
+
+def test_display_face_ignores_other_permission_modes():
+    assert effective_state.display_face(
+        "thinking", permission_mode="acceptEdits") == "thinking"
+    assert effective_state.display_face(
+        "working", tool="Edit", permission_mode="default") == "working_edit"
+
+
 # --- the new sprite faces render at every stage ------------------------------
 @pytest.mark.parametrize("face", ["working_read", "working_edit", "working_run",
-                                  "working_web"])
+                                  "working_web", "planning"])
 @pytest.mark.parametrize("stage", ["egg", "baby", "teen", "adult"])
 def test_new_working_faces_compose_at_every_stage(face, stage):
     assert face in sprite_pixel._FACES

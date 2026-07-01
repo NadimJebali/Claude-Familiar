@@ -102,6 +102,7 @@ def default_state(session_id: str, cwd: str = "", model: str = "") -> dict[str, 
         "tool": None,
         "subagents": [],  # list of {"id", "type", "description"}
         "notify": None,   # {"message", "type"} while Claude needs the user (e.g. permission)
+        "permission_mode": "",  # e.g. "plan" — drives the planning face while set
     }
 
 
@@ -131,6 +132,8 @@ def compute_next_state(
         nxt["cwd"] = payload["cwd"]
     if payload.get("model"):
         nxt["model"] = payload["model"]
+    if payload.get("permission_mode"):
+        nxt["permission_mode"] = payload["permission_mode"]
 
     if event == "SessionStart":
         nxt["state"] = "idle"

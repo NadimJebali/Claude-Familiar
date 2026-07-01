@@ -98,13 +98,19 @@ def working_face_for(tool: str | None) -> str:
     return _TOOL_FACES.get(tool or "", "working")
 
 
-def display_face(effective: str, *, tool: str | None = None) -> str:
+def display_face(effective: str, *, tool: str | None = None,
+                 permission_mode: str = "") -> str:
     """The face to DRAW for an effective state.
 
-    Today this only varies the working face by tool; every other effective state
-    is its own face. (The render falls back to the idle face for any unknown
-    key, so a missing sprite can never crash a card.)
+    Plan mode outranks the tool variants — while ``permission_mode == "plan"``
+    a busy mascot wears the pondering ``planning`` face (in plan mode Claude only
+    reads and searches, so "planning" says more than the tool kind). Otherwise
+    the working face varies by tool; every other effective state is its own
+    face. (The render falls back to the idle face for any unknown key, so a
+    missing sprite can never crash a card.)
     """
+    if permission_mode == "plan" and effective in ("thinking", "working"):
+        return "planning"
     if effective == "working":
         return working_face_for(tool)
     return effective

@@ -162,6 +162,13 @@ _FACES = {
         "..oOOOmmmOOOOo..",   # slightly-open browsing mouth
         "..oOOOOOOOOOOo..",
     ],
+    "planning": [
+        "..oOkwwOOkwwOo..",   # pupils up-and-left — gazing off into the plan
+        "..oOwwwOOwwwOo..",
+        "..oOOOOOOOOaOo..",   # a little idea spark at the temple
+        "..oOOOOmmOOOOo..",   # small pondering hum
+        "..oOOOOOOOOOOo..",
+    ],
     "waiting": [
         "..oOwwwOOwwwOo..",
         "..oOwkwOOwkwOo..",
