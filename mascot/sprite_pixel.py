@@ -5,7 +5,8 @@ as a grid of square "pixels" on the Canvas. Designing in ASCII means the art is
 readable and editable right here in the source: tweak a grid, see the change.
 
 Legend:  '.' transparent · 'o' outline · 'O' body (Claude orange) ·
-         'w' eye white · 'k' pupil · 'm' mouth · 'a' state accent (sparkle/mood)
+         'w' eye white · 'k' pupil · 'm' mouth · 't' tear (always blue) ·
+         'a' state accent (sparkle/mood)
 """
 from __future__ import annotations
 
@@ -17,8 +18,9 @@ OUTLINE = "#b05a34"
 WHITE = "#f7f3ee"
 PUPIL = "#2c2433"
 MOUTH = "#7a3322"
+TEAR = "#6db3e8"   # a soft sky blue — tears stay blue whatever the state accent
 
-COLORS = {"o": OUTLINE, "O": BODY, "w": WHITE, "k": PUPIL, "m": MOUTH}
+COLORS = {"o": OUTLINE, "O": BODY, "w": WHITE, "k": PUPIL, "m": MOUTH, "t": TEAR}
 
 GRID_W = 16
 GRID_H = 16
@@ -250,8 +252,8 @@ _FACES = {
     "stumble": [
         "..oOwwwOOwwwOo..",   # eyes blown wide…
         "..oOwwwOOwwwOo..",   # …pupils gone — caught out
-        "..oOaOOOOOOaOo..",   # blush on both cheeks (accent)
-        "..oOOOOmmOOOOo..",   # a tiny gasp
+        "..oOtOOOOOOtOo..",   # a blue tear at each eye corner…
+        "..oOtOOmmOOtOo..",   # …rolling down past a tiny gasp
         "..oOOOOOOOOOOo..",
     ],
     "idle_blink": [
