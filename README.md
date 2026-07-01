@@ -35,6 +35,14 @@ baby / teen / adult) in **Settings → Appearance → Mascot Look**.
   the bottom-right corner and labeled by project folder.
 - **Live state.** The card face tracks Claude in real time: thinking when you
   submit a prompt, working while a tool runs, waiting when Claude needs you.
+- **Expressive faces.** While working, the eyes match the tool — reading
+  (Read/Grep), editing (Edit/Write), running commands (Bash, gritted teeth), or
+  browsing the web. In **plan mode** it wears a pondering *planning…* face. When
+  Claude Code compacts its context, the mascot squeezes its eyes shut and
+  *tidies memories…* — and if a turn dies on a transient API error it shows a
+  brief embarrassed *oops…* instead of celebrating. (The compaction face needs
+  the `PreCompact` hook — re-run `python scripts/install_hooks.py` if you
+  installed before it existed.)
 - **Sub-agent badges.** When Claude spawns a sub-agent (the `Agent` tool), a small
   badge appears under the mascot and disappears when it finishes.
 - **Celebrate.** When Claude finishes a turn, the mascot does a happy little hop

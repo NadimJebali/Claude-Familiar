@@ -44,6 +44,34 @@ states = [
     },
 ]
 
+# A third "tour" card cycles through the newer looks while the demo runs: the
+# per-tool working faces, plan-mode planning, compacting, and the post-error
+# stumble. Each entry overlays the tour card's base state for TOUR_STEP_S.
+TOUR_STEP_S = 4.0
+TOUR_BASE = {
+    "session_id": "demo-tour",
+    "cwd": "C:/project/tour",
+    "subagents": [],
+    "tool": None,
+    "permission_mode": "",
+    "stumbled": False,
+}
+TOUR_PHASES = [
+    {"state": "working", "tool": "Read"},        # reading eyes
+    {"state": "working", "tool": "Edit"},        # editing concentration
+    {"state": "working", "tool": "Bash"},        # gritted-teeth run face
+    {"state": "working", "tool": "WebSearch"},   # scanning-the-web eyes
+    {"state": "thinking", "permission_mode": "plan"},   # planning…
+    {"state": "compacting"},                     # tidying memories…
+    {"state": "idle", "stumbled": True},         # brief embarrassed "oops"
+]
+
+
+def _write_tour_phase(index: int) -> None:
+    phase = TOUR_PHASES[index % len(TOUR_PHASES)]
+    state = {**TOUR_BASE, **phase, "ts": time.time()}
+    (STATE_DIR / "demo-tour.json").write_text(json.dumps(state, indent=2))
+
 # A demo pet: a teen (level 5, 2 days old), a little hungry so you can see the
 # "hungry" idle face + the food popup, with coins + items to try the shop.
 demo_pet = {
@@ -66,7 +94,9 @@ PET_PATH.write_text(json.dumps(demo_pet, indent=2), encoding="utf-8")
 
 print()
 print("Launching mascot widget (tkinter)...")
-print("✓ Two cards appear bottom-right: one working, one idle")
+print("✓ Three cards appear bottom-right: one working, one idle, one on a face tour")
+print("✓ The tour card cycles: reading / editing / running / browsing eyes,")
+print("  planning (plan mode), tidying memories (compacting), and a brief 'oops…'")
 print("✓ The idle card shows the pet's mood face + a food popup (it's hungry)")
 print("✓ Hover a card for the status tooltip (needs / coins / level / name)")
 print("✓ Click the paw button (or tray 'Pet...') to open the Pet window — shop, feed, play")
@@ -77,7 +107,11 @@ print()
 proc = subprocess.Popen([sys.executable, "-m", "mascot"], cwd=Path(__file__).parent)
 
 try:
-    proc.wait()
+    step = 0
+    while proc.poll() is None:
+        _write_tour_phase(step)
+        step += 1
+        time.sleep(TOUR_STEP_S)
 except KeyboardInterrupt:
     print("\nStopping...")
     proc.terminate()
@@ -86,6 +120,7 @@ finally:
     print("Cleaning up demo state files...")
     for state in states:
         (STATE_DIR / f"{state['session_id']}.json").unlink(missing_ok=True)
+    (STATE_DIR / "demo-tour.json").unlink(missing_ok=True)
     # Restore your real pet (or remove the demo pet if you had none).
     if pet_backup is not None:
         PET_PATH.write_bytes(pet_backup)
