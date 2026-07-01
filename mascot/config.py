@@ -76,6 +76,11 @@ STATE_COLORS = {
     "idle":     (120, 144, 168),
     "thinking": (236, 201, 75),
     "working":  (72, 187, 120),
+    # Per-tool working faces share the working green — only the face changes.
+    "working_read": (72, 187, 120),
+    "working_edit": (72, 187, 120),
+    "working_run":  (72, 187, 120),
+    "working_web":  (72, 187, 120),
     "waiting":  (237, 137, 54),
     "waiting_angry": (237, 137, 54),   # same accent as waiting; only the face changes
     "sleeping": (90, 103, 158),

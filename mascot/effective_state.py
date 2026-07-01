@@ -73,3 +73,38 @@ def compute(
         # Otherwise the idle face reflects the pet's mood (default: plain idle).
         return _MOOD_IDLE_FACE.get(mood, "idle")
     return raw
+
+
+# --- display face (the face DRAWN for an effective state) --------------------
+# The effective state is semantic (it drives captions, emotes, animation); the
+# display face is purely visual. While working, the face reflects what KIND of
+# tool is running — the caption already names the tool, now the eyes match.
+_TOOL_FACES = {
+    "Read": "working_read", "Glob": "working_read", "Grep": "working_read",
+    "NotebookRead": "working_read",
+    "Edit": "working_edit", "Write": "working_edit", "MultiEdit": "working_edit",
+    "NotebookEdit": "working_edit",
+    "Bash": "working_run", "PowerShell": "working_run", "BashOutput": "working_run",
+    "WebSearch": "working_web", "WebFetch": "working_web",
+}
+
+
+def working_face_for(tool: str | None) -> str:
+    """The working-face variant for the active tool (exact hook `tool_name`).
+
+    Unknown tools — and no tool at all — keep the classic focused-squint
+    ``working`` face, so a brand-new tool name can never break the render.
+    """
+    return _TOOL_FACES.get(tool or "", "working")
+
+
+def display_face(effective: str, *, tool: str | None = None) -> str:
+    """The face to DRAW for an effective state.
+
+    Today this only varies the working face by tool; every other effective state
+    is its own face. (The render falls back to the idle face for any unknown
+    key, so a missing sprite can never crash a card.)
+    """
+    if effective == "working":
+        return working_face_for(tool)
+    return effective

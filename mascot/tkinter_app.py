@@ -15,7 +15,16 @@ import tkinter as tk
 from pathlib import Path
 from typing import Any
 
-from . import config, osplatform, particles, pet_logic, shake, sprite_pixel, ui_icons
+from . import (
+    config,
+    effective_state,
+    osplatform,
+    particles,
+    pet_logic,
+    shake,
+    sprite_pixel,
+    ui_icons,
+)
 from . import overlay as overlay_mod
 from .popups import BubbleWindow, StatsTooltip
 from .scale import font as _font
@@ -69,6 +78,10 @@ STATE_CAPTIONS = {
     "idle_tired": "idle",
     "thinking": "thinking…",
     "working": "working…",
+    "working_read": "working…",    # per-tool faces are still "working" to the caption
+    "working_edit": "working…",    # (the tool name itself takes over when running)
+    "working_run": "working…",
+    "working_web": "working…",
     "waiting": "needs you!",
     "waiting_angry": "needs you!",   # angry variant once the card starts shaking
     "sleeping": "zzz…",
@@ -300,24 +313,30 @@ def _format_duration(seconds: float) -> str:
     return f"{h}h {m}m"
 
 
-def _render_sig(state: dict[str, Any], effective_state: str, stage: str = "baby",
+def _render_sig(state: dict[str, Any], effective: str, face: str, stage: str = "baby",
                 flourish: bool = False) -> tuple:
     """Signature of the *visible* content (excludes the `ts` heartbeat)."""
     subs = tuple((s.get("type") or "?") for s in (state.get("subagents") or []))
     # Include the active tool so the caption refreshes as it changes (only while
     # working, where it's surfaced — see _caption).
-    tool = state.get("tool") if effective_state == "working" else None
-    # Include evolution stage/flourish so the card redraws when the pet evolves,
-    # even if the face (effective state) is unchanged.
-    return (effective_state, stage, flourish, subs, state.get("cwd", ""), tool)
+    tool = state.get("tool") if effective == "working" else None
+    # Include the display face (it can change while the effective state doesn't —
+    # e.g. the tool kind swaps mid-working) and the evolution stage/flourish so the
+    # card redraws when the pet evolves, even if the face is unchanged.
+    return (effective, face, stage, flourish, subs, state.get("cwd", ""), tool)
 
 
-def _caption(effective_state: str, tool: str | None) -> str:
+# Faces whose caption is superseded by the running tool's name (the working family).
+_TOOL_CAPTION_FACES = frozenset(
+    {"working", "working_read", "working_edit", "working_run", "working_web"})
+
+
+def _caption(face: str, tool: str | None) -> str:
     """Caption under the creature. While a tool is actively running, name it
     (e.g. 'Bash…') instead of the generic 'working…'."""
-    if effective_state == "working" and tool:
+    if tool and face in _TOOL_CAPTION_FACES:
         return f"{tool}…"
-    return STATE_CAPTIONS.get(effective_state, "—")
+    return STATE_CAPTIONS.get(face, "—")
 
 
 class MascotWindow:
@@ -367,6 +386,7 @@ class MascotWindow:
         raw = state.get("state", "idle")
         self._overlay = overlay_mod.Overlay(_OVERLAY_CONFIG, raw=raw, now=time.time())
         self._effective_state = self._compute_effective_state(time.time())
+        self._display_face = self._compute_display_face()
         self._anim_t0 = time.time()
         # The shake's phase clock is aligned with the animation clock so the sway is
         # continuous (the original derived its phase from ``now - self._anim_t0``).
@@ -433,7 +453,7 @@ class MascotWindow:
         binding survives — safe to call mid-drag and on any visible change."""
         c = self.canvas
         c.delete("all")
-        accent = _accent(self._effective_state)
+        accent = _accent(self._display_face)
 
         # rounded panel + accent border (the border pulses while waiting)
         round_rect(c, PANEL_MARGIN, PANEL_MARGIN, CARD_W - PANEL_MARGIN,
@@ -445,12 +465,12 @@ class MascotWindow:
 
         stage = self._pet_stage()
         flourish = self._pet_flourish()
-        _draw_creature(c, CREATURE_CX, CREATURE_CY, self._effective_state, accent,
+        _draw_creature(c, CREATURE_CX, CREATURE_CY, self._display_face, accent,
                        stage, flourish)
         self._bob_y = 0.0
 
         c.create_text(CREATURE_CX, CAPTION_Y,
-                      text=_caption(self._effective_state, self.state.get("tool")),
+                      text=_caption(self._display_face, self.state.get("tool")),
                       font=CAPTION_FONT, fill=accent)
 
         self._draw_badges(c)
@@ -465,7 +485,8 @@ class MascotWindow:
         self._info_id = c.create_text(CREATURE_CX, INFO_Y, text=self._info_text_val,
                                       font=INFO_FONT, fill=INFO_FG)
 
-        self._sig = _render_sig(self.state, self._effective_state, stage, flourish)
+        self._sig = _render_sig(self.state, self._effective_state, self._display_face,
+                                stage, flourish)
 
     def _info_line(self, now: float) -> str:
         """'<model> · <duration>' — either part omitted if unknown."""
@@ -656,13 +677,22 @@ class MascotWindow:
         self._sync_bubble(state.get("notify"))
 
     def _refresh_render(self, now: float) -> None:
-        """Recompute effective state; redraw only if the visible content changed."""
+        """Recompute effective state + display face; redraw only if the visible
+        content changed."""
         self._effective_state = self._compute_effective_state(now)
-        new_sig = _render_sig(self.state, self._effective_state,
+        self._display_face = self._compute_display_face()
+        new_sig = _render_sig(self.state, self._effective_state, self._display_face,
                               self._pet_stage(), self._pet_flourish())
         if new_sig == self._sig:
             return
         self._render()
+
+    def _compute_display_face(self) -> str:
+        """The face to draw for the current effective state (e.g. the per-tool
+        working variants). Purely visual — captions/emotes key off the effective
+        state where they should."""
+        return effective_state.display_face(
+            self._effective_state, tool=self.state.get("tool"))
 
     def _pet_stage(self) -> str:
         """The pet's evolution stage from its level + age (egg/baby/teen/adult).

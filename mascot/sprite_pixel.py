@@ -133,6 +133,35 @@ _FACES = {
         "..oOOmmmmmmOOo..",
         "..oOOOOOOOOOOo..",
     ],
+    # --- per-tool working variants (chosen by effective_state.working_face_for) --
+    "working_read": [
+        "..oOwwwOOwwwOo..",   # eyes cast down the middle — reading a page
+        "..oOwwkOOkwwOo..",
+        "..oOOOOOOOOOOo..",
+        "..oOOOmmmmOOOo..",   # small absorbed line
+        "..oOOOOOOOOOOo..",
+    ],
+    "working_edit": [
+        "..oOOOOOwwwwOo..",   # left brow knitted flat, right eye wide open
+        "..oOkkkOOwkwOo..",   # asymmetric concentration
+        "..oOOOOOOOOOOo..",
+        "..oOOOmmOOOOOo..",   # bitten lip, off-center
+        "..oOOOOOOOOOOo..",
+    ],
+    "working_run": [
+        "..oOkOOOOOOkOo..",   # brow tips angled in — effort
+        "..oOOkkOOkkOOo..",   # tight determined squint
+        "..oOOOOOOOOOOo..",
+        "..oOmwmwwmwmOo..",   # gritted teeth (white glints)
+        "..oOOOOOOOOOOo..",
+    ],
+    "working_web": [
+        "..oOwwwOOOwwOo..",   # one eye wider than the other — scanning
+        "..oOkwwOOOwkOo..",   # pupils darting to opposite edges
+        "..oOOOOOOOOOOo..",
+        "..oOOOmmmOOOOo..",   # slightly-open browsing mouth
+        "..oOOOOOOOOOOo..",
+    ],
     "waiting": [
         "..oOwwwOOwwwOo..",
         "..oOwkwOOwkwOo..",
