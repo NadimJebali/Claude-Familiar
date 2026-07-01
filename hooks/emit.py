@@ -36,11 +36,31 @@ def load_state(path: Path) -> dict[str, Any] | None:
         return None
 
 
+# os.replace can transiently fail on Windows (PermissionError sharing violation)
+# while the widget holds the destination open for its poll read. Retry briefly;
+# if it still fails, clean up the temp file — an emit that leaks .tmp files under
+# heavy concurrent hook traffic litters the state dir forever (observed live).
+_REPLACE_ATTEMPTS = 3
+_REPLACE_BACKOFF_S = 0.03
+
+
 def write_state_atomic(path: Path, state: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".{os.getpid()}.tmp")
     tmp.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, path)  # atomic on the same filesystem
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(tmp, path)  # atomic on the same filesystem
+            return
+        except OSError:
+            if attempt < _REPLACE_ATTEMPTS - 1:
+                time.sleep(_REPLACE_BACKOFF_S)
+    # Still failing: this update is lost (best-effort, the next hook rewrites),
+    # but never leave the temp file behind.
+    try:
+        tmp.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def update_state(
