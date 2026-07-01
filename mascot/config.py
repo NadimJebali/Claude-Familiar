@@ -82,6 +82,7 @@ STATE_COLORS = {
     "working_run":  (72, 187, 120),
     "working_web":  (72, 187, 120),
     "planning": (56, 178, 172),    # plan mode: a calm scholarly teal
+    "stumble":  (246, 173, 85),    # a soft embarrassed amber (gentler than waiting)
     "waiting":  (237, 137, 54),
     "waiting_angry": (237, 137, 54),   # same accent as waiting; only the face changes
     "sleeping": (90, 103, 158),

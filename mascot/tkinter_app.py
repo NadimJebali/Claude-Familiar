@@ -83,6 +83,7 @@ STATE_CAPTIONS = {
     "working_run": "working…",
     "working_web": "working…",
     "planning": "planning…",       # plan mode: pondering, not yet building
+    "stumble": "oops…",            # a turn died on a transient API error
     "waiting": "needs you!",
     "waiting_angry": "needs you!",   # angry variant once the card starts shaking
     "sleeping": "zzz…",
@@ -147,6 +148,10 @@ DIZZY_DURATION_S = 2.0
 # Celebrate (happy) reaction: brief joy when Claude finishes a turn, and when the
 # mascot is petted. A widget-side effective state, like dizzy/sleeping.
 CELEBRATE_DURATION_S = 1.5
+
+# Stumble: how long the embarrassed "oops" face lingers after a turn dies on a
+# transient API error (measured from the state file's heartbeat at that moment).
+STUMBLE_FACE_S = 8.0
 
 # Evolution: the pet earns a milestone flourish (extra sparkles) at this level.
 MILESTONE_LEVEL = 10
@@ -389,7 +394,7 @@ class MascotWindow:
         raw = state.get("state", "idle")
         self._overlay = overlay_mod.Overlay(_OVERLAY_CONFIG, raw=raw, now=time.time())
         self._effective_state = self._compute_effective_state(time.time())
-        self._display_face = self._compute_display_face()
+        self._display_face = self._compute_display_face(time.time())
         self._anim_t0 = time.time()
         # The shake's phase clock is aligned with the animation clock so the sway is
         # continuous (the original derived its phase from ``now - self._anim_t0``).
@@ -669,8 +674,9 @@ class MascotWindow:
 
         raw = state.get("state", "idle")
         # Celebrate briefly when Claude finishes an active turn (working/thinking
-        # -> idle). Not on waiting->idle (the user just answered) or dead.
-        if prev_raw in ("working", "thinking") and raw == "idle":
+        # -> idle). Not on waiting->idle (the user just answered), dead, or a
+        # stumble (a turn that died on an API error is nothing to cheer).
+        if effective_state.should_celebrate(prev_raw, raw, bool(state.get("stumbled"))):
             self._overlay.note_celebrate(now)
         # Track the raw-state clocks (how long idle -> dozing; how long an attention
         # prompt has gone unanswered -> shake/glare).
@@ -683,20 +689,23 @@ class MascotWindow:
         """Recompute effective state + display face; redraw only if the visible
         content changed."""
         self._effective_state = self._compute_effective_state(now)
-        self._display_face = self._compute_display_face()
+        self._display_face = self._compute_display_face(now)
         new_sig = _render_sig(self.state, self._effective_state, self._display_face,
                               self._pet_stage(), self._pet_flourish())
         if new_sig == self._sig:
             return
         self._render()
 
-    def _compute_display_face(self) -> str:
+    def _compute_display_face(self, now: float) -> str:
         """The face to draw for the current effective state (per-tool working
-        variants, plan-mode planning). Purely visual — captions/emotes key off
-        the effective state where they should."""
+        variants, plan-mode planning, the brief post-stumble "oops"). Purely
+        visual — captions/emotes key off the effective state where they should."""
+        stumbled_recent = (bool(self.state.get("stumbled"))
+                           and now - (self.state.get("ts") or 0.0) < STUMBLE_FACE_S)
         return effective_state.display_face(
             self._effective_state, tool=self.state.get("tool"),
-            permission_mode=self.state.get("permission_mode", ""))
+            permission_mode=self.state.get("permission_mode", ""),
+            stumbled_recent=stumbled_recent)
 
     def _pet_stage(self) -> str:
         """The pet's evolution stage from its level + age (egg/baby/teen/adult).

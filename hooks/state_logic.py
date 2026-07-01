@@ -82,10 +82,13 @@ def _payload_text(payload: dict[str, Any]) -> str:
 # StopFailure carries no human text, so the death bubble uses a short fixed label
 # (the "resets at <time>" detail still rides on a Notification/Stop, when one fires).
 _DEATH_ERROR_TYPES = frozenset(
-    {"rate_limit", "billing_error", "authentication_failed", "oauth_org_not_allowed"}
+    {"rate_limit", "usage_limit", "session_limit", "billing_error",
+     "authentication_failed", "oauth_org_not_allowed"}
 )
 _DEATH_MESSAGES = {
     "rate_limit": "Out of usage",
+    "usage_limit": "Out of usage",      # kept in sync with notifier._LIMIT_TYPES —
+    "session_limit": "Out of usage",    # a limit death must tombstone, not idle
     "billing_error": "Billing problem",
     "authentication_failed": "Auth failed",
     "oauth_org_not_allowed": "Org not allowed",
@@ -103,6 +106,7 @@ def default_state(session_id: str, cwd: str = "", model: str = "") -> dict[str, 
         "subagents": [],  # list of {"id", "type", "description"}
         "notify": None,   # {"message", "type"} while Claude needs the user (e.g. permission)
         "permission_mode": "",  # e.g. "plan" — drives the planning face while set
+        "stumbled": False,  # a turn just died on a transient API error (brief "oops")
     }
 
 
@@ -119,11 +123,12 @@ def compute_next_state(
     nxt = dict(current)
     nxt["subagents"] = list(current.get("subagents", []))  # copy for immutability
 
-    # The notification bubble is transient: it appears on a Notification event and
-    # is cleared by the next event that moves the session forward (prompt, tool,
-    # stop, ...). SubagentStop is a no-op and preserves it.
+    # The notification bubble and the stumble marker are transient: they appear on
+    # their event and are cleared by the next event that moves the session forward
+    # (prompt, tool, stop, ...). SubagentStop is a no-op and preserves them.
     if event != "SubagentStop":
         nxt["notify"] = None
+        nxt["stumbled"] = False
 
     # Keep identity/context fresh from whatever the payload carries.
     if payload.get("session_id"):
@@ -225,8 +230,11 @@ def compute_next_state(
                 "type": error_type,
             }
         else:
-            # Transient/odd API error: the turn ended, so settle to idle.
+            # Transient/odd API error: the turn ended, so settle to idle — but
+            # mark the stumble so the card can show a brief embarrassed face
+            # instead of celebrating a failed turn.
             nxt["state"] = "idle"
+            nxt["stumbled"] = True
 
     # SubagentStop: intentionally a no-op (noisy; see module docstring).
     # SessionEnd: handled by emit.py (file deletion), not here.

@@ -98,19 +98,37 @@ def working_face_for(tool: str | None) -> str:
     return _TOOL_FACES.get(tool or "", "working")
 
 
+# The idle family a recent stumble may override. Dozing and the blink stay out —
+# they're distinct ladder states and outrank the embarrassed face on purpose.
+_IDLE_MOOD_FACES = frozenset(
+    {"idle", "idle_happy", "idle_hungry", "idle_sad", "idle_tired"})
+
+
 def display_face(effective: str, *, tool: str | None = None,
-                 permission_mode: str = "") -> str:
+                 permission_mode: str = "", stumbled_recent: bool = False) -> str:
     """The face to DRAW for an effective state.
 
-    Plan mode outranks the tool variants — while ``permission_mode == "plan"``
-    a busy mascot wears the pondering ``planning`` face (in plan mode Claude only
-    reads and searches, so "planning" says more than the tool kind). Otherwise
-    the working face varies by tool; every other effective state is its own
-    face. (The render falls back to the idle face for any unknown key, so a
-    missing sprite can never crash a card.)
+    A recent stumble (a turn that died on a transient API error) shows a brief
+    embarrassed face over the idle family. Plan mode outranks the tool variants —
+    while ``permission_mode == "plan"`` a busy mascot wears the pondering
+    ``planning`` face (in plan mode Claude only reads and searches, so "planning"
+    says more than the tool kind). Otherwise the working face varies by tool;
+    every other effective state is its own face. (The render falls back to the
+    idle face for any unknown key, so a missing sprite can never crash a card.)
     """
+    if stumbled_recent and effective in _IDLE_MOOD_FACES:
+        return "stumble"
     if permission_mode == "plan" and effective in ("thinking", "working"):
         return "planning"
     if effective == "working":
         return working_face_for(tool)
     return effective
+
+
+def should_celebrate(prev_raw: str, raw: str, stumbled: bool) -> bool:
+    """Whether an active->idle transition earns the happy hop.
+
+    A turn that ended on a transient API error (``stumbled``) is not a finished
+    turn — celebrating it read as the mascot cheering a failure.
+    """
+    return prev_raw in ("working", "thinking") and raw == "idle" and not stumbled

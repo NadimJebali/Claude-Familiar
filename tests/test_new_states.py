@@ -41,3 +41,43 @@ def test_permission_mode_updates_when_it_changes():
 
 def test_default_state_has_empty_permission_mode():
     assert default_state("s")["permission_mode"] == ""
+
+
+# --- the stumble marker (non-fatal StopFailure) ------------------------------
+def test_nonfatal_stopfailure_sets_stumbled_and_settles_idle():
+    current = _state(state="working", tool="Bash")
+    nxt = compute_next_state(current, "StopFailure",
+                             {"session_id": "sess1", "error_type": "server_error"})
+    assert nxt["state"] == "idle"
+    assert nxt["stumbled"] is True
+    assert nxt["tool"] is None
+
+
+def test_death_stopfailure_tombstones_without_stumble():
+    nxt = compute_next_state(_state(state="thinking"), "StopFailure",
+                             {"session_id": "sess1", "error_type": "billing_error"})
+    assert nxt["state"] == "dead"
+    assert nxt["stumbled"] is False
+
+
+def test_usage_and_session_limit_error_types_tombstone():
+    # Kept in sync with notifier._LIMIT_TYPES — a limit death must tombstone,
+    # never settle quietly to idle (the gravestone-never-appears report).
+    for error_type in ("usage_limit", "session_limit", "rate_limit"):
+        nxt = compute_next_state(_state(state="thinking"), "StopFailure",
+                                 {"session_id": "sess1", "error_type": error_type})
+        assert nxt["state"] == "dead", error_type
+        assert nxt["notify"]["message"] == "Out of usage"
+
+
+def test_stumbled_clears_on_the_next_forward_event():
+    stumbled = _state(state="idle", stumbled=True)
+    nxt = compute_next_state(stumbled, "UserPromptSubmit", {"session_id": "sess1"})
+    assert nxt["stumbled"] is False
+    assert nxt["state"] == "thinking"
+
+
+def test_subagent_stop_preserves_the_stumble_marker():
+    stumbled = _state(state="idle", stumbled=True)
+    nxt = compute_next_state(stumbled, "SubagentStop", {"session_id": "sess1"})
+    assert nxt["stumbled"] is True
