@@ -89,6 +89,14 @@ def test_should_celebrate_only_on_a_clean_finish():
     assert effective_state.should_celebrate("working", "dead", False) is False
 
 
+# --- the pixel gravestone (the "dead" look) -----------------------------------
+def test_grave_grid_is_valid_and_fully_paletted():
+    assert len(sprite_pixel._GRAVE) == sprite_pixel.GRID_H
+    for row in sprite_pixel._GRAVE:
+        assert len(row) == sprite_pixel.GRID_W
+        assert set(row) <= {*sprite_pixel.GRAVE_COLORS, "."}
+
+
 # --- the new sprite faces render at every stage ------------------------------
 @pytest.mark.parametrize("face", ["working_read", "working_edit", "working_run",
                                   "working_web", "planning", "stumble"])

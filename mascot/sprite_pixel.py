@@ -110,6 +110,42 @@ EGG_SPECKLE = "#6f7486"   # dino-egg spots: a steady grey, independent of mood
 # the base cell size by the renderer. Tuning/visual, not structural.
 STAGE_SCALE = {"egg": 0.85, "baby": 1.0, "teen": 1.2, "adult": 1.4}
 
+# The gravestone (the "dead" state — out of usage): a full 16-row grid like the
+# egg, with its own muted palette. Legend: 'e' stone edge · 's' stone · 'v' the
+# engraved cross · 'd' a weathering crack · 'g' earth mound · 'G' grass tufts.
+_GRAVE = [
+    "................",
+    ".....eeeeee.....",
+    "....esssssse....",
+    "...esssssssse...",
+    "...esssvvssse...",
+    "...esvvvvvvse...",
+    "...esssvvssse...",
+    "...esssvvssse...",
+    "...esssssssse...",
+    "...essssssdse...",
+    "...esssssdsse...",
+    "..GesssssssseG..",
+    "..gggggggggggg..",
+    ".gggggggggggggg.",
+    "................",
+    "................",
+]
+GRAVE_COLORS = {
+    "e": "#4f535d",   # stone edge (the dead accent, darkened)
+    "s": "#7a8090",   # stone face — matches STATE_COLORS["dead"]
+    "v": "#303339",   # engraved cross
+    "d": "#5f6472",   # weathering crack
+    "g": "#39473b",   # earth mound
+    "G": "#55684f",   # grass tufts
+}
+
+
+def draw_gravestone(c: tk.Canvas, cx: float, cy: float, px: int = 5,
+                    tag: str = "creature") -> None:
+    """Draw the pixel gravestone centered at (cx, cy) — the mascot's 'dead' look."""
+    _draw_grid(c, _GRAVE, GRAVE_COLORS, cx, cy, px, tag)
+
 # Per-state face (the 5 middle rows: eyes + mouth).
 _FACES = {
     "idle": [
@@ -212,10 +248,10 @@ _FACES = {
         "..oOOOOOOOOOOo..",
     ],
     "stumble": [
-        "..oOawwOOwwwOo..",   # a sweat drop at the left brow (accent)
-        "..oOwkwOOwkwOo..",   # wide startled eyes
-        "..oOOOOOOOOOOo..",
-        "..oOOmmOOOmmOo..",   # wobbly, broken little mouth — "oops"
+        "..oOwwwOOwwwOo..",   # eyes blown wide…
+        "..oOwwwOOwwwOo..",   # …pupils gone — caught out
+        "..oOaOOOOOOaOo..",   # blush on both cheeks (accent)
+        "..oOOOOmmOOOOo..",   # a tiny gasp
         "..oOOOOOOOOOOo..",
     ],
     "idle_blink": [
@@ -280,6 +316,12 @@ def grid_for(stage: str, state: str) -> list[str]:
 for _stage in (*_BODIES, "egg"):
     for _s in _FACES:
         grid_for(_stage, _s)
+
+# The gravestone gets the same import-time self-check as the faces.
+assert len(_GRAVE) == GRID_H, f"grave: {len(_GRAVE)} rows"
+for _row in _GRAVE:
+    assert len(_row) == GRID_W, f"grave: bad row width {len(_row)!r}"
+    assert set(_row) <= {*GRAVE_COLORS, "."}, f"grave: unknown cell in {_row!r}"
 
 
 def draw_creature(

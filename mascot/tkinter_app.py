@@ -31,29 +31,13 @@ from .scale import font as _font
 from .scale import s as _s
 
 
-def _draw_gravestone(c, cx, cy) -> None:
-    """A simple tombstone, drawn with canvas primitives (art-style independent)."""
-    hw = _s(24)
-    top = cy - _s(34)
-    bottom = cy + _s(28)
-    # grassy mound at the base
-    c.create_oval(cx - _s(34), bottom - _s(5), cx + _s(34), bottom + _s(9),
-                  fill=GRAVE_GROUND, outline="", tags="creature")
-    # rounded-top stone tablet
-    round_rect(c, cx - hw, top, cx + hw, bottom, _s(16),
-               fill=GRAVESTONE_FILL, outline=GRAVESTONE_EDGE, width=_s(2), tags="creature")
-    # engraved RIP
-    c.create_text(cx, cy - _s(2), text="R.I.P", fill=GRAVESTONE_ENGRAVE,
-                  font=_font(10, "bold"), tags="creature")
-
-
 def _draw_creature(c, cx, cy, state, accent, stage="baby", flourish=False) -> None:
     """Draw the mascot (pixel art), scaled to the widget size.
 
     The creature grows with its evolution `stage` and gets a milestone `flourish`
-    at higher levels."""
+    at higher levels; the "dead" state is the pixel gravestone (stage-independent)."""
     if state == "dead":
-        _draw_gravestone(c, cx, cy)
+        sprite_pixel.draw_gravestone(c, cx, cy, CREATURE_PX)
         return
     px = max(1, round(CREATURE_PX * sprite_pixel.STAGE_SCALE.get(stage, 1.0)))
     sprite_pixel.draw_creature(c, cx, cy, state, accent, px, stage=stage, flourish=flourish)
@@ -232,16 +216,6 @@ def _hex(rgb: tuple[int, int, int]) -> str:
 def _lerp(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[int, int, int]:
     return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))  # type: ignore[return-value]
 
-
-# Gravestone palette derived from the shared "dead" state color so it tracks
-# config.STATE_COLORS; edge/engrave are progressively darker shades of it. The
-# grassy mound is its own hue (not a state color).
-_BLACK = (0, 0, 0)
-_GRAVE_BASE = config.STATE_COLORS["dead"]
-GRAVESTONE_FILL = _hex(_GRAVE_BASE)
-GRAVESTONE_EDGE = _hex(_lerp(_GRAVE_BASE, _BLACK, 0.35))
-GRAVESTONE_ENGRAVE = _hex(_lerp(_GRAVE_BASE, _BLACK, 0.6))
-GRAVE_GROUND = "#39473b"
 
 # --- particle kinds (hearts + mood emotes) --------------------------------
 # The thin per-kind sprite shells the particle field calls. Each adapts the
