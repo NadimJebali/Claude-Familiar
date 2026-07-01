@@ -81,3 +81,34 @@ def test_subagent_stop_preserves_the_stumble_marker():
     stumbled = _state(state="idle", stumbled=True)
     nxt = compute_next_state(stumbled, "SubagentStop", {"session_id": "sess1"})
     assert nxt["stumbled"] is True
+
+
+# --- PreCompact -> compacting ------------------------------------------------
+def test_precompact_enters_compacting_and_clears_the_tool():
+    working = _state(state="working", tool="Edit",
+                     subagents=[{"id": "t1", "type": "reviewer", "description": ""}])
+    nxt = compute_next_state(working, "PreCompact", {"session_id": "sess1"})
+    assert nxt["state"] == "compacting"
+    assert nxt["tool"] is None
+    # Compaction happens mid-turn: the sub-agent badges survive it.
+    assert nxt["subagents"] == working["subagents"]
+
+
+def test_compacting_is_left_by_the_next_forward_event():
+    compacting = _state(state="compacting")
+    nxt = compute_next_state(compacting, "PreToolUse",
+                             {"session_id": "sess1", "tool_name": "Bash"})
+    assert nxt["state"] == "working"
+    assert nxt["tool"] == "Bash"
+
+
+def test_compacting_watchdog_falls_back_to_idle_when_stale():
+    from mascot import effective_state as es
+
+    kwargs = {"ts": 1000.0, "dizzy_until": 0.0, "celebrate_until": 0.0,
+              "waiting_since": None, "idle_since": None, "blink_until": 0.0,
+              "sleep_after_idle_s": 90.0, "shake_after_s": 30.0,
+              "thinking_stall_s": 180.0, "working_stall_s": 270.0}
+    # Fresh compaction: displayed as-is. Stale past the thinking grace: idle.
+    assert es.compute("compacting", 1010.0, **kwargs) == "compacting"
+    assert es.compute("compacting", 1000.0 + 181.0, **kwargs) == "idle"

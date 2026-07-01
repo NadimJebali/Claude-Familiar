@@ -56,12 +56,14 @@ def compute(
     # Don't sit frozen on a busy state if the turn died with no closing hook (e.g.
     # a usage/session-limit hit): after a long stale stretch with no new event,
     # fall the display back to idle. `working` gets a longer grace than `thinking`
-    # so a single long-running tool isn't cut off early. Return idle *directly* —
-    # not via `raw = "idle"` fall-through — so a stalled busy state can never reach
-    # the idle->sleeping/blink overlay below and "doze off" mid-build.
+    # so a single long-running tool isn't cut off early; `compacting` gets the
+    # thinking grace (compaction may emit no closing hook of its own). Return idle
+    # *directly* — not via `raw = "idle"` fall-through — so a stalled busy state
+    # can never reach the idle->sleeping/blink overlay below and "doze off"
+    # mid-build.
     if ts is not None:
         stale = now - ts
-        if (raw == "thinking" and stale > thinking_stall_s) or (
+        if (raw in ("thinking", "compacting") and stale > thinking_stall_s) or (
                 raw == "working" and stale > working_stall_s):
             return "idle"
     if raw == "idle":

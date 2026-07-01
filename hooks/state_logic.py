@@ -180,6 +180,15 @@ def compute_next_state(
             nxt["tool"] = None
         nxt["state"] = "working"
 
+    elif event == "PreCompact":
+        # Claude Code is compacting the conversation context. Payload shape is
+        # unverified (event name only — same HITL discipline as StopFailure was);
+        # nothing here depends on payload fields. Sub-agent badges are preserved
+        # (compaction happens mid-turn); any next event overwrites the state, and
+        # the effective-state stall watchdog falls a stuck compaction back to idle.
+        nxt["state"] = "compacting"
+        nxt["tool"] = None
+
     elif event == "Notification":
         message = payload.get("message", "")
         if _is_usage_limit(_payload_text(payload)):

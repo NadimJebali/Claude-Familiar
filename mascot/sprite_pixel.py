@@ -204,6 +204,13 @@ _FACES = {
         "..oOmOOOOOOmOo..",   # smile corners turned up
         "..oOOmmmmmmOOo..",   # big grin
     ],
+    "compacting": [
+        "..oOaOOOOOOOOo..",   # a bead of effort at the temple (accent)
+        "..oOOkkOOkkOOo..",   # eyes screwed tightly shut…
+        "..oOkOOkkOOkOo..",   # …with strain lines underneath
+        "..oOOOmmmmOOOo..",   # tight flat mouth — squeezing memories together
+        "..oOOOOOOOOOOo..",
+    ],
     "stumble": [
         "..oOawwOOwwwOo..",   # a sweat drop at the left brow (accent)
         "..oOwkwOOwkwOo..",   # wide startled eyes

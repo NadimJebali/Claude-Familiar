@@ -49,6 +49,7 @@ EVENTS = (
     "PreToolUse",
     "PostToolUse",
     "Notification",
+    "PreCompact",   # context compaction starting -> the "tidying memories" face
     "Stop",
     "StopFailure",  # turn ended on an API error (usage/rate limit, auth, billing, ...)
     "SubagentStop",

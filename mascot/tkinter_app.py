@@ -84,6 +84,7 @@ STATE_CAPTIONS = {
     "working_web": "working…",
     "planning": "planning…",       # plan mode: pondering, not yet building
     "stumble": "oops…",            # a turn died on a transient API error
+    "compacting": "tidying memories…",  # Claude Code is compacting its context
     "waiting": "needs you!",
     "waiting_angry": "needs you!",   # angry variant once the card starts shaking
     "sleeping": "zzz…",
