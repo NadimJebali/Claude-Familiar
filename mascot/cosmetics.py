@@ -16,6 +16,7 @@ at render time). All transforms return a NEW pet dict.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 SLOT_HEAD = "head"
@@ -101,7 +102,7 @@ def equip(pet: dict[str, Any], piece_id: str | None) -> dict[str, Any]:
     return {**pet, "equipped": equipped}
 
 
-def equipped_head(pet: dict[str, Any]) -> str | None:
+def equipped_head(pet: Mapping[str, Any]) -> str | None:
     """The worn head piece's id, or None (bare)."""
     return pet.get("equipped", {}).get(SLOT_HEAD)
 

@@ -31,7 +31,8 @@ from .control_panel import (
     PANEL,
     _apply_theme,
 )
-from .tkinter_app import MILESTONE_LEVEL, round_rect
+from .pet_view import pet_view
+from .tkinter_app import round_rect
 
 NAME_MAX = 16
 CELEBRATE_S = 1.5
@@ -424,14 +425,11 @@ class PetWindow:
             accent = sprite_pixel.BODY
             cx, cy = PET_CANVAS_W // 2, PET_CANVAS_H // 2
             pet = self._cached_pet
-            level = pet_logic.level_for_xp(pet.get("xp", 0))
-            age = max(0.0, now - pet.get("born", now))
-            stage = pet_logic.stage_for(level, age)
-            sprite_pixel.draw_creature(c, cx, cy, face, accent, PET_PX, stage=stage,
-                                       flourish=level >= MILESTONE_LEVEL)
-            hat = cosmetics.equipped_head(pet)
-            if hat:
-                sprite_pixel.draw_hat(c, cx, cy, hat, PET_PX, stage=stage)
+            view = pet_view(pet, now=now)
+            sprite_pixel.draw_creature(c, cx, cy, face, accent, PET_PX,
+                                       stage=view.stage, flourish=view.flourish)
+            if view.hat:
+                sprite_pixel.draw_hat(c, cx, cy, view.hat, PET_PX, stage=view.stage)
             self._animate_hearts(now)
         except tk.TclError:
             return
