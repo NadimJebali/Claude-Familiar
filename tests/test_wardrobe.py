@@ -153,3 +153,24 @@ def test_grant_milestones_is_idempotent_and_never_regresses():
 def test_grant_milestones_before_the_threshold_gives_nothing():
     _, newly = cosmetics.grant_milestones(_pet(days_active=6))
     assert newly == []
+
+
+# --- hat art parity + anchors ---------------------------------------------------
+def test_every_catalog_piece_has_valid_hat_art():
+    from mascot import sprite_pixel
+    for piece in cosmetics.CATALOG:
+        hat = sprite_pixel._HATS.get(piece["id"])
+        assert hat is not None, piece["id"]
+        grid, colors = hat["grid"], hat["colors"]
+        assert all(len(r) == len(grid[0]) for r in grid), piece["id"]
+        assert len(grid[0]) <= sprite_pixel.GRID_W, piece["id"]
+        for row in grid:
+            assert set(row) <= {*colors, "."}, piece["id"]
+
+
+def test_hat_anchor_exists_for_every_wearing_stage():
+    from mascot import sprite_pixel
+    # Every stage except the egg wears hats; each needs a crown-row anchor.
+    for stage in ("baby", "teen", "adult"):
+        assert stage in sprite_pixel._HAT_ANCHOR_ROW
+    assert "egg" not in sprite_pixel._HAT_ANCHOR_ROW   # the egg stays bare

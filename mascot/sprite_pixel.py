@@ -11,6 +11,7 @@ Legend:  '.' transparent · 'o' outline · 'O' body (Claude orange) ·
 from __future__ import annotations
 
 import tkinter as tk
+from typing import Any
 
 # --- palette (Claude burnt-orange) -----------------------------------------
 BODY = "#d97757"
@@ -364,6 +365,94 @@ def _draw_flourish(c: tk.Canvas, cx: float, cy: float, px: int, accent: str, tag
         x = cx + gx * px
         y = cy + gy * px
         c.create_rectangle(x, y, x + px, y + px, fill=accent, outline="", tags=tag)
+
+
+# --- wardrobe hats (cosmetics.py catalog art) --------------------------------
+# One small grid + palette per piece, drawn OVER the creature so its bottom row
+# sits on the stage's crown row (covering the sparkle — the hat is the sparkle
+# now). Draft art like the stage bodies: iterate the grids, HITL.
+_HATS: dict[str, dict[str, Any]] = {
+    "party_hat": {
+        "grid": ["...y...",
+                 "..ppp..",
+                 ".ppypp.",
+                 "ppppppp"],
+        "colors": {"p": "#f472b6", "y": "#ecc94b"},
+    },
+    "beanie": {
+        "grid": ["..bbbb..",
+                 ".bbbbbb.",
+                 "BBBBBBBB"],
+        "colors": {"b": "#4a6fa5", "B": "#6db3e8"},
+    },
+    "top_hat": {
+        "grid": ["..TTTTTT..",
+                 "..TTTTTT..",
+                 "..TrrrrT..",
+                 "TTTTTTTTTT"],
+        "colors": {"T": "#2c2433", "r": "#e0556a"},
+    },
+    "wizard_hat": {
+        "grid": ["....w....",
+                 "...www...",
+                 "..wwsww..",
+                 ".wwwwwww.",
+                 "wwwwwwwww"],
+        "colors": {"w": "#7c5cd6", "s": "#ecc94b"},
+    },
+    "propeller_cap": {
+        "grid": [".yy.k.bb.",
+                 "..rrrrr..",
+                 ".rrrrrrr."],
+        "colors": {"y": "#ecc94b", "b": "#6db3e8", "k": "#2c2433", "r": "#e0556a"},
+    },
+    "flower": {
+        "grid": [".f.",
+                 "fyf",
+                 ".f.",
+                 ".g."],
+        "colors": {"f": "#f7f3ee", "y": "#ecc94b", "g": "#6fcf83"},
+    },
+    "crown": {
+        "grid": ["y.y.y",
+                 "yjyjy",
+                 "yyyyy"],
+        "colors": {"y": "#ecc94b", "j": "#e0556a"},
+    },
+}
+
+# The first head-outline row of each stage's body — a hat's bottom row sits here.
+# (The egg never wears anything; render callers skip it.)
+_HAT_ANCHOR_ROW = {"baby": 3, "teen": 3, "adult": 2}
+
+# Validate every hat grid at import time, like the faces.
+for _hid, _hat in _HATS.items():
+    _g = _hat["grid"]
+    assert all(len(_r) == len(_g[0]) for _r in _g), f"hat {_hid}: ragged rows"
+    assert len(_g[0]) <= GRID_W, f"hat {_hid}: wider than the creature"
+    for _r in _g:
+        assert set(_r) <= {*_hat["colors"], "."}, f"hat {_hid}: unknown cell in {_r!r}"
+
+
+def draw_hat(c: tk.Canvas, cx: float, cy: float, hat_id: str, px: int,
+             stage: str = "baby", tag: str = "creature") -> None:
+    """Draw a wardrobe hat over the creature at (cx, cy) — same center and cell
+    size as the `draw_creature` call it decorates, so it scales and bobs with the
+    body (it shares the tag). Unknown hat ids and the egg draw nothing."""
+    hat = _HATS.get(hat_id)
+    if hat is None or stage == "egg":
+        return
+    grid, colors = hat["grid"], hat["colors"]
+    anchor = _HAT_ANCHOR_ROW.get(stage, 3)
+    y0 = cy - (GRID_H * px) / 2 + (anchor - len(grid) + 1) * px
+    x0 = cx - (len(grid[0]) * px) / 2
+    for r, row in enumerate(grid):
+        y = y0 + r * px
+        for col, ch in enumerate(row):
+            if ch == ".":
+                continue
+            x = x0 + col * px
+            c.create_rectangle(x, y, x + px, y + px, fill=colors[ch], outline="", tags=tag)
 
 
 # --- pet hearts -------------------------------------------------------------

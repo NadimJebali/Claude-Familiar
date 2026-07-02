@@ -24,7 +24,7 @@ from functools import partial
 from tkinter import ttk
 from typing import Any
 
-from . import config, item_art, pet_logic, pet_store, shop, sprite_pixel, ui_icons
+from . import config, cosmetics, item_art, pet_logic, pet_store, shop, sprite_pixel, ui_icons
 from .control_panel import (
     BG,
     MUTED,
@@ -358,6 +358,9 @@ class PetWindow:
             stage = pet_logic.stage_for(level, age)
             sprite_pixel.draw_creature(c, cx, cy, face, accent, PET_PX, stage=stage,
                                        flourish=level >= MILESTONE_LEVEL)
+            hat = cosmetics.equipped_head(pet)
+            if hat:
+                sprite_pixel.draw_hat(c, cx, cy, hat, PET_PX, stage=stage)
             self._animate_hearts(now)
         except tk.TclError:
             return
