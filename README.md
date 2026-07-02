@@ -107,6 +107,14 @@ one global creature shared across all your sessions, a delight rather than a cho
 - **A shop.** Spend coins on **food** (consumable) and **toys** (reusable, on a
   play cooldown). Some items have trade-offs — an energy drink raises energy but
   lowers happiness — and higher-tier items unlock as the pet levels up.
+- **A wardrobe.** 🎩 Cosmetic **hats** the pet actually wears on its card — all
+  day, while you work. Shop pieces are coin sinks with level gates that keep
+  paying past the last evolution stage (the top hat of the ladder is about a
+  week of real work under the daily cap); **milestone pieces can't be bought**
+  — a flower for 7 days together, a crown for 30. Days-together and your best
+  streak only ever grow, so an earned piece can never be lost. Cosmetics are
+  pure delight: zero stat effects, ever. (The egg stays bare — it hatches
+  *into* its wardrobe.)
 - **Three gentle needs** — hunger, happiness, energy — drift over time; energy
   drains while Claude works and refills while it's idle/asleep. Needs only ever
   dull the mood, **never sickness or death** (the gravestone stays reserved for

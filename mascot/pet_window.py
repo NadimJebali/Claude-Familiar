@@ -138,19 +138,26 @@ class PetWindow:
                               bg=PANEL, highlightthickness=0, bd=0)
         self.bars.pack(pady=(8, 6))
 
+        # Shared history: the current streak + lifetime days together (never lost).
+        self.streak_var = tk.StringVar()
+        ttk.Label(left, textvariable=self.streak_var, style="Muted.TLabel").pack(
+            anchor="w", pady=(0, 4))
+
         rename = ttk.Frame(left, style="Card.TFrame")
         rename.pack(fill="x")
         self.name_entry = ttk.Entry(rename, width=14)
         self.name_entry.pack(side="left", fill="x", expand=True)
         ttk.Button(rename, text="Rename", command=self._rename).pack(side="right", padx=(6, 0))
 
-        # Right: Shop + Items tabs.
+        # Right: Shop + Items + Wardrobe tabs.
         nb = ttk.Notebook(body)
         nb.pack(side="right", fill="both", expand=True, padx=(12, 0))
         self.shop_tab = ttk.Frame(nb, style="Card.TFrame", padding=10)
         self.items_tab = ttk.Frame(nb, style="Card.TFrame", padding=10)
+        self.wardrobe_tab = ttk.Frame(nb, style="Card.TFrame", padding=10)
         nb.add(self.shop_tab, text="  Shop  ")
         nb.add(self.items_tab, text="  Items  ")
+        nb.add(self.wardrobe_tab, text="  Wardrobe  ")
 
         ttk.Label(self.root, textvariable=self.status, style="MutedBG.TLabel",
                   wraplength=440, justify="left").pack(anchor="w", padx=16, pady=(0, 10))
@@ -204,6 +211,25 @@ class PetWindow:
         self._celebrate()
         self.status.set(f"Played with {item['name']}!")
 
+    def _buy_cosmetic(self, piece: dict[str, Any]) -> None:
+        pet = self._pet()
+        ok, reason = cosmetics.can_buy(pet, piece, self._level(pet))
+        if not ok:
+            self.status.set(reason)
+            return
+        self._commit(cosmetics.buy(pet, piece))
+        self._celebrate()
+        self.status.set(f"Bought the {piece['name']}!")
+
+    def _wear(self, piece_id: str | None) -> None:
+        """Wear a wardrobe piece (or take the current one off with None). Free."""
+        self._commit(cosmetics.equip(self._pet(), piece_id))
+        if piece_id:
+            piece = cosmetics.piece_by_id(piece_id)
+            self.status.set(f"Looking sharp in the {piece['name'] if piece else piece_id}.")
+        else:
+            self.status.set("Bare-headed again.")
+
     def _pet_tap(self) -> None:
         """Tapping the pet pets it: a happy reaction + hearts + a small coin trickle."""
         today = time.strftime("%Y-%m-%d", time.localtime())
@@ -239,14 +265,19 @@ class PetWindow:
         if self.name_entry.get() == "" and pet.get("name"):
             self.name_entry.insert(0, pet["name"])
         self._draw_bars(pet)
+        streak, days = pet.get("streak", 0), pet.get("days_active", 0)
+        self.streak_var.set(f"streak {streak} · {days} day{'s' if days != 1 else ''} together")
 
-        # The lists only rebuild on these (coins/level/inventory); the toy cooldown
-        # countdown updates live in _update_cooldowns, so it isn't part of the sig.
-        sig = (pet.get("coins", 0), level, tuple(sorted(pet.get("inventory", {}).items())))
+        # The lists only rebuild on these (coins/level/inventory/wardrobe); the toy
+        # cooldown countdown updates live in _update_cooldowns, so it isn't in the sig.
+        sig = (pet.get("coins", 0), level, tuple(sorted(pet.get("inventory", {}).items())),
+               tuple(pet.get("wardrobe", [])), cosmetics.equipped_head(pet),
+               pet.get("days_active", 0))
         if force or sig != self._list_sig:
             self._list_sig = sig
             self._build_shop(pet, level)
             self._build_items(pet)
+            self._build_wardrobe(pet, level)
         self._update_cooldowns()
 
     def _draw_bars(self, pet: dict[str, Any]) -> None:
@@ -326,6 +357,46 @@ class PetWindow:
                 cd.pack(side="right", padx=(0, 6))
                 self._cooldowns[item_id] = (item, btn, cd)
                 ttk.Label(row, text=item["name"], style="Card.TLabel").pack(side="left")
+
+    def _hat_icon(self, parent: tk.Misc, piece_id: str) -> tk.Canvas:
+        """A small canvas showing the hat's pixel art."""
+        cv = tk.Canvas(parent, width=28, height=28, bg=PANEL, highlightthickness=0, bd=0)
+        sprite_pixel.draw_hat_icon(cv, piece_id, 14, 14, 2)
+        return cv
+
+    def _build_wardrobe(self, pet: dict[str, Any], level: int) -> None:
+        for child in self.wardrobe_tab.winfo_children():
+            child.destroy()
+        worn = cosmetics.equipped_head(pet)
+        for piece in cosmetics.CATALOG:
+            row = ttk.Frame(self.wardrobe_tab, style="Card.TFrame")
+            row.pack(fill="x", pady=3)
+            self._hat_icon(row, piece["id"]).pack(side="left", padx=(0, 6))
+            if cosmetics.owns(pet, piece):
+                wearing = worn == piece["id"]
+                btn = ttk.Button(row, text="Wearing ✓" if wearing else "Wear",
+                                 command=partial(self._wear,
+                                                 None if wearing else piece["id"]))
+                sub = piece["desc"]
+            elif cosmetics.is_milestone(piece):
+                btn = ttk.Button(row, text="Locked")
+                btn.state(["disabled"])
+                sub = (f"{cosmetics.requirement_text(piece)} "
+                       f"({min(pet.get('days_active', 0), piece['days_active'])}"
+                       f"/{piece['days_active']})")
+            else:
+                ok, _ = cosmetics.can_buy(pet, piece, level)
+                btn = ttk.Button(row, text="Buy", command=partial(self._buy_cosmetic, piece))
+                if not ok:
+                    btn.state(["disabled"])
+                sub = (f"{piece['price']} coins" if level >= piece.get("min_level", 1)
+                       else f"Unlocks at level {piece['min_level']}")
+            btn.pack(side="right")
+            info = ttk.Frame(row, style="Card.TFrame")
+            info.pack(side="left", fill="x", expand=True)
+            ttk.Label(info, text=piece["name"], style="Card.TLabel").pack(anchor="w")
+            ttk.Label(info, text=sub, style="Muted.TLabel",
+                      wraplength=210, justify="left").pack(anchor="w")
 
     def _update_cooldowns(self) -> None:
         """Live-update each owned toy's Play button + countdown label every tick, so

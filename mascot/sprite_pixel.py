@@ -434,6 +434,16 @@ for _hid, _hat in _HATS.items():
         assert set(_r) <= {*_hat["colors"], "."}, f"hat {_hid}: unknown cell in {_r!r}"
 
 
+def draw_hat_icon(c: tk.Canvas, hat_id: str, cx: float, cy: float, px: int = 3,
+                  tag: str = "hat_icon") -> None:
+    """Draw a hat by itself, centered at (cx, cy) — for wardrobe lists, not the
+    creature (see `draw_hat` for wearing)."""
+    hat = _HATS.get(hat_id)
+    if hat is None:
+        return
+    _draw_grid(c, hat["grid"], hat["colors"], cx, cy, px, tag)
+
+
 def draw_hat(c: tk.Canvas, cx: float, cy: float, hat_id: str, px: int,
              stage: str = "baby", tag: str = "creature") -> None:
     """Draw a wardrobe hat over the creature at (cx, cy) — same center and cell

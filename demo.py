@@ -81,7 +81,10 @@ demo_pet = {
     "hunger": 18, "happiness": 72, "energy": 84,
     "coins": 120, "xp": 480,            # level 5 + 2d age -> teen stage
     "coins_today": 0, "last_award_date": "", "last_prompt_date": "",
+    "days_active": 9, "streak": 4, "best_streak": 6,   # history: flower earned
     "inventory": {"snack": 3, "ball": 1}, "cooldowns": {},
+    "wardrobe": ["party_hat", "flower"],
+    "equipped": {"head": "party_hat"},  # worn on the card + in the Pet window
 }
 
 print("Creating demo state files + a demo pet...")
