@@ -24,13 +24,24 @@ from functools import partial
 from tkinter import ttk
 from typing import Any
 
-from . import config, cosmetics, item_art, pet_logic, pet_store, shop, sprite_pixel, ui_icons
+from . import (
+    config,
+    cosmetics,
+    item_art,
+    pet_actions,
+    pet_logic,
+    pet_store,
+    shop,
+    sprite_pixel,
+    ui_icons,
+)
 from .control_panel import (
     BG,
     MUTED,
     PANEL,
     _apply_theme,
 )
+from .pet_host import PetHost
 from .pet_view import pet_view
 from .tkinter_app import round_rect
 
@@ -66,14 +77,10 @@ class PetWindow:
         self,
         parent: tk.Misc,
         *,
-        load_pet: Callable[[], dict[str, Any]],
-        save_pet: Callable[[dict[str, Any]], dict[str, Any]],
-        on_care: Callable[[], None] | None = None,
+        host: PetHost,
         on_close: Callable[[], None] | None = None,
     ) -> None:
-        self._load_pet = load_pet
-        self._save_pet = save_pet
-        self._on_care = on_care
+        self._host = host
         self._on_close = on_close
         self._alive = True
         self._celebrate_until = 0.0
@@ -165,14 +172,14 @@ class PetWindow:
 
     # --- pet state helpers ------------------------------------------------
     def _pet(self) -> dict[str, Any]:
-        return self._load_pet()
+        return self._host.get_pet()
 
     def _level(self, pet: dict[str, Any]) -> int:
         return pet_logic.level_for_xp(pet.get("xp", 0))
 
     def _commit(self, pet: dict[str, Any]) -> None:
-        """Persist a new pet and refresh the display."""
-        self._save_pet(pet)
+        """Persist a new pet through the host and refresh the display."""
+        self._host.save_pet(pet)
         self._refresh(force=True)
 
     # --- actions ----------------------------------------------------------
@@ -184,60 +191,51 @@ class PetWindow:
         self.status.set(f"Named your pet “{name}”." if name else "Cleared the pet's name.")
 
     def _buy(self, item: dict[str, Any]) -> None:
-        pet = self._pet()
-        ok, reason = shop.can_buy(pet, item, self._level(pet))
-        if not ok:
-            self.status.set(reason)
-            return
-        self._commit(shop.buy(pet, item))
-        self.status.set(f"Bought {item['name']}.")
+        self.status.set(pet_actions.buy(self._host, item))
+        self._refresh(force=True)
 
     def _feed(self, item: dict[str, Any]) -> None:
-        pet = self._pet()
-        ok, reason = shop.can_feed(pet, item)
-        if not ok:
-            self.status.set(reason)
-            return
-        self._commit(shop.feed(pet, item))
-        self._celebrate()
-        self.status.set(f"Fed {item['name']}. Yum!")
+        before = self._pet()
+        self.status.set(pet_actions.feed(self._host, item))
+        self._refresh(force=True)
+        self._react_if_changed(before)
 
     def _play(self, item: dict[str, Any]) -> None:
-        pet = self._pet()
-        ok, reason = shop.can_play(pet, item, time.time())
-        if not ok:
-            self.status.set(reason)
-            return
-        self._commit(shop.play(pet, item, time.time()))
-        self._celebrate()
-        self.status.set(f"Played with {item['name']}!")
+        before = self._pet()
+        self.status.set(pet_actions.play(self._host, item, time.time()))
+        self._refresh(force=True)
+        self._react_if_changed(before)
 
     def _buy_cosmetic(self, piece: dict[str, Any]) -> None:
-        pet = self._pet()
-        ok, reason = cosmetics.can_buy(pet, piece, self._level(pet))
-        if not ok:
-            self.status.set(reason)
-            return
-        self._commit(cosmetics.buy(pet, piece))
-        self._celebrate()
-        self.status.set(f"Bought the {piece['name']}!")
+        before = self._pet()
+        self.status.set(pet_actions.buy_cosmetic(self._host, piece))
+        self._refresh(force=True)
+        self._react_if_changed(before)
 
     def _wear(self, piece_id: str | None) -> None:
         """Wear a wardrobe piece (or take the current one off with None). Free."""
-        self._commit(cosmetics.equip(self._pet(), piece_id))
-        if piece_id:
-            piece = cosmetics.piece_by_id(piece_id)
-            self.status.set(f"Looking sharp in the {piece['name'] if piece else piece_id}.")
-        else:
-            self.status.set("Bare-headed again.")
+        self.status.set(pet_actions.wear(self._host, piece_id))
+        self._refresh(force=True)
 
     def _pet_tap(self) -> None:
-        """Tapping the pet pets it: a happy reaction + hearts + a small coin trickle."""
-        today = time.strftime("%Y-%m-%d", time.localtime())
-        self._commit(pet_logic.apply_events(self._pet(), [pet_logic.PET], today=today))
-        self._celebrate()
+        """Tapping the pet pets it: a happy reaction + hearts + a small coin trickle,
+        and — like the window's other care — celebrates the session cards."""
+        before = self._pet()
+        pet_actions.pet_tap(self._host, time.time())
+        self._refresh(force=True)
+        if self._pet() != before:
+            self._react()
+            self._host.notify_care()
 
-    def _celebrate(self) -> None:
+    def _react_if_changed(self, before: dict[str, Any]) -> None:
+        """Play the local reaction if a care action actually changed the pet. The
+        cards' celebration is routed by ``pet_actions`` through ``host.notify_care``."""
+        if self._pet() != before:
+            self._react()
+
+    def _react(self) -> None:
+        """The window's own reaction to care: a happy face + floating hearts on the pet
+        canvas. Celebrating the session cards is the host's job (``notify_care``)."""
         now = time.time()
         self._celebrate_until = now + CELEBRATE_S
         for _ in range(3):
@@ -248,11 +246,6 @@ class PetWindow:
                 "drift": random.uniform(-12.0, 12.0),
             })
         self._hearts = self._hearts[-6:]
-        if self._on_care is not None:
-            try:
-                self._on_care()
-            except Exception as exc:  # noqa: BLE001
-                print("[mascot] pet on_care failed:", exc)
 
     # --- rendering --------------------------------------------------------
     def _refresh(self, force: bool = False) -> None:
@@ -475,19 +468,33 @@ class PetWindow:
             self._on_close()
 
 
-def main() -> None:
-    """Standalone entry point (opened from Settings): its own Tk root, reading and
-    writing pet.json directly via pet_store with a read-modify-write per action."""
-    root = tk.Tk()
-    root.withdraw()  # the PetWindow Toplevel is the visible window
+class _StandaloneHost:
+    """PetHost for the standalone Pet window (opened from Settings): reads/writes
+    pet.json directly with a read-modify-write per action, so it never clobbers the
+    manager's concurrent decay/awards. No session cards to celebrate, and it can't
+    open itself — so ``notify_care`` / ``open_pet`` are no-ops and the pet is enabled."""
 
-    def _load() -> dict[str, Any]:
+    pet_enabled = True
+
+    def get_pet(self) -> dict[str, Any]:
         return pet_store.load(pet_store.PET_PATH, time.time())
 
-    def _save(pet: dict[str, Any]) -> dict[str, Any]:
+    def save_pet(self, pet: dict[str, Any]) -> dict[str, Any]:
         return pet_store.save(pet_store.PET_PATH, pet, time.time())
 
-    PetWindow(root, load_pet=_load, save_pet=_save, on_close=root.destroy)
+    def notify_care(self) -> None:
+        pass
+
+    def open_pet(self) -> None:
+        pass
+
+
+def main() -> None:
+    """Standalone entry point (opened from Settings): its own Tk root, persisting
+    directly to pet.json through a read-modify-write host."""
+    root = tk.Tk()
+    root.withdraw()  # the PetWindow Toplevel is the visible window
+    PetWindow(root, host=_StandaloneHost(), on_close=root.destroy)
     root.mainloop()
 
 
