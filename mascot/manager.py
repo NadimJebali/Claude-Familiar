@@ -15,11 +15,10 @@ from typing import TYPE_CHECKING
 
 from . import (
     config,
-    cosmetics,
     icon,
     notifier,
     pet_logic,
-    pet_store,
+    pet_service,
     single_instance,
     state_store,
 )
@@ -29,11 +28,6 @@ if TYPE_CHECKING:
     from .pet_window import PetWindow
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-# How often the widget flushes the pet to pet.json. The pet updates every poll in
-# memory; persistence is throttled (an award forces an out-of-band save) and
-# decay-on-load reconstructs anything missed if the process dies between flushes.
-PET_SAVE_INTERVAL_S = 10.0
 
 
 def _pythonw() -> Path:
@@ -84,25 +78,20 @@ class MascotManager:
             print("[mascot] system tray unavailable:", exc)
             self.tray = None
 
-        # The one global pet. The widget is its SOLE writer: it applies decay and
-        # derives coin/XP events from polled session-state transitions. Best-effort
-        # — any pet failure must leave the mascot itself fully working. In simple mode
-        # we never touch pet.json: `default_pet` is a pure, in-memory placeholder (no
-        # file I/O) that is never ticked, pushed, or saved — so on-disk progress is
-        # preserved and the next enable applies decay-on-load from the real last_seen.
+        # The one global pet lives behind PetService — the per-poll choreography of
+        # decay -> award -> milestone -> persist around an injected store + clock. The
+        # widget is its SOLE writer. Best-effort: any pet failure must leave the mascot
+        # itself fully working, so a construction failure simply drops pet features for
+        # the session (``None``). In simple mode there is no service at all — pet.json is
+        # never touched, so on-disk progress is preserved for the next enable.
         now = time.time()
+        self._pet_service: pet_service.PetService | None = None
         if self._pet_enabled:
             try:
-                self.pet = pet_store.load(pet_store.PET_PATH, now)
+                self._pet_service = pet_service.PetService(pet_service.PetStore(), now=now)
             except Exception as exc:  # noqa: BLE001
-                print("[mascot] could not load pet:", exc)
-                self.pet = pet_store.default_pet(now)
-        else:
-            self.pet = pet_store.default_pet(now)   # unused placeholder; never persisted
-        self._pet_prev: dict[str, dict] = {}   # sid -> last session state (transitions)
-        self._pet_last_tick = now
-        self._pet_last_save = now
-        self._pet_file_mtime = self._pet_mtime()
+                print("[mascot] could not start pet service:", exc)
+                self._pet_service = None
         self._pet_win: PetWindow | None = None   # the Pet window, when open (tray)
         self._notify_prev: dict[str, dict] = {}  # sid -> last state (native-toast edge)
 
@@ -154,70 +143,23 @@ class MascotManager:
 
     # --- pet (Tamagotchi) -------------------------------------------------
     def _update_pet(self, states: dict[str, dict], now: float) -> None:
-        """Advance the global pet from this poll. This method owns only the I/O:
-        pick up external pet.json edits via mtime, compute elapsed / working / today,
-        call the pure `pet_logic.tick` seam (decay -> first-prompt gate -> award),
-        push the result to every card, and save (throttled, forced on award).
-        Wrapped so a pet failure never disrupts the mascot. No-op when the pet is
-        disabled (simple hook-visualiser mode)."""
-        if not self._pet_enabled:
+        """Advance the global pet from this poll via :class:`PetService`, then do the
+        Tk-side I/O the service leaves to us: celebrate the cards on a newly earned
+        milestone and push the advanced pet to every card. Wrapped so a pet failure
+        never disrupts the mascot. No-op when the pet is off or the service failed to
+        start (simple hook-visualiser mode never creates one)."""
+        if self._pet_service is None:
             return
         try:
-            # Pick up edits made by a standalone Pet window (opened from Settings):
-            # if pet.json changed under us, reload it (decay-on-load brings it to now).
-            mtime = self._pet_mtime()
-            if mtime is not None and mtime != self._pet_file_mtime:
-                self.pet = pet_store.load(pet_store.PET_PATH, now)
-                self._pet_file_mtime = mtime
-                self._pet_last_tick = now      # load already decayed up to now
-
-            elapsed = max(0.0, now - self._pet_last_tick)
-            self._pet_last_tick = now
-            # Energy drains while any session is busy and refills while all idle.
-            working = any(s.get("state") in ("working", "thinking") for s in states.values())
-            today = time.strftime("%Y-%m-%d", time.localtime(now))
-            # The pure per-poll seam owns decay -> first-prompt gate -> award; we
-            # feed it our last-seen snapshot so only sessions still present can fire.
-            self.pet, awarded = pet_logic.tick(
-                self.pet, self._pet_prev, states,
-                elapsed=elapsed, working=working, today=today,
-            )
-            # Track only live sessions, so a closed card can't fire a stale transition.
-            self._pet_prev = dict(states)
-
-            # Grant any milestone wardrobe pieces the pet's history has earned
-            # (idempotent). A newly earned piece is a moment: celebrate the cards.
-            self.pet, new_pieces = cosmetics.grant_milestones(self.pet)
-            if new_pieces:
-                awarded = True                 # force the save below
+            result = self._pet_service.poll(states, now=now)
+            if result.celebrate:
                 self._celebrate_cards()
-
             # Push the latest pet to every card so its idle-face mood + hover tooltip
             # reflect the shared pet (the pet is one global creature, all cards mirror it).
             for win in self.windows.values():
-                win.set_pet(self.pet)
-
-            if awarded or (now - self._pet_last_save >= PET_SAVE_INTERVAL_S):
-                self._save_pet(now)
+                win.set_pet(result.pet)
         except Exception as exc:  # noqa: BLE001 — the pet must never crash the widget
             print("[mascot] pet update failed:", exc)
-
-    def _save_pet(self, now: float) -> None:
-        """Flush the pet to pet.json (best-effort). Records our own write's mtime so
-        we don't mistake it for an external edit on the next poll."""
-        try:
-            self.pet = pet_store.save(pet_store.PET_PATH, self.pet, now)
-            self._pet_last_save = now
-            self._pet_file_mtime = self._pet_mtime()
-        except Exception as exc:  # noqa: BLE001
-            print("[mascot] could not save pet:", exc)
-
-    @staticmethod
-    def _pet_mtime() -> float | None:
-        try:
-            return pet_store.PET_PATH.stat().st_mtime
-        except OSError:
-            return None
 
     # --- pet window (opened from the tray, in this process) ---------------
     def _on_tray_pet(self) -> None:
@@ -226,14 +168,17 @@ class MascotManager:
     def _open_pet_window(self) -> None:
         """Open (or focus) the Pet window as a Toplevel in this process, so it
         shares the live in-memory pet and persists through the single writer."""
+        if self._pet_service is None:
+            return
         if self._pet_win is not None and getattr(self._pet_win, "_alive", False):
             self._pet_win.focus()
             return
+        svc = self._pet_service
         try:
             from .pet_window import PetWindow
             self._pet_win = PetWindow(
                 self.root,
-                load_pet=lambda: self.pet,
+                load_pet=lambda: svc.pet,
                 save_pet=self._pet_window_save,
                 on_care=self._celebrate_cards,
                 on_close=self._on_pet_window_closed,
@@ -243,10 +188,10 @@ class MascotManager:
             self._pet_win = None
 
     def _pet_window_save(self, pet: dict) -> dict:
-        """Persist a Pet-window action through the single writer + record mtime."""
-        self.pet = pet
-        self._save_pet(time.time())
-        return self.pet
+        """Persist a Pet-window action through the single writer (the service)."""
+        if self._pet_service is None:
+            return pet
+        return self._pet_service.commit(pet, now=time.time())
 
     def _on_pet_window_closed(self) -> None:
         self._pet_win = None
@@ -261,10 +206,12 @@ class MascotManager:
 
     def _on_pet_petted(self) -> None:
         """A card tap pets the pet: a small daily-capped coin/XP trickle."""
+        if self._pet_service is None:
+            return
         try:
             today = time.strftime("%Y-%m-%d", time.localtime())
-            self.pet = pet_logic.apply_events(self.pet, [pet_logic.PET], today=today)
-            self._save_pet(time.time())
+            petted = pet_logic.apply_events(self._pet_service.pet, [pet_logic.PET], today=today)
+            self._pet_service.commit(petted, now=time.time())
         except Exception as exc:  # noqa: BLE001
             print("[mascot] pet trickle failed:", exc)
 
@@ -297,8 +244,8 @@ class MascotManager:
         try:
             self.root.mainloop()
         finally:
-            if self._pet_enabled:            # flush the latest pet on any exit
-                self._save_pet(time.time())  # (simple mode never touches pet.json)
+            if self._pet_service is not None:   # flush the latest pet on any exit
+                self._pet_service.flush(now=time.time())   # (simple mode has no service)
             if self.tray is not None:        # also covers a normal window-close exit
                 self.tray.dispose()
                 self.tray = None
