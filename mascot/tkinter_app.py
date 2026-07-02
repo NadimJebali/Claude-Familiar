@@ -20,12 +20,14 @@ from . import (
     effective_state,
     osplatform,
     particles,
+    pet_actions,
     pet_logic,
     shake,
     sprite_pixel,
     ui_icons,
 )
 from . import overlay as overlay_mod
+from .pet_host import PetHost
 from .pet_view import PetView, pet_view
 from .popups import BubbleWindow, StatsTooltip
 from .scale import font as _font
@@ -325,15 +327,15 @@ class MascotWindow:
     """One mascot window (Toplevel) per session, drawn on a single Canvas."""
 
     def __init__(self, manager_root: tk.Tk, session_id: str, state: dict[str, Any], index: int,
-                 on_open_pet=None, on_pet=None, pet_enabled: bool = True) -> None:
+                 host: PetHost) -> None:
         self.session_id = session_id
         self.state = state
         # Simple hook-visualiser mode (pet disabled): no tooltip, no tap-to-pet/hearts.
         # The mood faces + food/tired emotes fall out on their own (the manager never
         # pushes a pet mood); only these card-local affordances need an explicit gate.
-        self._pet_enabled = pet_enabled
-        self._on_open_pet = on_open_pet
-        self._on_pet = on_pet      # called when the card is petted (coin trickle)
+        # `pet_enabled` is fixed at startup, so snapshot it; the host serves the rest.
+        self._host = host
+        self._pet_enabled = host.pet_enabled
         self._sig: tuple | None = None
         self._drag_offset: tuple[int, int] | None = None
         self._alive = True
@@ -414,7 +416,7 @@ class MascotWindow:
         # it survives the canvas's full redraws). Only shown when wired by the manager.
         self._pet_btn: tk.Button | None = None
         self._paw_img = None
-        if on_open_pet is not None:
+        if self._pet_enabled:
             # A pixel-art paw button (bigger than the old glyph), top-left of the card.
             self._paw_img = ui_icons.photo(self.root, "paw", px=max(2, _s(2)))
             self._pet_btn = tk.Button(
@@ -545,8 +547,7 @@ class MascotWindow:
         if (self._pet_enabled and moved < PET_TAP_MAX_DIST and not self._overlay.is_dizzy(now)
                 and raw not in ("waiting", "dead")):
             self._pet(now)
-            if self._on_pet is not None:    # a pet earns a small coin trickle
-                self._on_pet()
+            pet_actions.pet_tap(self._host, now)   # a pet earns a small coin trickle
 
     # --- pet hearts -------------------------------------------------------
     def celebrate(self) -> None:
@@ -555,9 +556,8 @@ class MascotWindow:
         self._pet(time.time())
 
     def _open_pet(self) -> None:
-        """The on-card paw button: ask the manager to open the Pet window."""
-        if self._on_open_pet is not None:
-            self._on_open_pet()
+        """The on-card paw button: ask the host to open the Pet window."""
+        self._host.open_pet()
 
     def _pet(self, now: float) -> None:
         """Reward a tap with a happy face and a few rising pixel hearts."""

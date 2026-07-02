@@ -17,7 +17,6 @@ from . import (
     config,
     icon,
     notifier,
-    pet_logic,
     pet_service,
     single_instance,
     state_store,
@@ -109,13 +108,9 @@ class MascotManager:
         for index, (sid, state) in enumerate(sorted(states.items())):
             win = self.windows.get(sid)
             if win is None:
-                win = MascotWindow(
-                    self.root, sid, state, index,
-                    # Simple mode: no pet wiring -> no paw button, tooltip, or coin-on-tap.
-                    on_open_pet=self._open_pet_window if self._pet_enabled else None,
-                    on_pet=self._on_pet_petted if self._pet_enabled else None,
-                    pet_enabled=self._pet_enabled,
-                )
+                # The manager is the cards' PetHost; its pet_enabled (a live service)
+                # gates the paw button, tooltip, and coin-on-tap in simple mode.
+                win = MascotWindow(self.root, sid, state, index, host=self)
                 self.windows[sid] = win
                 if self._cards_hidden:        # honor a tray "hide" for new sessions
                     win.set_hidden(True)
@@ -153,7 +148,7 @@ class MascotManager:
         try:
             result = self._pet_service.poll(states, now=now)
             if result.celebrate:
-                self._celebrate_cards()
+                self.notify_care()
             # Push the latest pet to every card so its idle-face mood + hover tooltip
             # reflect the shared pet (the pet is one global creature, all cards mirror it).
             for win in self.windows.values():
@@ -163,57 +158,53 @@ class MascotManager:
 
     # --- pet window (opened from the tray, in this process) ---------------
     def _on_tray_pet(self) -> None:
-        self._open_pet_window()
-
-    def _open_pet_window(self) -> None:
-        """Open (or focus) the Pet window as a Toplevel in this process, so it
-        shares the live in-memory pet and persists through the single writer."""
-        if self._pet_service is None:
-            return
-        if self._pet_win is not None and getattr(self._pet_win, "_alive", False):
-            self._pet_win.focus()
-            return
-        svc = self._pet_service
-        try:
-            from .pet_window import PetWindow
-            self._pet_win = PetWindow(
-                self.root,
-                load_pet=lambda: svc.pet,
-                save_pet=self._pet_window_save,
-                on_care=self._celebrate_cards,
-                on_close=self._on_pet_window_closed,
-            )
-        except Exception as exc:  # noqa: BLE001 — never let it crash the widget
-            print("[mascot] could not open pet window:", exc)
-            self._pet_win = None
-
-    def _pet_window_save(self, pet: dict) -> dict:
-        """Persist a Pet-window action through the single writer (the service)."""
-        if self._pet_service is None:
-            return pet
-        return self._pet_service.commit(pet, now=time.time())
+        self.open_pet()
 
     def _on_pet_window_closed(self) -> None:
         self._pet_win = None
 
-    def _celebrate_cards(self) -> None:
-        """Play the happy reaction + hearts on every card when the pet is fed/played."""
+    # --- PetHost: what the cards + Pet window need from their host ---------
+    @property
+    def pet_enabled(self) -> bool:
+        """True when the pet is live (a PetService exists). Simple mode — and a rare
+        pet-service startup failure — read as False, so the windows gate the paw
+        button, tooltip, and coin-on-tap off this one flag."""
+        return self._pet_service is not None
+
+    def get_pet(self) -> dict:
+        """The current global pet (the Pet window reads it live). ``{}`` only in the
+        unreachable case where a window asks with no service — pet_enabled gates that."""
+        return self._pet_service.pet if self._pet_service is not None else {}
+
+    def save_pet(self, pet: dict) -> dict:
+        """Persist a window action (buy/feed/equip/pet-tap) through PetService — the
+        single writer — and return the persisted pet."""
+        if self._pet_service is None:
+            return pet
+        return self._pet_service.commit(pet, now=time.time())
+
+    def notify_care(self) -> None:
+        """Play the happy reaction + hearts on every card when the pet is cared for."""
         for win in self.windows.values():
             try:
                 win.celebrate()
             except Exception:  # noqa: BLE001
                 pass
 
-    def _on_pet_petted(self) -> None:
-        """A card tap pets the pet: a small daily-capped coin/XP trickle."""
+    def open_pet(self) -> None:
+        """Open (or focus) the Pet window as a Toplevel in this process, so it shares
+        the live in-memory pet and persists through the single writer (this host)."""
         if self._pet_service is None:
             return
+        if self._pet_win is not None and getattr(self._pet_win, "_alive", False):
+            self._pet_win.focus()
+            return
         try:
-            today = time.strftime("%Y-%m-%d", time.localtime())
-            petted = pet_logic.apply_events(self._pet_service.pet, [pet_logic.PET], today=today)
-            self._pet_service.commit(petted, now=time.time())
-        except Exception as exc:  # noqa: BLE001
-            print("[mascot] pet trickle failed:", exc)
+            from .pet_window import PetWindow
+            self._pet_win = PetWindow(self.root, host=self, on_close=self._on_pet_window_closed)
+        except Exception as exc:  # noqa: BLE001 — never let it crash the widget
+            print("[mascot] could not open pet window:", exc)
+            self._pet_win = None
 
     # --- system-tray callbacks (run on the Tk thread) ---------------------
     def _on_tray_toggle(self) -> None:
