@@ -426,10 +426,7 @@ class PetWindow:
             cx, cy = PET_CANVAS_W // 2, PET_CANVAS_H // 2
             pet = self._cached_pet
             view = pet_view(pet, now=now)
-            sprite_pixel.draw_creature(c, cx, cy, face, accent, PET_PX,
-                                       stage=view.stage, flourish=view.flourish)
-            if view.hat:
-                sprite_pixel.draw_hat(c, cx, cy, view.hat, PET_PX, stage=view.stage)
+            sprite_pixel.draw_pet(c, cx, cy, view, state=face, accent=accent, px=PET_PX)
             self._animate_hearts(now)
         except tk.TclError:
             return

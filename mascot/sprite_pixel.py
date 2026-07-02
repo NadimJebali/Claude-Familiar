@@ -11,7 +11,10 @@ Legend:  '.' transparent · 'o' outline · 'O' body (Claude orange) ·
 from __future__ import annotations
 
 import tkinter as tk
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .pet_view import PetView
 
 # --- palette (Claude burnt-orange) -----------------------------------------
 BODY = "#d97757"
@@ -463,6 +466,20 @@ def draw_hat(c: tk.Canvas, cx: float, cy: float, hat_id: str, px: int,
                 continue
             x = x0 + col * px
             c.create_rectangle(x, y, x + px, y + px, fill=colors[ch], outline="", tags=tag)
+
+
+def draw_pet(c: tk.Canvas, cx: float, cy: float, view: PetView, *, state: str,
+             accent: str, px: int, tag: str = "creature") -> None:
+    """Render the wearing pet from its :class:`~mascot.pet_view.PetView` — the body
+    for ``view.stage`` + the ``state`` face + the milestone ``view.flourish``, with
+    ``view.hat`` worn on top. The egg stays bare (its ``hat`` is already None, and
+    ``draw_hat`` guards the egg too). One home for the draw-creature-then-hat sequence
+    both windows used to inline; the caller sizes ``px`` (the card grows it with the
+    stage, the Pet window keeps it fixed) and owns the stage-independent gravestone."""
+    draw_creature(c, cx, cy, state, accent, px, tag=tag, stage=view.stage,
+                  flourish=view.flourish)
+    if view.hat:
+        draw_hat(c, cx, cy, view.hat, px, stage=view.stage, tag=tag)
 
 
 # --- pet hearts -------------------------------------------------------------

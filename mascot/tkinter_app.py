@@ -32,19 +32,17 @@ from .scale import font as _font
 from .scale import s as _s
 
 
-def _draw_creature(c, cx, cy, state, accent, stage="baby", flourish=False, hat=None) -> None:
-    """Draw the mascot (pixel art), scaled to the widget size.
+def _draw_creature(c, cx, cy, state, accent, view) -> None:
+    """Draw the mascot (pixel art) for the pet's look `view`, scaled to the widget.
 
-    The creature grows with its evolution `stage` and gets a milestone `flourish`
-    at higher levels; the "dead" state is the pixel gravestone (stage-independent,
-    and it never wears the `hat` — nor does the egg, handled by `draw_hat`)."""
+    The creature grows with its evolution stage and gets a milestone flourish at
+    higher levels; the "dead" state is the pixel gravestone (stage-independent, and
+    it wears no hat -- nor does the egg, both handled inside `draw_pet`)."""
     if state == "dead":
         sprite_pixel.draw_gravestone(c, cx, cy, CREATURE_PX)
         return
-    px = max(1, round(CREATURE_PX * sprite_pixel.STAGE_SCALE.get(stage, 1.0)))
-    sprite_pixel.draw_creature(c, cx, cy, state, accent, px, stage=stage, flourish=flourish)
-    if hat:
-        sprite_pixel.draw_hat(c, cx, cy, hat, px, stage=stage)
+    px = max(1, round(CREATURE_PX * sprite_pixel.STAGE_SCALE.get(view.stage, 1.0)))
+    sprite_pixel.draw_pet(c, cx, cy, view, state=state, accent=accent, px=px)
 
 
 def round_rect(c, x1, y1, x2, y2, r, **kw) -> int:
@@ -295,17 +293,17 @@ def _format_duration(seconds: float) -> str:
     return f"{h}h {m}m"
 
 
-def _render_sig(state: dict[str, Any], effective: str, face: str, stage: str = "baby",
-                flourish: bool = False, hat: str | None = None) -> tuple:
+def _render_sig(state: dict[str, Any], effective: str, face: str,
+                view: PetView) -> tuple:
     """Signature of the *visible* content (excludes the `ts` heartbeat)."""
     subs = tuple((s.get("type") or "?") for s in (state.get("subagents") or []))
     # Include the active tool so the caption refreshes as it changes (only while
     # working, where it's surfaced — see _caption).
     tool = state.get("tool") if effective == "working" else None
     # Include the display face (it can change while the effective state doesn't —
-    # e.g. the tool kind swaps mid-working), the evolution stage/flourish, and the
-    # worn hat so the card redraws when the pet evolves or changes outfits.
-    return (effective, face, stage, flourish, hat, subs, state.get("cwd", ""), tool)
+    # e.g. the tool kind swaps mid-working) and the pet's look `view` (stage /
+    # flourish / worn hat) so the card redraws when the pet evolves or re-dresses.
+    return (effective, face, view, subs, state.get("cwd", ""), tool)
 
 
 # Faces whose caption is superseded by the running tool's name (the working family
@@ -448,8 +446,7 @@ class MascotWindow:
         )
 
         view = self._pet_view()
-        _draw_creature(c, CREATURE_CX, CREATURE_CY, self._display_face, accent,
-                       view.stage, view.flourish, hat=view.hat)
+        _draw_creature(c, CREATURE_CX, CREATURE_CY, self._display_face, accent, view)
         self._bob_y = 0.0
 
         c.create_text(CREATURE_CX, CAPTION_Y,
@@ -468,8 +465,7 @@ class MascotWindow:
         self._info_id = c.create_text(CREATURE_CX, INFO_Y, text=self._info_text_val,
                                       font=INFO_FONT, fill=INFO_FG)
 
-        self._sig = _render_sig(self.state, self._effective_state, self._display_face,
-                                view.stage, view.flourish, view.hat)
+        self._sig = _render_sig(self.state, self._effective_state, self._display_face, view)
 
     def _info_line(self, now: float) -> str:
         """'<model> · <duration>' — either part omitted if unknown."""
@@ -666,8 +662,7 @@ class MascotWindow:
         self._effective_state = self._compute_effective_state(now)
         self._display_face = self._compute_display_face(now)
         view = self._pet_view()
-        new_sig = _render_sig(self.state, self._effective_state, self._display_face,
-                              view.stage, view.flourish, view.hat)
+        new_sig = _render_sig(self.state, self._effective_state, self._display_face, view)
         if new_sig == self._sig:
             return
         self._render()
