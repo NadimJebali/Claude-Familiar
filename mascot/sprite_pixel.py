@@ -244,7 +244,7 @@ _FACES = {
         "..oOOmmmmmmOOo..",   # big grin
     ],
     "compacting": [
-        "..oOaOOOOOOOOo..",   # a bead of effort at the temple (accent)
+        "..oOtOOOOOOOOo..",   # a blue sweat droplet at the temple
         "..oOOkkOOkkOOo..",   # eyes screwed tightly shut…
         "..oOkOOkkOOkOo..",   # …with strain lines underneath
         "..oOOOmmmmOOOo..",   # tight flat mouth — squeezing memories together
