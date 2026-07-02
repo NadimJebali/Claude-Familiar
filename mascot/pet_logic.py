@@ -126,6 +126,17 @@ def events_for_transition(prev: dict[str, Any], nxt: dict[str, Any]) -> list[str
     return events
 
 
+def _yesterday(today: str) -> str:
+    """The ISO date one day before `today` ("" for a malformed date, which simply
+    reads as 'not consecutive' and restarts the streak at 1). Deterministic —
+    string math only, no clock."""
+    import datetime
+    try:
+        return (datetime.date.fromisoformat(today) - datetime.timedelta(days=1)).isoformat()
+    except ValueError:
+        return ""
+
+
 def started_prompt(prev: dict[str, Any], nxt: dict[str, Any]) -> bool:
     """True when a session just began a new prompt (entered ``thinking`` from any
     non-thinking state). The widget uses this for the daily first-prompt streak;
@@ -195,10 +206,18 @@ def tick(
         if prev is None:
             continue   # a new session has no transition yet
         events = events_for_transition(prev, nxt)
-        # Daily first-prompt streak: the first new prompt of the day pays a bonus.
-        # Claim it once per calendar day (persisted in last_prompt_date on the pet).
+        # Daily first-prompt streak: the first new prompt of the day pays a bonus
+        # and advances the shared-history counters. Claimed once per calendar day
+        # (persisted in last_prompt_date). Gentleness rule: `days_active` and
+        # `best_streak` only ever grow — a missed day resets the *current* streak
+        # number but can never take anything earned away.
         if started_prompt(prev, nxt) and pet.get("last_prompt_date") != today:
-            pet = {**pet, "last_prompt_date": today}
+            streak = (pet.get("streak", 0) + 1
+                      if pet.get("last_prompt_date") == _yesterday(today) else 1)
+            pet = {**pet, "last_prompt_date": today,
+                   "days_active": pet.get("days_active", 0) + 1,
+                   "streak": streak,
+                   "best_streak": max(pet.get("best_streak", 0), streak)}
             events = [*events, FIRST_PROMPT_OF_DAY]
         if events:
             pet = apply_events(pet, events, today=today)

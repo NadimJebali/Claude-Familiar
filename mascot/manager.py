@@ -13,7 +13,16 @@ import tkinter as tk
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import config, icon, notifier, pet_logic, pet_store, single_instance, state_store
+from . import (
+    config,
+    cosmetics,
+    icon,
+    notifier,
+    pet_logic,
+    pet_store,
+    single_instance,
+    state_store,
+)
 from .tkinter_app import MascotWindow
 
 if TYPE_CHECKING:
@@ -175,6 +184,13 @@ class MascotManager:
             )
             # Track only live sessions, so a closed card can't fire a stale transition.
             self._pet_prev = dict(states)
+
+            # Grant any milestone wardrobe pieces the pet's history has earned
+            # (idempotent). A newly earned piece is a moment: celebrate the cards.
+            self.pet, new_pieces = cosmetics.grant_milestones(self.pet)
+            if new_pieces:
+                awarded = True                 # force the save below
+                self._celebrate_cards()
 
             # Push the latest pet to every card so its idle-face mood + hover tooltip
             # reflect the shared pet (the pet is one global creature, all cards mirror it).
