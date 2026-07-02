@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import pet_logic
+from . import catalog, pet_logic
 
 FOOD = "food"
 TOY = "toy"
@@ -65,25 +65,16 @@ def owned(pet: dict[str, Any], item: dict[str, Any]) -> int:
 
 def can_buy(pet: dict[str, Any], item: dict[str, Any], level: int) -> tuple[bool, str]:
     """Whether the pet can buy `item` now: unlocked by level, affordable, and — for
-    reusable toys — not already owned (a toy is a one-time purchase; food stacks)."""
-    if not is_unlocked(item, level):
-        return False, f"Reach level {item['min_level']} to unlock"
-    if item.get("type") == TOY and owned(pet, item) >= 1:
-        return False, "Already owned"
-    if pet.get("coins", 0) < item["price"]:
-        return False, "Not enough coins"
-    return True, ""
+    reusable toys — not already owned (a toy is a one-time purchase; food stacks).
+    The level gate, price, and the shared reasons live in `catalog`."""
+    owns = item.get("type") == TOY and owned(pet, item) >= 1
+    return catalog.can_acquire(pet, item, level, owns=owns)
 
 
 def buy(pet: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
     """Spend the item's price and add one to inventory. Assumes `can_buy`. Coins
     are floored at 0 defensively. `pet` is not mutated."""
-    nxt = dict(pet)
-    nxt["coins"] = max(0, pet.get("coins", 0) - item["price"])
-    inv = dict(pet.get("inventory", {}))
-    inv[item["id"]] = inv.get(item["id"], 0) + 1
-    nxt["inventory"] = inv
-    return nxt
+    return catalog.acquire(pet, item, into="inventory")
 
 
 def can_feed(pet: dict[str, Any], item: dict[str, Any]) -> tuple[bool, str]:
