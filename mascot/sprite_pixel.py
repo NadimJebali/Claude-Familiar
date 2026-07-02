@@ -13,6 +13,8 @@ from __future__ import annotations
 import tkinter as tk
 from typing import TYPE_CHECKING, Any
 
+from . import pixel_grid
+
 if TYPE_CHECKING:
     from .pet_view import PetView
 
@@ -150,7 +152,7 @@ GRAVE_COLORS = {
 def draw_gravestone(c: tk.Canvas, cx: float, cy: float, px: int = 5,
                     tag: str = "creature") -> None:
     """Draw the pixel gravestone centered at (cx, cy) — the mascot's 'dead' look."""
-    _draw_grid(c, _GRAVE, GRAVE_COLORS, cx, cy, px, tag)
+    pixel_grid.draw_grid(c, _GRAVE, GRAVE_COLORS, cx, cy, px, tag)
 
 # Per-state face (the 5 middle rows: eyes + mouth).
 _FACES = {
@@ -318,16 +320,8 @@ def grid_for(stage: str, state: str) -> list[str]:
     return rows
 
 
-# Validate every face composed against every stage (+ the egg) at import time.
-for _stage in (*_BODIES, "egg"):
-    for _s in _FACES:
-        grid_for(_stage, _s)
-
-# The gravestone gets the same import-time self-check as the faces.
-assert len(_GRAVE) == GRID_H, f"grave: {len(_GRAVE)} rows"
-for _row in _GRAVE:
-    assert len(_row) == GRID_W, f"grave: bad row width {len(_row)!r}"
-    assert set(_row) <= {*GRAVE_COLORS, "."}, f"grave: unknown cell in {_row!r}"
+# Every composed face (against each body + the egg) and the gravestone are validated
+# in tests/test_pixel_grid.py::test_every_registry_grid_is_wellformed.
 
 
 def draw_creature(
@@ -428,13 +422,8 @@ _HATS: dict[str, dict[str, Any]] = {
 # (The egg never wears anything; render callers skip it.)
 _HAT_ANCHOR_ROW = {"baby": 3, "teen": 3, "adult": 2}
 
-# Validate every hat grid at import time, like the faces.
-for _hid, _hat in _HATS.items():
-    _g = _hat["grid"]
-    assert all(len(_r) == len(_g[0]) for _r in _g), f"hat {_hid}: ragged rows"
-    assert len(_g[0]) <= GRID_W, f"hat {_hid}: wider than the creature"
-    for _r in _g:
-        assert set(_r) <= {*_hat["colors"], "."}, f"hat {_hid}: unknown cell in {_r!r}"
+# Every hat grid is validated (rectangular, no wider than the creature, palette-
+# covered) in tests/test_pixel_grid.py::test_every_registry_grid_is_wellformed.
 
 
 def draw_hat_icon(c: tk.Canvas, hat_id: str, cx: float, cy: float, px: int = 3,
@@ -444,7 +433,7 @@ def draw_hat_icon(c: tk.Canvas, hat_id: str, cx: float, cy: float, px: int = 3,
     hat = _HATS.get(hat_id)
     if hat is None:
         return
-    _draw_grid(c, hat["grid"], hat["colors"], cx, cy, px, tag)
+    pixel_grid.draw_grid(c, hat["grid"], hat["colors"], cx, cy, px, tag)
 
 
 def draw_hat(c: tk.Canvas, cx: float, cy: float, hat_id: str, px: int,
@@ -539,25 +528,12 @@ _ZED_W = len(_ZED[0])
 _ZED_H = len(_ZED)
 
 
-def _draw_grid(c, grid, colors, cx, cy, px, tag):
-    w, h = len(grid[0]), len(grid)
-    x0 = cx - (w * px) / 2
-    y0 = cy - (h * px) / 2
-    for r, row in enumerate(grid):
-        y = y0 + r * px
-        for col, ch in enumerate(row):
-            if ch == ".":
-                continue
-            x = x0 + col * px
-            c.create_rectangle(x, y, x + px, y + px, fill=colors[ch], outline="", tags=tag)
-
-
 def draw_food(c: tk.Canvas, cx: float, cy: float, px: int, tag: str = "emote") -> None:
     """Draw a small food icon centered at (cx, cy) (the 'hungry' mood popup)."""
-    _draw_grid(c, _FOOD, _FOOD_COLORS, cx, cy, px, tag)
+    pixel_grid.draw_grid(c, _FOOD, _FOOD_COLORS, cx, cy, px, tag)
 
 
 def draw_zzz(c: tk.Canvas, cx: float, cy: float, px: int,
              color: str = WHITE, tag: str = "emote") -> None:
     """Draw a single sleepy 'Z' centered at (cx, cy) (the 'tired' mood popup)."""
-    _draw_grid(c, _ZED, {"Z": color}, cx, cy, px, tag)
+    pixel_grid.draw_grid(c, _ZED, {"Z": color}, cx, cy, px, tag)
