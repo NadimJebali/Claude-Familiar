@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import tkinter as tk
 
+from . import pixel_grid
+
 GRID = 12
 
 PALETTE = {
@@ -112,11 +114,8 @@ _ITEMS: dict[str, list[str]] = {
     ],
 }
 
-# Validate every grid at import (catch a mistyped row immediately).
-for _id, _grid in _ITEMS.items():
-    assert len(_grid) == GRID, f"{_id}: {len(_grid)} rows"
-    for _row in _grid:
-        assert len(_row) == GRID, f"{_id}: bad row width {_row!r}"
+# Every grid is validated (12x12, palette-covered) in
+# tests/test_pixel_grid.py::test_every_registry_grid_is_wellformed.
 
 
 def has_art(item_id: str) -> bool:
@@ -129,12 +128,4 @@ def draw_item(c: tk.Canvas, item_id: str, cx: float, cy: float, px: int,
     grid = _ITEMS.get(item_id)
     if grid is None:
         return
-    x0 = cx - (GRID * px) / 2
-    y0 = cy - (GRID * px) / 2
-    for r, row in enumerate(grid):
-        y = y0 + r * px
-        for col, ch in enumerate(row):
-            if ch == ".":
-                continue
-            x = x0 + col * px
-            c.create_rectangle(x, y, x + px, y + px, fill=PALETTE[ch], outline="", tags=tag)
+    pixel_grid.draw_grid(c, grid, PALETTE, cx, cy, px, tag)

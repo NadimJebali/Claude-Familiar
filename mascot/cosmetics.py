@@ -16,7 +16,10 @@ at render time). All transforms return a NEW pet dict.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
+
+from . import catalog
 
 SLOT_HEAD = "head"
 
@@ -65,26 +68,18 @@ def requirement_text(piece: dict[str, Any]) -> str:
 
 
 def can_buy(pet: dict[str, Any], piece: dict[str, Any], level: int) -> tuple[bool, str]:
-    """Whether the shop tier will sell `piece` now. Milestone pieces are never
-    for sale; owned pieces (all permanent) can't be bought twice."""
+    """Whether the shop tier will sell `piece` now. Milestone pieces are never for
+    sale; the level gate, ownership (all pieces are permanent), and price live in
+    `catalog`."""
     if is_milestone(piece):
         return False, requirement_text(piece)
-    if owns(pet, piece):
-        return False, "Already owned"
-    if level < piece.get("min_level", 1):
-        return False, f"Reach level {piece['min_level']} to unlock"
-    if pet.get("coins", 0) < piece["price"]:
-        return False, "Not enough coins"
-    return True, ""
+    return catalog.can_acquire(pet, piece, level, owns=owns(pet, piece))
 
 
 def buy(pet: dict[str, Any], piece: dict[str, Any]) -> dict[str, Any]:
     """Spend the price and add the piece to the wardrobe (permanent). Assumes
     `can_buy`. `pet` is not mutated."""
-    nxt = dict(pet)
-    nxt["coins"] = max(0, pet.get("coins", 0) - piece["price"])
-    nxt["wardrobe"] = [*pet.get("wardrobe", []), piece["id"]]
-    return nxt
+    return catalog.acquire(pet, piece, into="wardrobe")
 
 
 def equip(pet: dict[str, Any], piece_id: str | None) -> dict[str, Any]:
@@ -101,7 +96,7 @@ def equip(pet: dict[str, Any], piece_id: str | None) -> dict[str, Any]:
     return {**pet, "equipped": equipped}
 
 
-def equipped_head(pet: dict[str, Any]) -> str | None:
+def equipped_head(pet: Mapping[str, Any]) -> str | None:
     """The worn head piece's id, or None (bare)."""
     return pet.get("equipped", {}).get(SLOT_HEAD)
 

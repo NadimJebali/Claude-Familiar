@@ -17,7 +17,6 @@ from typing import Any
 
 from . import (
     config,
-    cosmetics,
     effective_state,
     osplatform,
     particles,
@@ -27,24 +26,23 @@ from . import (
     ui_icons,
 )
 from . import overlay as overlay_mod
+from .pet_view import PetView, pet_view
 from .popups import BubbleWindow, StatsTooltip
 from .scale import font as _font
 from .scale import s as _s
 
 
-def _draw_creature(c, cx, cy, state, accent, stage="baby", flourish=False, hat=None) -> None:
-    """Draw the mascot (pixel art), scaled to the widget size.
+def _draw_creature(c, cx, cy, state, accent, view) -> None:
+    """Draw the mascot (pixel art) for the pet's look `view`, scaled to the widget.
 
-    The creature grows with its evolution `stage` and gets a milestone `flourish`
-    at higher levels; the "dead" state is the pixel gravestone (stage-independent,
-    and it never wears the `hat` — nor does the egg, handled by `draw_hat`)."""
+    The creature grows with its evolution stage and gets a milestone flourish at
+    higher levels; the "dead" state is the pixel gravestone (stage-independent, and
+    it wears no hat -- nor does the egg, both handled inside `draw_pet`)."""
     if state == "dead":
         sprite_pixel.draw_gravestone(c, cx, cy, CREATURE_PX)
         return
-    px = max(1, round(CREATURE_PX * sprite_pixel.STAGE_SCALE.get(stage, 1.0)))
-    sprite_pixel.draw_creature(c, cx, cy, state, accent, px, stage=stage, flourish=flourish)
-    if hat:
-        sprite_pixel.draw_hat(c, cx, cy, hat, px, stage=stage)
+    px = max(1, round(CREATURE_PX * sprite_pixel.STAGE_SCALE.get(view.stage, 1.0)))
+    sprite_pixel.draw_pet(c, cx, cy, view, state=state, accent=accent, px=px)
 
 
 def round_rect(c, x1, y1, x2, y2, r, **kw) -> int:
@@ -141,9 +139,6 @@ CELEBRATE_DURATION_S = 1.5
 # Stumble: how long the embarrassed "oops" face lingers after a turn dies on a
 # transient API error (measured from the state file's heartbeat at that moment).
 STUMBLE_FACE_S = 8.0
-
-# Evolution: the pet earns a milestone flourish (extra sparkles) at this level.
-MILESTONE_LEVEL = 10
 
 # Click-to-pet: a press+release that moves less than this (px) is a pet tap, not a
 # drag. Petting emits rising pixel hearts that fade as they climb.
@@ -298,17 +293,17 @@ def _format_duration(seconds: float) -> str:
     return f"{h}h {m}m"
 
 
-def _render_sig(state: dict[str, Any], effective: str, face: str, stage: str = "baby",
-                flourish: bool = False, hat: str | None = None) -> tuple:
+def _render_sig(state: dict[str, Any], effective: str, face: str,
+                view: PetView) -> tuple:
     """Signature of the *visible* content (excludes the `ts` heartbeat)."""
     subs = tuple((s.get("type") or "?") for s in (state.get("subagents") or []))
     # Include the active tool so the caption refreshes as it changes (only while
     # working, where it's surfaced — see _caption).
     tool = state.get("tool") if effective == "working" else None
     # Include the display face (it can change while the effective state doesn't —
-    # e.g. the tool kind swaps mid-working), the evolution stage/flourish, and the
-    # worn hat so the card redraws when the pet evolves or changes outfits.
-    return (effective, face, stage, flourish, hat, subs, state.get("cwd", ""), tool)
+    # e.g. the tool kind swaps mid-working) and the pet's look `view` (stage /
+    # flourish / worn hat) so the card redraws when the pet evolves or re-dresses.
+    return (effective, face, view, subs, state.get("cwd", ""), tool)
 
 
 # Faces whose caption is superseded by the running tool's name (the working family
@@ -450,10 +445,8 @@ class MascotWindow:
             PANEL_RADIUS, fill="", outline=accent, width=2,
         )
 
-        stage = self._pet_stage()
-        flourish = self._pet_flourish()
-        _draw_creature(c, CREATURE_CX, CREATURE_CY, self._display_face, accent,
-                       stage, flourish, hat=self._pet_hat())
+        view = self._pet_view()
+        _draw_creature(c, CREATURE_CX, CREATURE_CY, self._display_face, accent, view)
         self._bob_y = 0.0
 
         c.create_text(CREATURE_CX, CAPTION_Y,
@@ -472,8 +465,7 @@ class MascotWindow:
         self._info_id = c.create_text(CREATURE_CX, INFO_Y, text=self._info_text_val,
                                       font=INFO_FONT, fill=INFO_FG)
 
-        self._sig = _render_sig(self.state, self._effective_state, self._display_face,
-                                stage, flourish, self._pet_hat())
+        self._sig = _render_sig(self.state, self._effective_state, self._display_face, view)
 
     def _info_line(self, now: float) -> str:
         """'<model> · <duration>' — either part omitted if unknown."""
@@ -669,17 +661,22 @@ class MascotWindow:
         content changed."""
         self._effective_state = self._compute_effective_state(now)
         self._display_face = self._compute_display_face(now)
-        new_sig = _render_sig(self.state, self._effective_state, self._display_face,
-                              self._pet_stage(), self._pet_flourish(), self._pet_hat())
+        view = self._pet_view()
+        new_sig = _render_sig(self.state, self._effective_state, self._display_face, view)
         if new_sig == self._sig:
             return
         self._render()
 
-    def _pet_hat(self) -> str | None:
-        """The wardrobe piece the pet is wearing (None when bare / pet disabled)."""
-        if not self._pet_enabled or not self._pet_data:
-            return None
-        return cosmetics.equipped_head(self._pet_data)
+    def _pet_view(self) -> PetView:
+        """The pet's look (stage/hat/flourish) for the sprite draw, via the pure
+        `pet_view` projection. Two edge looks bypass it: simple hook-visualiser mode
+        (pet disabled) shows the fixed life stage picked in Settings, and before the
+        first pet push there's no pet yet (the baby). Both are bare, no flourish."""
+        if not self._pet_enabled:
+            return PetView(config.SIMPLE_STAGE, None, False, "content")
+        if not self._pet_data:
+            return PetView("baby", None, False, "content")
+        return pet_view(self._pet_data, now=time.time())
 
     def _compute_display_face(self, now: float) -> str:
         """The face to draw for the current effective state (per-tool working
@@ -691,27 +688,6 @@ class MascotWindow:
             self._effective_state, tool=self.state.get("tool"),
             permission_mode=self.state.get("permission_mode", ""),
             stumbled_recent=stumbled_recent)
-
-    def _pet_stage(self) -> str:
-        """The pet's evolution stage from its level + age (egg/baby/teen/adult).
-
-        In simple hook-visualiser mode (pet disabled) the pet never evolves, so the
-        look is the fixed life stage the user picked in Settings."""
-        if not self._pet_enabled:
-            return config.SIMPLE_STAGE
-        pet = self._pet_data
-        if not pet:
-            return "baby"
-        level = pet_logic.level_for_xp(pet.get("xp", 0))
-        age = max(0.0, time.time() - pet.get("born", time.time()))
-        return pet_logic.stage_for(level, age)
-
-    def _pet_flourish(self) -> bool:
-        """Whether the pet has reached the milestone level for a sparkle flourish."""
-        pet = self._pet_data
-        if not pet:
-            return False
-        return pet_logic.level_for_xp(pet.get("xp", 0)) >= MILESTONE_LEVEL
 
     def _schedule_blink(self, now: float) -> None:
         """Trigger an occasional blink, but only while genuinely idle (not busy,

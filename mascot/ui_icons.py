@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import tkinter as tk
 
+from . import pixel_grid
+
 PALETTE = {
     "p": "#d9885a",   # paw (warm Claude accent)
     "o": "#b5872f",   # coin rim (bronze)
@@ -62,19 +64,14 @@ _ICONS: dict[str, list[str]] = {
     ],
 }
 
-# Validate the grids at import.
-for _name, _grid in _ICONS.items():
-    _w = len(_grid[0])
-    assert all(len(r) == _w for r in _grid), _name
+# Grids are validated (rectangular, palette-covered) in
+# tests/test_pixel_grid.py::test_every_registry_grid_is_wellformed.
 
 
 def photo(master: tk.Misc, name: str, px: int = 2) -> tk.PhotoImage:
     """Render icon `name` to a transparent PhotoImage at `px` pixels per cell."""
     grid = _ICONS[name]
     img = tk.PhotoImage(master=master, width=len(grid[0]) * px, height=len(grid) * px)
-    for y, row in enumerate(grid):
-        for x, ch in enumerate(row):
-            if ch == ".":
-                continue
-            img.put(PALETTE[ch], to=(x * px, y * px, (x + 1) * px, (y + 1) * px))
+    for x, y, ch in pixel_grid.grid_cells(grid):
+        img.put(PALETTE[ch], to=(x * px, y * px, (x + 1) * px, (y + 1) * px))
     return img

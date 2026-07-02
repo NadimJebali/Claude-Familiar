@@ -21,7 +21,36 @@ behavioral tests, which assert direction/clamping/monotonicity, not magnitudes.
 """
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, TypedDict
+
+
+class Pet(TypedDict):
+    """The one global pet's shape (see :func:`mascot.pet_store.default_pet`).
+
+    A *precise dict*, not a value class: at runtime a pet is still a plain dict and
+    the pure cores stay dict-in/dict-out — this only names the fields and their types
+    so callers (and mypy) stop inferring the shape from scattered ``.get`` calls.
+    """
+    name: str
+    born: float
+    last_seen: float
+    hunger: float
+    happiness: float
+    energy: float
+    coins: int
+    xp: int
+    coins_today: int
+    last_award_date: str
+    last_prompt_date: str
+    days_active: int
+    streak: int
+    best_streak: int
+    inventory: dict[str, int]
+    cooldowns: dict[str, float]
+    wardrobe: list[str]
+    equipped: dict[str, str]
+
 
 # Stats are 0..MAX_STAT. This is the bar range, not a tuning knob.
 MAX_STAT = 100
@@ -231,7 +260,7 @@ LOW_NEED = 25
 HIGH_NEED = 70
 
 
-def mood(pet: dict[str, Any]) -> str:
+def mood(pet: Mapping[str, Any]) -> str:
     """Derive the pet's mood from its needs (for the idle-face overlay, #11).
 
     The single most-depleted need decides a low mood (`hungry`/`tired`/`sad`); if
@@ -256,6 +285,11 @@ XP_PER_LEVEL = 100
 def level_for_xp(xp: int) -> int:
     """The pet's level for a given lifetime XP. Level 1 at 0 XP, +1 per XP_PER_LEVEL."""
     return 1 + max(0, int(xp)) // XP_PER_LEVEL
+
+
+# The level at which the pet earns a permanent milestone flourish (a sparkle). Read
+# by the look projection (`pet_view`) and the sprite flourish. Tuning, not structural.
+MILESTONE_LEVEL = 10
 
 
 DAY_S = 86400.0
