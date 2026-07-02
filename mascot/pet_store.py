@@ -36,8 +36,13 @@ def default_pet(now: float) -> dict[str, Any]:
         "coins_today": 0,
         "last_award_date": "",
         "last_prompt_date": "",   # for the daily first-prompt streak bonus
+        "days_active": 0,   # lifetime count of days with a prompt — never decreases
+        "streak": 0,        # current consecutive-day run (display only)
+        "best_streak": 0,   # the longest run ever — never decreases
         "inventory": {},   # item_id -> count owned (food + toys)
         "cooldowns": {},   # item_id -> last-played timestamp (toys)
+        "wardrobe": [],    # cosmetic ids owned (permanent; never consumed)
+        "equipped": {},    # slot -> cosmetic id, e.g. {"head": "party_hat"}
     }
 
 
