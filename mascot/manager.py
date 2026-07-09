@@ -18,6 +18,7 @@ from . import (
     icon,
     notifier,
     pet_service,
+    roster,
     single_instance,
     state_store,
 )
@@ -100,22 +101,21 @@ class MascotManager:
         now = time.time()
         states = state_store.load_states(config.STATE_DIR, now)
 
-        for sid in list(self.windows):
-            if sid not in states:
-                self.windows[sid].close()
-                del self.windows[sid]
-
-        for index, (sid, state) in enumerate(sorted(states.items())):
-            win = self.windows.get(sid)
-            if win is None:
-                # The manager is the cards' PetHost; its pet_enabled (a live service)
-                # gates the paw button, tooltip, and coin-on-tap in simple mode.
-                win = MascotWindow(self.root, sid, state, index, host=self)
-                self.windows[sid] = win
-                if self._cards_hidden:        # honor a tray "hide" for new sessions
-                    win.set_hidden(True)
-            else:
-                win.update_state(state, now)
+        # The pure roster core decides the card lifecycle; the manager is just the
+        # shell that carries the commands out against its live Tk windows.
+        cmds = roster.reconcile(self.windows, states)
+        for sid in cmds.destroy:
+            self.windows[sid].close()
+            del self.windows[sid]
+        for sid, state, index in cmds.create:
+            # The manager is the cards' PetHost; its pet_enabled (a live service)
+            # gates the paw button, tooltip, and coin-on-tap in simple mode.
+            win = MascotWindow(self.root, sid, state, index, host=self)
+            self.windows[sid] = win
+            if self._cards_hidden:            # honor a tray "hide" for new sessions
+                win.set_hidden(True)
+        for sid, state in cmds.update:
+            self.windows[sid].update_state(state, now)
 
         self._notify_sessions(states)
         self._update_pet(states, now)
