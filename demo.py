@@ -18,6 +18,7 @@ from pathlib import Path
 BASE = Path.home() / ".claude" / "mascot"
 STATE_DIR = BASE / "state"
 PET_PATH = BASE / "pet.json"
+USAGE_PATH = BASE / "usage.json"
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 now = time.time()
@@ -98,6 +99,18 @@ for state in states:
 pet_backup = PET_PATH.read_bytes() if PET_PATH.exists() else None
 PET_PATH.write_text(json.dumps(demo_pet, indent=2), encoding="utf-8")
 
+# A demo usage snapshot so the bottom bars show without a live statusline: the 5h
+# window warning-amber, the weekly window alarm-red. resets_at is far in the future
+# so neither decays to zero during the demo.
+demo_usage = {
+    "five_hour": {"used_percentage": 76, "resets_at": now + 3 * 3600},
+    "seven_day": {"used_percentage": 93, "resets_at": now + 5 * DAY},
+    "effort": "max",
+    "ts": now,
+}
+usage_backup = USAGE_PATH.read_bytes() if USAGE_PATH.exists() else None
+USAGE_PATH.write_text(json.dumps(demo_usage, indent=2), encoding="utf-8")
+
 print()
 print("Launching mascot widget (tkinter)...")
 print("✓ Three cards appear bottom-right: one working, one idle, one on a face tour")
@@ -134,4 +147,10 @@ finally:
     else:
         PET_PATH.unlink(missing_ok=True)
         print("Removed the demo pet.json.")
+    # Same for the usage snapshot.
+    if usage_backup is not None:
+        USAGE_PATH.write_bytes(usage_backup)
+        print("Restored your real usage.json.")
+    else:
+        USAGE_PATH.unlink(missing_ok=True)
     print("Done.")

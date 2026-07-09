@@ -28,6 +28,7 @@ from . import (
 )
 from . import effort as effort_mod
 from . import overlay as overlay_mod
+from . import usage as usage_mod
 from .pet_host import PetHost
 from .pet_view import PetView, pet_view
 from .popups import BubbleWindow, StatsTooltip
@@ -89,7 +90,10 @@ CARD_W = _s(158)
 # Height carries enough headroom above the caption for the *adult* sprite (the
 # tallest stage at 16x7px); the creature zone (margin..caption) is sized to it so
 # the grown-up's ears clear the top border and its feet clear the caption text.
-CARD_H = _s(211)
+# The extra USAGE_ROW_H at the bottom holds the 5h/weekly usage bars (below the
+# info line) — a pure addition, so nothing above it moves.
+USAGE_ROW_H = _s(24)
+CARD_H = _s(211) + USAGE_ROW_H
 WIN_BG = "#101117"          # window backdrop (blends with the panel's corners)
 CHROMA = "#ff00ff"          # chroma key -> transparent when TRANSPARENT_BG (unused elsewhere)
 # Chroma-key transparency (-transparentcolor) is a Windows-only Tk feature; on
@@ -120,6 +124,19 @@ LABEL_FG = "#8b8fa3"
 INFO_FG = "#6b6f82"
 BADGE_GAP = _s(26)          # spacing between sub-agent mini-mascots
 MINI_PIXEL_PX = _s(1)       # pixel size for a mini sub-agent -> ~16px
+
+# Usage bars (5h / weekly) — two thin labeled bars at the very bottom, in the same
+# visual language as the tooltip's need bars. Laid out below INFO_Y so no existing
+# element moves; the row is empty space when there's no usage data to show.
+USAGE_BAR_H = _s(6)
+USAGE_BAR_GAP = _s(5)               # vertical gap between the two bars
+USAGE_ROW_TOP = _s(205)             # first bar's top edge (below the info line)
+USAGE_LABEL_X = PANEL_MARGIN + _s(10)   # "5h" / "7d" label, west-anchored
+USAGE_BAR_X0 = PANEL_MARGIN + _s(26)    # track left
+USAGE_BAR_X1 = CARD_W - PANEL_MARGIN - _s(34)   # track right
+USAGE_PCT_X = CARD_W - PANEL_MARGIN - _s(6)     # "NN%" text, east-anchored
+USAGE_TRACK = "#2a2d3b"             # bar track (matches PANEL_EDGE)
+USAGE_FONT = _font(6)
 
 # Animation
 BOB_AMPLITUDE = _s(4)
@@ -310,6 +327,12 @@ def _render_sig(state: dict[str, Any], effective: str, face: str,
     return (effective, face, view, subs, state.get("cwd", ""), tool, effort)
 
 
+def _usage_sig(bars: list) -> tuple:
+    """Signature of the usage row — labels + rounded percents, so the card
+    repaints when a bar's value changes (incl. a window decaying to 0 at reset)."""
+    return tuple((b.label, round(b.pct)) for b in bars)
+
+
 # Faces whose caption is superseded by the running tool's name (the working family
 # — plus planning, where a running tool is still the more informative caption).
 _TOOL_CAPTION_FACES = frozenset(
@@ -388,6 +411,10 @@ class MascotWindow:
         # The resolved effort (per-session state -> global settings fallback) drives
         # the panel tint. Computed here so the first _render below can use it.
         self._effort_display = self._resolve_effort()
+        # The account-global usage snapshot (pushed by the manager) drives the two
+        # bottom bars. None until the first push -> an empty row.
+        self._usage: dict[str, Any] | None = None
+        self._usage_bars: list[usage_mod.UsageBar] = []
 
         # IMPORTANT: extra windows must be Toplevel, not Tk(). Only one Tk root.
         # Outside the rounded panel is painted with this bg; when transparency is
@@ -476,12 +503,14 @@ class MascotWindow:
         self._info_id = c.create_text(CREATURE_CX, INFO_Y, text=self._info_text_val,
                                       font=INFO_FONT, fill=INFO_FG)
 
+        self._draw_usage(c)
+
         # Keep the paw button on the tinted panel (it's a real widget, not canvas).
         if self._pet_btn is not None:
             self._pet_btn.configure(bg=panel)
 
-        self._sig = _render_sig(self.state, self._effective_state, self._display_face,
-                                view, self._effort_display)
+        self._sig = (*_render_sig(self.state, self._effective_state, self._display_face,
+                                  view, self._effort_display), _usage_sig(self._usage_bars))
 
     def _info_line(self, now: float) -> str:
         """'<model> · <duration>' — either part omitted if unknown."""
@@ -505,6 +534,25 @@ class MascotWindow:
             x = x0 + i * BADGE_GAP
             sprite_pixel.draw_creature(c, x, BADGE_Y, "working", accent, MINI_PIXEL_PX,
                                        tag="subagent")
+
+    def _draw_usage(self, c: tk.Canvas) -> None:
+        """Draw the 5h / weekly usage bars at the bottom of the card (nothing when
+        there's no usage data — API-key users, or before the first snapshot). Each
+        bar: a short label, a track, a traffic-light fill, and a NN% readout."""
+        for i, bar in enumerate(self._usage_bars):
+            top = USAGE_ROW_TOP + i * (USAGE_BAR_H + USAGE_BAR_GAP)
+            mid = top + USAGE_BAR_H / 2
+            c.create_text(USAGE_LABEL_X, mid, text=bar.label, anchor="e",
+                          font=USAGE_FONT, fill=LABEL_FG)
+            c.create_rectangle(USAGE_BAR_X0, top, USAGE_BAR_X1, top + USAGE_BAR_H,
+                               fill=USAGE_TRACK, outline="")
+            frac = max(0.0, min(1.0, bar.pct / 100.0))
+            if frac > 0:
+                fill_x = USAGE_BAR_X0 + (USAGE_BAR_X1 - USAGE_BAR_X0) * frac
+                c.create_rectangle(USAGE_BAR_X0, top, fill_x, top + USAGE_BAR_H,
+                                   fill=_hex(usage_mod.bar_color(bar.pct)), outline="")
+            c.create_text(USAGE_PCT_X, mid, text=f"{round(bar.pct)}%", anchor="e",
+                          font=USAGE_FONT, fill=INFO_FG)
 
     # --- positioning ------------------------------------------------------
     def _place_initial(self, index: int) -> None:
@@ -648,6 +696,12 @@ class MascotWindow:
         if self._tooltip is not None:
             self._tooltip.set_pet(pet)
 
+    def set_usage(self, snapshot: dict[str, Any] | None) -> None:
+        """Receive the latest account-global usage snapshot from the manager; the
+        next animate tick recomputes the bars (with reset decay) and repaints if
+        they changed. Cheap — like set_pet, this only stores the data."""
+        self._usage = snapshot
+
     # --- state ------------------------------------------------------------
     def update_state(self, state: dict[str, Any], now: float | None = None) -> None:
         if now is None:
@@ -676,9 +730,10 @@ class MascotWindow:
         self._effective_state = self._compute_effective_state(now)
         self._display_face = self._compute_display_face(now)
         self._effort_display = self._resolve_effort()
+        self._usage_bars = usage_mod.usage_view(self._usage, now)
         view = self._pet_view()
-        new_sig = _render_sig(self.state, self._effective_state, self._display_face,
-                              view, self._effort_display)
+        new_sig = (*_render_sig(self.state, self._effective_state, self._display_face,
+                                view, self._effort_display), _usage_sig(self._usage_bars))
         if new_sig == self._sig:
             return
         self._render()
