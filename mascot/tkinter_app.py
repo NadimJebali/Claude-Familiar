@@ -26,6 +26,7 @@ from . import (
     sprite_pixel,
     ui_icons,
 )
+from . import effort as effort_mod
 from . import overlay as overlay_mod
 from .pet_host import PetHost
 from .pet_view import PetView, pet_view
@@ -296,7 +297,7 @@ def _format_duration(seconds: float) -> str:
 
 
 def _render_sig(state: dict[str, Any], effective: str, face: str,
-                view: PetView) -> tuple:
+                view: PetView, effort: str) -> tuple:
     """Signature of the *visible* content (excludes the `ts` heartbeat)."""
     subs = tuple((s.get("type") or "?") for s in (state.get("subagents") or []))
     # Include the active tool so the caption refreshes as it changes (only while
@@ -305,7 +306,8 @@ def _render_sig(state: dict[str, Any], effective: str, face: str,
     # Include the display face (it can change while the effective state doesn't —
     # e.g. the tool kind swaps mid-working) and the pet's look `view` (stage /
     # flourish / worn hat) so the card redraws when the pet evolves or re-dresses.
-    return (effective, face, view, subs, state.get("cwd", ""), tool)
+    # `effort` drives the panel tint, so a level change repaints the card once.
+    return (effective, face, view, subs, state.get("cwd", ""), tool, effort)
 
 
 # Faces whose caption is superseded by the running tool's name (the working family
@@ -378,10 +380,14 @@ class MascotWindow:
 
         # canvas item ids we animate / restyle in place
         self._border_id: int | None = None
+        self._panel_id: int | None = None      # the filled panel; restyled for the effort tint
         self._info_id: int | None = None
         self._info_text_val = ""
         self._started = state.get("started")
         self._bob_y = 0.0
+        # The resolved effort (per-session state -> global settings fallback) drives
+        # the panel tint. Computed here so the first _render below can use it.
+        self._effort_display = self._resolve_effort()
 
         # IMPORTANT: extra windows must be Toplevel, not Tk(). Only one Tk root.
         # Outside the rounded panel is painted with this bg; when transparency is
@@ -438,10 +444,13 @@ class MascotWindow:
         c = self.canvas
         c.delete("all")
         accent = _accent(self._display_face)
+        panel = self._panel_color()
 
-        # rounded panel + accent border (the border pulses while waiting)
-        round_rect(c, PANEL_MARGIN, PANEL_MARGIN, CARD_W - PANEL_MARGIN,
-                   CARD_H - PANEL_MARGIN, PANEL_RADIUS, fill=PANEL_FILL, outline="")
+        # rounded panel (tinted by the session's effort) + accent border (the
+        # border pulses while waiting). The panel id is kept so the effort tint
+        # can be restyled in place on the animate clock.
+        self._panel_id = round_rect(c, PANEL_MARGIN, PANEL_MARGIN, CARD_W - PANEL_MARGIN,
+                                    CARD_H - PANEL_MARGIN, PANEL_RADIUS, fill=panel, outline="")
         self._border_id = round_rect(
             c, PANEL_MARGIN, PANEL_MARGIN, CARD_W - PANEL_MARGIN, CARD_H - PANEL_MARGIN,
             PANEL_RADIUS, fill="", outline=accent, width=2,
@@ -467,7 +476,12 @@ class MascotWindow:
         self._info_id = c.create_text(CREATURE_CX, INFO_Y, text=self._info_text_val,
                                       font=INFO_FONT, fill=INFO_FG)
 
-        self._sig = _render_sig(self.state, self._effective_state, self._display_face, view)
+        # Keep the paw button on the tinted panel (it's a real widget, not canvas).
+        if self._pet_btn is not None:
+            self._pet_btn.configure(bg=panel)
+
+        self._sig = _render_sig(self.state, self._effective_state, self._display_face,
+                                view, self._effort_display)
 
     def _info_line(self, now: float) -> str:
         """'<model> · <duration>' — either part omitted if unknown."""
@@ -661,11 +675,27 @@ class MascotWindow:
         content changed."""
         self._effective_state = self._compute_effective_state(now)
         self._display_face = self._compute_display_face(now)
+        self._effort_display = self._resolve_effort()
         view = self._pet_view()
-        new_sig = _render_sig(self.state, self._effective_state, self._display_face, view)
+        new_sig = _render_sig(self.state, self._effective_state, self._display_face,
+                              view, self._effort_display)
         if new_sig == self._sig:
             return
         self._render()
+
+    def _resolve_effort(self) -> str:
+        """The effort level to display: the session's per-turn level (from the
+        state file) wins, falling back to Claude's global ``effortLevel``."""
+        return effort_mod.resolve(self.state.get("effort", ""), effort_mod.settings_effort())
+
+    def _panel_color(self) -> str:
+        """The card panel fill for the current effort — a subtle tint in the
+        effort's own color. The gravestone (dead) suppresses the tint so a
+        finished session stays sombre; unknown/absent effort keeps the default."""
+        if self._display_face == "dead":
+            return PANEL_FILL
+        fill = effort_mod.panel_fill(self._effort_display, _PANEL_FILL_RGB)
+        return _hex(fill) if fill is not None else PANEL_FILL
 
     def _pet_view(self) -> PetView:
         """The pet's look (stage/hat/flourish) for the sprite draw, via the pure

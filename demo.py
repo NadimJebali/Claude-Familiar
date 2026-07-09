@@ -32,6 +32,7 @@ states = [
         "state": "working",
         "tool": "Edit",
         "subagents": [{"id": "a", "type": "code-reviewer"}],
+        "effort": "high",       # periwinkle panel tint
         "ts": now,
     },
     {
@@ -40,6 +41,7 @@ states = [
         "state": "idle",
         "tool": None,
         "subagents": [],
+        "effort": "low",        # amber panel tint
         "ts": now,
     },
 ]
@@ -55,6 +57,7 @@ TOUR_BASE = {
     "tool": None,
     "permission_mode": "",
     "stumbled": False,
+    "effort": "max",        # the tour card wears the max tint (rainbow once animated)
 }
 TOUR_PHASES = [
     {"state": "working", "tool": "Read"},        # reading eyes
