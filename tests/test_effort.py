@@ -146,6 +146,91 @@ def test_settings_effort_cache_invalidates_when_file_changes(tmp_path):
     assert effort_mod.settings_effort(p) == "max"
 
 
+# --- effort core: animated color math (xhigh wave + max rainbow) -----------
+def _valid_rgb(c):
+    return (isinstance(c, tuple) and len(c) == 3
+            and all(isinstance(x, int) and 0 <= x <= 255 for x in c))
+
+
+def test_wave_color_is_always_a_valid_color():
+    for t in (-100.0, -1.3, 0.0, 0.5, 3.7, 1e6):
+        assert _valid_rgb(effort_mod.wave_color(t))
+
+
+def test_wave_color_stays_within_the_two_shimmer_endpoints():
+    lo, hi = effort_mod.WAVE_LO, effort_mod.WAVE_HI
+    for k in range(50):
+        c = effort_mod.wave_color(k * 0.13)
+        for i in range(3):
+            assert min(lo[i], hi[i]) <= c[i] <= max(lo[i], hi[i])
+
+
+def test_wave_color_oscillates():
+    seen = {effort_mod.wave_color(k * 0.3) for k in range(40)}
+    assert len(seen) > 3  # genuinely sweeps, not a constant
+
+
+def test_wave_color_is_periodic():
+    p = effort_mod.WAVE_PERIOD_S
+    assert effort_mod.wave_color(0.37) == effort_mod.wave_color(0.37 + p)
+
+
+def test_rainbow_color_is_always_a_valid_color():
+    for t in (-100.0, -0.9, 0.0, 1.1, 5.5, 1e6):
+        assert _valid_rgb(effort_mod.rainbow_color(t))
+
+
+def test_rainbow_color_is_periodic():
+    p = effort_mod.RAINBOW_PERIOD_S
+    assert effort_mod.rainbow_color(1.9) == effort_mod.rainbow_color(1.9 + p)
+
+
+def test_rainbow_color_cycles_widely():
+    # Over a full period it visits many distinct hues, not a narrow band.
+    seen = {effort_mod.rainbow_color(k * effort_mod.RAINBOW_PERIOD_S / 30)
+            for k in range(30)}
+    assert len(seen) >= 10
+
+
+def test_rainbow_color_hits_palette_anchors():
+    # At the start of each 1/7 segment the color equals that rainbow anchor.
+    n = len(effort_mod.RAINBOW)
+    for i in range(n):
+        t = i * effort_mod.RAINBOW_PERIOD_S / n
+        assert effort_mod.rainbow_color(t) == effort_mod.RAINBOW[i]
+
+
+def test_panel_fill_animates_for_xhigh_and_max():
+    # The two special levels sweep with the clock; sampling across a period must
+    # produce more than one panel color.
+    for level, period in (("xhigh", effort_mod.WAVE_PERIOD_S),
+                          ("max", effort_mod.RAINBOW_PERIOD_S)):
+        fills = {effort_mod.panel_fill(level, PANEL, k * period / 12)
+                 for k in range(12)}
+        assert len(fills) > 2
+
+
+def test_panel_fill_is_static_for_quiet_levels():
+    # low/medium/high do not animate — same panel color at any t.
+    for level in ("low", "medium", "high"):
+        assert (effort_mod.panel_fill(level, PANEL, 0.0)
+                == effort_mod.panel_fill(level, PANEL, 3.3))
+
+
+def test_border_accent_only_for_animated_levels():
+    # Only the two animated levels get a full-strength moving border accent.
+    for level in ("", "auto", "low", "medium", "high"):
+        assert effort_mod.border_accent(level, 0.0) is None
+    for level in ("xhigh", "max"):
+        assert _valid_rgb(effort_mod.border_accent(level, 0.0))
+
+
+def test_border_accent_moves_with_the_clock():
+    xs = {effort_mod.border_accent("max", k * effort_mod.RAINBOW_PERIOD_S / 10)
+          for k in range(10)}
+    assert len(xs) > 2
+
+
 # --- state shape: effort is a first-class, carried field -------------------
 def test_default_state_has_empty_effort():
     assert default_state(SID)["effort"] == ""

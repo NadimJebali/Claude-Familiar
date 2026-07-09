@@ -13,6 +13,7 @@ only thing here that touches the filesystem.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 RGB = tuple[int, int, int]
@@ -41,6 +42,11 @@ RAINBOW: tuple[RGB, ...] = (
 # lands in a follow-up slice; the static tint here uses the bright end.
 WAVE_LO: RGB = (62, 22, 118)
 WAVE_HI: RGB = (140, 80, 240)
+
+# Animation periods (seconds). Tuning-pass magnitudes — tests assert the shape
+# (valid color, oscillates, wraps), not the exact speed.
+WAVE_PERIOD_S = 2.4      # xhigh: one deep<->bright purple sweep
+RAINBOW_PERIOD_S = 6.0   # max: one full trip around the rainbow ring
 
 
 def _mean(colors: tuple[RGB, ...]) -> RGB:
@@ -107,17 +113,60 @@ def blend(base: RGB, target: RGB, strength: float) -> RGB:
     return (mix(base[0], target[0]), mix(base[1], target[1]), mix(base[2], target[2]))
 
 
-def panel_fill(effort: str | None, base: RGB, t: float = 0.0) -> RGB | None:
-    """The card panel color for ``effort`` over the dark ``base``, or ``None`` for
-    an unknown level (the card then keeps its exact default panel).
+def wave_color(t: float) -> RGB:
+    """The ``xhigh`` shimmer color at time ``t`` — a smooth sinusoidal sweep
+    between the deep and bright ends of the purple gradient (the "wave")."""
+    phase = (math.sin(2 * math.pi * t / WAVE_PERIOD_S) + 1) / 2  # 0..1
+    return blend(WAVE_LO, WAVE_HI, phase)
 
-    ``t`` is the animation clock, unused by the static tints in this slice; the
-    follow-up slice makes ``xhigh``/``max`` vary their color with it.
+
+def rainbow_color(t: float) -> RGB:
+    """The ``max`` color at time ``t`` — a smooth trip around the rainbow ring,
+    lerping between adjacent anchors and wrapping violet -> red."""
+    n = len(RAINBOW)
+    pos = (t / RAINBOW_PERIOD_S % 1.0) * n
+    i = int(pos) % n
+    return blend(RAINBOW[i], RAINBOW[(i + 1) % n], pos - int(pos))
+
+
+def effort_color(effort: str | None, t: float = 0.0) -> RGB | None:
+    """The representative color for ``effort`` at time ``t``, or ``None`` when the
+    level is unknown. ``low``/``medium``/``high`` are static tints; ``xhigh`` waves
+    through the purple shimmer and ``max`` cycles the rainbow (both driven by ``t``).
     """
     level = normalize(effort)
     if not level:
         return None
-    return blend(base, TINTS[level], _BLEND_STRENGTH[level])
+    if level == "xhigh":
+        return wave_color(t)
+    if level == "max":
+        return rainbow_color(t)
+    return TINTS[level]
+
+
+def panel_fill(effort: str | None, base: RGB, t: float = 0.0) -> RGB | None:
+    """The card panel color for ``effort`` over the dark ``base`` at time ``t``, or
+    ``None`` for an unknown level (the card then keeps its exact default panel).
+    ``xhigh``/``max`` animate with ``t``; the quiet levels ignore it.
+    """
+    level = normalize(effort)
+    if not level:
+        return None
+    color = effort_color(level, t)
+    assert color is not None  # a known level always has a color
+    return blend(base, color, _BLEND_STRENGTH[level])
+
+
+# The two "special" levels whose background animates; the quiet levels stay static.
+_ANIMATED = frozenset({"xhigh", "max"})
+
+
+def border_accent(effort: str | None, t: float) -> RGB | None:
+    """A full-strength moving border color for the animated levels (``xhigh``/
+    ``max``), or ``None`` for every other level. The card draws it only when the
+    session isn't demanding attention (the waiting pulse always wins)."""
+    level = normalize(effort)
+    return effort_color(level, t) if level in _ANIMATED else None
 
 
 # --- settings fallback (thin I/O shell) ------------------------------------

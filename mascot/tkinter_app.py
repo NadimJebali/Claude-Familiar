@@ -444,7 +444,7 @@ class MascotWindow:
         c = self.canvas
         c.delete("all")
         accent = _accent(self._display_face)
-        panel = self._panel_color()
+        panel = self._panel_color(time.time() - self._anim_t0)
 
         # rounded panel (tinted by the session's effort) + accent border (the
         # border pulses while waiting). The panel id is kept so the effort tint
@@ -688,14 +688,21 @@ class MascotWindow:
         state file) wins, falling back to Claude's global ``effortLevel``."""
         return effort_mod.resolve(self.state.get("effort", ""), effort_mod.settings_effort())
 
-    def _panel_color(self) -> str:
-        """The card panel fill for the current effort — a subtle tint in the
-        effort's own color. The gravestone (dead) suppresses the tint so a
-        finished session stays sombre; unknown/absent effort keeps the default."""
+    def _panel_color(self, t: float = 0.0) -> str:
+        """The card panel fill for the current effort at animation time ``t`` — a
+        subtle tint in the effort's own color (xhigh waves purple, max cycles the
+        rainbow). The gravestone (dead) suppresses the tint so a finished session
+        stays sombre; unknown/absent effort keeps the default panel."""
         if self._display_face == "dead":
             return PANEL_FILL
-        fill = effort_mod.panel_fill(self._effort_display, _PANEL_FILL_RGB)
+        fill = effort_mod.panel_fill(self._effort_display, _PANEL_FILL_RGB, t)
         return _hex(fill) if fill is not None else PANEL_FILL
+
+    def _effort_animates(self) -> bool:
+        """True while the current effort has a moving background (xhigh/max) and
+        the card isn't a gravestone — the only case that needs per-frame restyle."""
+        return (self._display_face != "dead"
+                and effort_mod.border_accent(self._effort_display, 0.0) is not None)
 
     def _pet_view(self) -> PetView:
         """The pet's look (stage/hat/flourish) for the sprite draw, via the pure
@@ -827,13 +834,27 @@ class MascotWindow:
             # path (mascot/particles.py). Repaints the live ones, drops the expired.
             self._particles.draw(self.canvas, now)
 
-            # Gentle border pulse while the raw state needs the user's attention.
+            # Effort background animation: xhigh waves purple, max cycles the
+            # rainbow. Cheap in-place restyle of the existing panel item (never a
+            # full redraw) on this same clock — only the two animated levels move.
+            if self._panel_id is not None and self._effort_animates():
+                fill = self._panel_color(elapsed)
+                self.canvas.itemconfig(self._panel_id, fill=fill)
+                if self._pet_btn is not None:
+                    self._pet_btn.configure(bg=fill)
+
+            # Border: the waiting attention pulse always wins; otherwise the two
+            # animated effort levels tint the border in their live color.
             if self._border_id is not None:
                 if self.state.get("state", "idle") == "waiting":
                     phase = (elapsed / PULSE_PERIOD_S) * 2 * math.pi
                     t = (math.sin(phase) + 1) / 2
                     color = _hex(_lerp((42, 45, 59), config.STATE_COLORS["waiting"], t))
                     self.canvas.itemconfig(self._border_id, outline=color)
+                elif self._effort_animates():
+                    accent = effort_mod.border_accent(self._effort_display, elapsed)
+                    if accent is not None:
+                        self.canvas.itemconfig(self._border_id, outline=_hex(accent))
 
             # Tick the live session-duration text (cheap: only on change).
             if self._info_id is not None:
