@@ -20,6 +20,10 @@ _MENU = "Start menu" if _IS_WINDOWS else "application menu"
 
 
 def main() -> None:
+    print("Installing runtime dependencies (PySide6, tray, notifications)...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "-r",
+                    str(ROOT / "requirements.txt")], cwd=str(ROOT), check=False)
+
     print("Generating the mascot app icon...")
     subprocess.run([sys.executable, "-c",
                     "from mascot import icon; print(icon.ensure_app_icon())"],

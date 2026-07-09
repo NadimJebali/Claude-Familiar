@@ -4,6 +4,7 @@
 #   python -m pip install -r requirements-dev.txt
 #
 pytest
+pytest-qt>=4        # Qt test helpers for the PySide6 view layer (ADR-0002)
 hypothesis>=6
 ruff>=0.15
 mypy>=1.8

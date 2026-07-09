@@ -6,6 +6,11 @@
 #
 # Dev/test tools (pytest, hypothesis, ruff) live in requirements-dev.txt.
 
+# Qt for Python — the widget's view layer (ADR-0002 / PRD #51). The migration is a
+# hard cutover to PySide6; once it lands it replaces the Tk view and subsumes the
+# tray + toast deps below (pystray/Pillow/plyer are removed at the cutover, #63).
+PySide6>=6.8
+
 # Cross-platform system tray (#18). pystray renders the tray icon + menu on
 # Windows / Linux / macOS; Pillow supplies the icon image.
 pystray>=0.19
