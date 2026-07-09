@@ -448,14 +448,17 @@ decisions + 6 derived).
   when there's no data. The manager pushes the snapshot to every card each poll
   (like the pet push), independent of the pet toggle.
 
-### #49 — HITL: verification gates, tuning, docs (🔄 in progress)
+### #49 — HITL: verification gates, tuning, docs (mostly ✅)
 - **Gate 1 (effort stamp):** ✅ confirmed on the **VSCode-extension** path (live state
-  file carries `effort`). ⏳ CLI path is by the identical mechanism (same emit.py,
-  same `CLAUDE_EFFORT`) — wants a real CLI-session confirmation.
-- **Gate 2 (statusline in VSCode):** ⏳ needs the statusline installed into the real
-  `~/.claude/settings.json` + one VSCode session to observe whether the extension
-  runs the command. Accepted fallback (grill decision): last-known usage from CLI
-  sessions with reset decay. **Outcome to be recorded in the README.**
+  file carries `effort: "xhigh"`). CLI path is by the identical mechanism (same
+  emit.py, same `CLAUDE_EFFORT`) — a real CLI-session look is nice-to-have but
+  redundant.
+- **Gate 2 (statusline in VSCode):** ✅ **confirmed live.** With the statusline
+  installed in the real `~/.claude/settings.json`, the **VSCode extension (2.1.205)
+  ran the command and wrote real `usage.json`** (5h/weekly percents + effort) —
+  even hot-reloading the setting without a session restart. So usage is **live** on
+  both CLI and VSCode; the last-known-with-decay path is only a fallback for any
+  surface that doesn't run the statusline. Recorded in the README.
 - **Visual tuning pass:** ⏳ tint strengths (`_BLEND_STRENGTH` 0.18/0.32), wave/rainbow
   periods, and bar legibility at small/medium/large are first-pass magnitudes — tests
   assert shape/invariants, not values (like the pet-balance numbers). Wants a live

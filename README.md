@@ -300,10 +300,11 @@ Claude Code session ──hooks──▶ emit.py ──atomic write──▶ ~/.
   writer** (one global file, last-writer-wins — the limits are account-wide), so it
   never races the per-session state files. The two pure cores behind it are
   `mascot/statusline.py` (JSON → snapshot + footer) and `mascot/usage.py`
-  (snapshot → decayed bars + colors). *Note: the terminal footer + usage feed run
-  wherever Claude executes the statusline command; in editor sessions that don't,
-  the bars show the last-known numbers from your terminal sessions (limits are
-  account-global), decayed by each window's reset time.*
+  (snapshot → decayed bars + colors). *Confirmed live on both the CLI and the
+  VSCode extension (Claude Code 2.1.205 runs the statusline command in both). If a
+  future surface ever doesn't, the bars fall back to the last-known numbers from
+  your other sessions — the limits are account-global — decayed by each window's
+  reset time, so they stay honest rather than going blank.*
 - **`mascot/manager.py`** (`MascotManager`) polls the state directory every second
   and creates/destroys one native Tkinter window (`mascot/tkinter_app.py`) per
   active session. Each card is a single Canvas; the mascot is drawn by
