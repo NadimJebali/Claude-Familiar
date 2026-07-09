@@ -227,3 +227,30 @@ def test_simple_mode_is_not_a_live_pet_host(app, tmp_path, monkeypatch):
     mgr._on_petted("s1")                            # both are safe no-ops in simple mode
     mgr.open_pet()
     assert mgr._pet_window is None
+
+
+# --- QtCard: the paw button -> open the Pet window ---------------------------
+def test_card_shows_a_paw_button_only_when_pet_enabled(app):
+    on = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer(), pet_enabled=True)
+    off = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer(), pet_enabled=False)
+    assert on._paw is not None      # the paw opens the Pet window when the pet is live
+    assert off._paw is None         # simple mode is a read-only indicator, no paw
+    on.close()
+    off.close()
+
+
+def test_paw_click_requests_opening_the_pet_window(app):
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer(), pet_enabled=True)
+    opened: list[bool] = []
+    card.open_pet_requested.connect(lambda: opened.append(True))
+    card._paw.click()
+    assert opened == [True]
+    card.close()
+
+
+def test_manager_wires_the_card_paw_to_open_the_pet_window(app, tmp_path):
+    mgr = qt_app.QtMascotApp(tmp_path, service=_svc(tmp_path))
+    mgr._on_sessions({"s1": _state("s1", "idle")})
+    mgr.cards["s1"].open_pet_requested.emit()       # as the paw button would
+    assert mgr._pet_window is not None
+    mgr._pet_window.close()

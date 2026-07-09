@@ -105,8 +105,9 @@ class QtMascotApp(QObject):
         for sid in cmds.destroy:
             self._cards.pop(sid).close()
         for sid, state, index in cmds.create:
-            card = QtCard(sid, state, index, self._renderer)
+            card = QtCard(sid, state, index, self._renderer, pet_enabled=self.pet_enabled)
             card.petted.connect(self._on_petted)
+            card.open_pet_requested.connect(self.open_pet)
             card.show()
             if self._cards_hidden:            # honor a tray "hide" for new sessions
                 card.hide()

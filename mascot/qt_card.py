@@ -15,9 +15,11 @@ timer drives the idle bob. The card is draggable, and a quick tap (no drag) pets
 
 The manager pushes the global pet's look via :meth:`QtCard.set_pet`: the mood tints
 the idle face and the stage/hat/flourish dress the sprite (parity with the Tk card).
+A paw button at the panel's top-left (shown only when the pet is live) asks the
+manager to open the Pet window via the ``open_pet_requested`` signal.
 
-Still on the parity list (later #57 work / #60): sub-agent badges, the paw button to
-the Pet window, the attention-shake jostle, and home-monitor placement.
+Still on the parity list (later #57 work / #60): sub-agent badges, the attention-
+shake jostle, and home-monitor placement.
 """
 from __future__ import annotations
 
@@ -25,18 +27,25 @@ import math
 import random
 import time
 
-from PySide6.QtCore import QPoint, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
     QGuiApplication,
+    QIcon,
+    QImage,
     QMouseEvent,
     QPainter,
     QPainterPath,
     QPixmap,
     QScreen,
 )
-from PySide6.QtWidgets import QGraphicsDropShadowEffect, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QGraphicsDropShadowEffect,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from . import config, effective_state
 from .overlay import Overlay, OverlayConfig
@@ -55,6 +64,11 @@ PANEL_FILL = "#1d1f29"
 PANEL_EDGE = "#2a2d3b"
 PANEL_RADIUS = 20
 CAPTION_FG = "#e8e6ef"
+
+# The paw button (opens the Pet window) sits at the panel's top-left, mirroring the
+# Tk card. Its icon is the same pixel-art paw, rasterized once to a QPixmap.
+PAW_PX = 2              # pixel size of the paw icon (a 12x12 grid -> 24px)
+PAW_INSET = 8          # offset from the panel's top-left corner
 
 # --- animation / interaction constants (match the Tk card) ------------------
 ANIM_MS = 40            # ~25fps
@@ -97,6 +111,28 @@ _CAPTIONS = {
 def _hex(rgb: tuple[int, int, int]) -> str:
     r, g, b = rgb
     return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _paw_pixmap(px: int) -> QPixmap:
+    """The pixel-art paw (shared with the Tk paw button) rasterized to a QPixmap.
+
+    Reuses the pure paw grid + palette from ``ui_icons`` — the same coexistence
+    pattern the sprite renderer uses for the creature grids; at the #63 cutover the
+    pure icon data relocates alongside the sprite data."""
+    from . import ui_icons
+    from .pixel_grid import grid_cells
+
+    grid = ui_icons._ICONS["paw"]
+    img = QImage(len(grid[0]) * px, len(grid) * px,
+                 QImage.Format.Format_ARGB32_Premultiplied)
+    img.fill(Qt.GlobalColor.transparent)
+    p = QPainter(img)
+    try:
+        for col, row, ch in grid_cells(grid):
+            p.fillRect(col * px, row * px, px, px, QColor(ui_icons.PALETTE[ch]))
+    finally:
+        p.end()
+    return QPixmap.fromImage(img)
 
 
 class _CardPanel(QWidget):
@@ -147,10 +183,12 @@ class _CardPanel(QWidget):
 class QtCard(QWidget):
     """A live, animated, draggable session card."""
 
-    petted = Signal(str)   # session_id — emitted on a pet tap (manager awards coins)
+    petted = Signal(str)          # session_id — emitted on a pet tap (manager awards coins)
+    open_pet_requested = Signal()  # the paw button — the manager opens the Pet window
 
     def __init__(self, session_id: str, state: dict, index: int,
-                 renderer: SpriteRenderer, *, screen: QScreen | None = None) -> None:
+                 renderer: SpriteRenderer, *, pet_enabled: bool = False,
+                 screen: QScreen | None = None) -> None:
         super().__init__()
         self.session_id = session_id
         self._renderer = renderer
@@ -187,6 +225,11 @@ class QtCard(QWidget):
         self._pixmap_key: tuple[object, ...] | None = None
         self._drag_offset: QPoint | None = None
         self._press_pos: QPoint | None = None
+
+        # A small paw button (only when the pet is live) at the panel's top-left that
+        # asks the manager to open the Pet window. As a child button it swallows its
+        # own clicks, so pressing the paw neither drags nor pets the card.
+        self._paw = self._build_paw() if pet_enabled else None
 
         self._place(index, screen)
         self._render(now)
@@ -266,6 +309,24 @@ class QtCard(QWidget):
         return self._renderer.creature(
             SpriteSpec(stage=stage, state=face, accent=accent, hat=hat, flourish=flourish),
             CREATURE_PX)
+
+    # --- paw button (opens the Pet window) -------------------------------
+    def _build_paw(self) -> QPushButton:
+        """A flat, pixel-art paw button anchored at the panel's top-left corner."""
+        icon_px = PAW_PX * 12                      # the paw grid is 12 cells square
+        button = QPushButton(self)
+        button.setIcon(QIcon(_paw_pixmap(PAW_PX)))
+        button.setIconSize(QSize(icon_px, icon_px))
+        button.setFixedSize(icon_px + 8, icon_px + 8)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setToolTip("Open the Pet window")
+        button.setStyleSheet(
+            "QPushButton{background:transparent;border:none;border-radius:6px}"
+            f"QPushButton:hover{{background:{PANEL_EDGE}}}")
+        button.clicked.connect(lambda: self.open_pet_requested.emit())
+        button.move(SHADOW_PAD + PAW_INSET, SHADOW_PAD + PAW_INSET)
+        button.raise_()
+        return button
 
     # --- drag + tap-to-pet ------------------------------------------------
     def mousePressEvent(self, event: QMouseEvent) -> None:
