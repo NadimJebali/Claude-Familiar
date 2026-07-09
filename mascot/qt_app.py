@@ -68,6 +68,7 @@ class QtMascotApp(QObject):
             self._cards.pop(sid).close()
         for sid, state, index in cmds.create:
             card = QtCard(sid, state, index, self._renderer)
+            card.petted.connect(self._on_petted)
             card.show()
             if self._cards_hidden:            # honor a tray "hide" for new sessions
                 card.hide()
@@ -90,6 +91,11 @@ class QtMascotApp(QObject):
         except Exception as exc:  # noqa: BLE001 — a toast must never crash the widget
             print("[mascot] toast failed:", exc)
         self._notify_prev = dict(live)
+
+    def _on_petted(self, _session_id: str) -> None:
+        """A card was petted. The happy hop plays on the card itself; the
+        daily-capped coin trickle awaits the Qt pet wiring (#57 remainder / #60),
+        which will connect here to award through PetService."""
 
     # --- tray callbacks (run on the UI thread) ---------------------------
     def _toggle_cards(self) -> None:

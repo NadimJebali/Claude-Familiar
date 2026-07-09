@@ -18,7 +18,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QThreadPool
+from PySide6.QtCore import QEvent, QPointF, Qt, QThreadPool
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
 
 from mascot import qt_app, qt_card, qt_ingest
@@ -107,4 +108,33 @@ def test_card_constructs_and_swaps_state(app):
     assert card.session_id == "s1"
     card.set_state(_state("s1", "dead"))    # gravestone path
     card.set_state(_state("s1", "waiting"))
+    card.close()
+
+
+def test_finishing_a_turn_celebrates(app):
+    card = qt_card.QtCard("s", _state("s", "working"), 0, QtPixmapRenderer())
+    card.set_state(_state("s", "idle"))     # active -> idle earns the happy hop
+    assert card._face == "happy"
+    card.close()
+
+
+def _tap(card, x=5, y=5):
+    pos = QPointF(x, y)
+    press = QMouseEvent(QEvent.Type.MouseButtonPress, pos, pos,
+                        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+                        Qt.KeyboardModifier.NoModifier)
+    release = QMouseEvent(QEvent.Type.MouseButtonRelease, pos, pos,
+                          Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton,
+                          Qt.KeyboardModifier.NoModifier)
+    card.mousePressEvent(press)
+    card.mouseReleaseEvent(release)
+
+
+def test_tap_emits_petted_and_hops(app):
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer())
+    got: list[str] = []
+    card.petted.connect(got.append)
+    _tap(card)                              # press+release in place = a pet tap
+    assert got == ["s"]
+    assert card._face == "happy"            # petting plays the happy hop
     card.close()
