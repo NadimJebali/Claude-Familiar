@@ -9,13 +9,15 @@ the port inherits their tested behaviour rather than re-deriving it:
 ``Overlay`` + ``effective_state`` layer dozing, the idle blink, the celebrate
 hop, dizzy, the waiting glare, per-tool working faces, plan-mode and the stumble
 over the raw hook state. The face is a cached pixmap from the ``SpriteRenderer``
-seam, swapped only when the face actually changes; a ~25fps timer drives the idle
-bob. The card is draggable, and a quick tap (no drag) pets it — a happy hop plus a
-``petted`` signal the manager turns into the coin trickle.
+seam, swapped only when the face (or the pet's look) actually changes; a ~25fps
+timer drives the idle bob. The card is draggable, and a quick tap (no drag) pets it
+— a happy hop plus a ``petted`` signal the manager turns into the coin trickle.
 
-Still on the parity list (later #57 work / #60): the pet's stage/hat/mood tint,
-sub-agent badges, the paw button to the Pet window, the attention-shake jostle,
-and home-monitor placement. This slice is the live, animated, draggable card.
+The manager pushes the global pet's look via :meth:`QtCard.set_pet`: the mood tints
+the idle face and the stage/hat/flourish dress the sprite (parity with the Tk card).
+
+Still on the parity list (later #57 work / #60): sub-agent badges, the paw button to
+the Pet window, the attention-shake jostle, and home-monitor placement.
 """
 from __future__ import annotations
 
@@ -38,6 +40,7 @@ from PySide6.QtWidgets import QGraphicsDropShadowEffect, QVBoxLayout, QWidget
 
 from . import config, effective_state
 from .overlay import Overlay, OverlayConfig
+from .pet_view import PetView
 from .sprite_qt import SpriteRenderer, SpriteSpec
 
 # --- card geometry (mirrors the Tk card's authored "small" size) ------------
@@ -176,7 +179,12 @@ class QtCard(QWidget):
         self._anim_t0 = now
         self._next_blink = now + random.uniform(BLINK_MIN_GAP_S, BLINK_MAX_GAP_S)
         self._face: str | None = None
+        # The global pet's look (mood tints the idle face; stage/hat/flourish dress
+        # the sprite), pushed by the manager each poll. None until the first push —
+        # a bare baby with a neutral "content" mood, matching the Tk card.
+        self._pet_view: PetView | None = None
         self._pixmap: QPixmap | None = None
+        self._pixmap_key: tuple[object, ...] | None = None
         self._drag_offset: QPoint | None = None
         self._press_pos: QPoint | None = None
 
@@ -201,6 +209,20 @@ class QtCard(QWidget):
         self._overlay.note_raw(raw, now)
         self._render(now)
 
+    def set_pet(self, view: PetView) -> None:
+        """Adopt the latest global pet look (the manager pushes it every poll): the
+        mood tints the idle face and the stage/hat/flourish dress the sprite. Cheap —
+        an unchanged look re-renders no pixmap (the view is part of the cache key)."""
+        self._pet_view = view
+        self._render(time.time())
+
+    def celebrate(self) -> None:
+        """Play the happy hop — the host calls this when the pet is cared for (fed or
+        played with in the Pet window), so care reads the same as an on-card pet."""
+        now = time.time()
+        self._overlay.note_celebrate(now)
+        self._render(now)
+
     def _tick(self) -> None:
         now = time.time()
         if self._raw == "idle" and now >= self._next_blink:
@@ -210,10 +232,15 @@ class QtCard(QWidget):
         self._render(now)
 
     def _render(self, now: float) -> None:
-        eff = self._overlay.effective(self._raw, now, ts=self._state.get("ts"))
+        mood = self._pet_view.mood if self._pet_view is not None else "content"
+        eff = self._overlay.effective(self._raw, now, ts=self._state.get("ts"), mood=mood)
         face = self._display_face(eff, now)
-        if face != self._face:                     # only re-render on a real face change
-            self._face = face
+        self._face = face
+        # The drawn sprite depends on the face AND the pet's look, so re-render the
+        # pixmap when either changes (a re-dress or evolution, not just a new face).
+        key = (face, self._pet_view)
+        if key != self._pixmap_key:
+            self._pixmap_key = key
             self._pixmap = self._pixmap_for(face)
         bob = 0 if (eff == "sleeping" or self._raw == "dead") else round(
             BOB_AMPLITUDE * math.sin((now - self._anim_t0) * 2 * math.pi / BOB_PERIOD_S))
@@ -231,8 +258,14 @@ class QtCard(QWidget):
     def _pixmap_for(self, face: str) -> QPixmap:
         if self._raw == "dead":
             return self._renderer.gravestone(CREATURE_PX)
+        view = self._pet_view
+        stage = view.stage if view is not None else "baby"
+        hat = view.hat if view is not None else None
+        flourish = view.flourish if view is not None else False
         accent = _hex(config.STATE_COLORS.get(face, config.STATE_COLORS["idle"]))
-        return self._renderer.creature(SpriteSpec("baby", face, accent), CREATURE_PX)
+        return self._renderer.creature(
+            SpriteSpec(stage=stage, state=face, accent=accent, hat=hat, flourish=flourish),
+            CREATURE_PX)
 
     # --- drag + tap-to-pet ------------------------------------------------
     def mousePressEvent(self, event: QMouseEvent) -> None:
