@@ -16,6 +16,12 @@ from typing import Any
 
 AGENT_TOOL = "Agent"
 
+# Version of the state-file format this writer produces. emit.py stamps it onto
+# every file it writes; the widget's reader declares the version it understands
+# in mascot/schema.SCHEMA_VERSION, and a test asserts the two agree. Bump this
+# only on a breaking change to the file shape (a new optional field is not one).
+SCHEMA_VERSION = 1
+
 # Claude Code fires a Notification both for real permission/attention prompts
 # ("Claude needs your permission to use Bash") AND as a plain idle reminder
 # ("Claude is waiting for your input") after ~60s of inactivity. The idle nudge

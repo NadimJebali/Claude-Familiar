@@ -19,7 +19,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from proc import find_owner_pid
-from state_logic import compute_next_state, default_state
+from state_logic import SCHEMA_VERSION, compute_next_state, default_state
 
 STATE_DIR = Path.home() / ".claude" / "mascot" / "state"
 _SAFE = re.compile(r"[^A-Za-z0-9._-]")
@@ -89,6 +89,10 @@ def update_state(
     )
     nxt = compute_next_state(current, event, payload)
     nxt["ts"] = now
+    # Stamp the format version on every write, so a file this build produces (or
+    # rewrites) always reports the writer's version — upgrading a legacy file
+    # that predates versioning the moment its session next fires a hook.
+    nxt["schema_version"] = SCHEMA_VERSION
     # Record the owning claude.exe PID once per session so the widget can prune
     # this mascot the instant that process dies (closed terminal, no SessionEnd).
     # Key-presence (not truthiness) so a None result isn't re-detected every hook.
