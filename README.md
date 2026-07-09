@@ -45,6 +45,20 @@ baby / teen / adult) in **Settings → Appearance → Mascot Look**.
   the bottom-right corner and labeled by project folder.
 - **Live state.** The card face tracks Claude in real time: thinking when you
   submit a prompt, working while a tool runs, waiting when Claude needs you.
+- **Effort-reactive background.** The card's panel tints in Claude's own effort
+  colors (the exact palette Claude Code uses): a subtle amber at **low**, green at
+  **medium**, periwinkle at **high**, an animated **purple wave** at **xhigh**
+  (and ultracode), and an animated **rainbow** at **max**. It reads the live
+  reasoning effort per session, so the background says how hard Claude is thinking
+  at a glance. The waiting-attention pulse always wins the border, and the
+  gravestone stays sombre (no effort background). Older Claude Code with no effort
+  signal → the card looks exactly as before.
+- **Usage bars.** Two thin bars at the bottom of the card show your **5-hour
+  session** and **7-day weekly** usage (for Claude subscribers), filled
+  traffic-light style — calm below 70%, warning-amber from 70%, alarm-red from 90%
+  — so you see a limit coming instead of meeting the gravestone. Each bar empties
+  on its own when its window resets. (API-key users, or anyone without the
+  statusline feed, simply see an empty row.)
 - **Expressive faces.** While working, the eyes match the tool — reading
   (Read/Grep), editing (Edit/Write), running commands (Bash, gritted teeth), or
   browsing the web. In **plan mode** it wears a pondering *planning…* face. When
@@ -198,11 +212,16 @@ python scripts/install_hooks.py
 The install script:
 - writes hook entries using the **absolute path** to your current Python
   interpreter and to `hooks/emit.py`, so they work from any cwd;
+- also installs a **statusline** command (`hooks/status_emit.py`) that feeds the
+  card's 5h/weekly usage bars and prints a compact status line in your terminal
+  footer. If you **already** have a custom `statusLine`, the installer leaves it
+  untouched and prints how to wire the usage feed in yourself (the bars just stay
+  empty until you do) — it never clobbers your setup;
 - backs up your original `settings.json` to `settings.json.mascot-backup`;
 - is **idempotent** — safe to re-run (it refreshes the entries in place) and
   leaves any other hooks you have untouched.
 
-To remove the hooks later:
+To remove the hooks later (also removes our statusline, only if it's ours):
 
 ```bash
 python scripts/install_hooks.py --uninstall
@@ -266,16 +285,32 @@ Claude Code session ──hooks──▶ emit.py ──atomic write──▶ ~/.
 - **`hooks/emit.py`** is invoked by every hook with the event name as an argument
   and the hook payload on stdin. It updates that session's state file with an
   atomic `os.replace` and **always exits 0** — it can never block or break Claude,
-  even if the widget isn't running.
+  even if the widget isn't running. It also stamps the live reasoning **effort**
+  (from the `CLAUDE_EFFORT` env var Claude Code exposes to hook commands), which
+  drives the effort-reactive background.
 - **`hooks/state_logic.py`** holds `compute_next_state(current, event, payload)`,
   a pure function (the unit-tested core) that maps each hook event to the next
   state.
+- **`hooks/status_emit.py`** is installed as Claude Code's **statusline** command.
+  Claude hands it the statusline JSON on stdin; it writes the account-global
+  **usage** snapshot (5-hour + weekly limits) to `~/.claude/mascot/usage.json` for
+  the card's bars, and prints a compact `model · effort · 5h% · wk% · dir` line to
+  the terminal footer (effort-colored). Like `emit.py` it always exits 0 and never
+  clobbers a good snapshot on malformed input. This is a **second, independent
+  writer** (one global file, last-writer-wins — the limits are account-wide), so it
+  never races the per-session state files. The two pure cores behind it are
+  `mascot/statusline.py` (JSON → snapshot + footer) and `mascot/usage.py`
+  (snapshot → decayed bars + colors). *Note: the terminal footer + usage feed run
+  wherever Claude executes the statusline command; in editor sessions that don't,
+  the bars show the last-known numbers from your terminal sessions (limits are
+  account-global), decayed by each window's reset time.*
 - **`mascot/manager.py`** (`MascotManager`) polls the state directory every second
   and creates/destroys one native Tkinter window (`mascot/tkinter_app.py`) per
   active session. Each card is a single Canvas; the mascot is drawn by
   **`mascot/sprite_pixel.py`**. The
   manager is also the single writer of the pet (`pet.json`), applying decay and
-  awarding coins/XP from the polled state transitions.
+  awarding coins/XP from the polled state transitions, and it pushes the latest
+  usage snapshot to every card each poll.
 
 State files live in `~/.claude/mascot/state/`. Each carries a heartbeat (`ts`)
 and the owning `claude.exe` PID; a card is pruned the moment that process exits.
@@ -292,6 +327,9 @@ claude-mascot/
     popup_place.py    # pure multi-monitor popup placement (tested)
     scale.py          # widget-size scaling primitives
     sprite_pixel.py   # Claude-style pixel creature: faces + evolution stages + hearts/emotes
+    effort.py         # PURE effort core: normalize + palette + wave/rainbow color math (tested)
+    usage.py          # PURE usage core: snapshot -> 5h/weekly bars w/ reset decay + colors (tested)
+    statusline.py     # PURE: statusline JSON -> usage snapshot + terminal footer line (tested)
     pet_logic.py      # PURE pet core: decay, item effects, coins/XP, mood, level, stage (tested)
     pet_store.py      # pet.json wrapper: load/save + decay-on-load (single source of truth)
     shop.py           # data-driven shop catalog + buy/feed/play (pure, tested)
@@ -312,7 +350,8 @@ claude-mascot/
     config.py         # paths, timeouts, sizes (UI_SCALE), colors
     __main__.py       # python -m mascot
   hooks/
-    emit.py           # invoked by every hook; stdin JSON -> atomic state update
+    emit.py           # invoked by every hook; stdin JSON -> atomic state update (+ effort stamp)
+    status_emit.py    # statusline command: stdin JSON -> usage.json + terminal footer
     state_logic.py    # compute_next_state (pure, tested)
     proc.py           # find owning Claude PID via process ancestry (psutil)
   scripts/

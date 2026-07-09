@@ -20,6 +20,7 @@ from . import (
     pet_service,
     single_instance,
     state_store,
+    usage,
 )
 from .tkinter_app import MascotWindow
 
@@ -119,6 +120,7 @@ class MascotManager:
 
         self._notify_sessions(states)
         self._update_pet(states, now)
+        self._push_usage()
         self.root.after(500, self._refresh)
 
     # --- native OS notifications (#19) ------------------------------------
@@ -135,6 +137,19 @@ class MascotManager:
         except Exception as exc:  # noqa: BLE001 — a toast must never crash the widget
             print("[mascot] notification failed:", exc)
         self._notify_prev = dict(states)
+
+    # --- usage bars (5h / weekly) -----------------------------------------
+    def _push_usage(self) -> None:
+        """Push the account-global usage snapshot (5h + weekly limits) to every
+        card each poll, so their bottom bars reflect the latest numbers. The read
+        is mtime-cached and best-effort — a usage failure never disrupts the
+        mascot. Independent of the pet toggle (usage is Claude status, not a pet)."""
+        try:
+            snapshot = usage.load_usage()
+            for win in self.windows.values():
+                win.set_usage(snapshot)
+        except Exception as exc:  # noqa: BLE001 — usage must never crash the widget
+            print("[mascot] usage update failed:", exc)
 
     # --- pet (Tamagotchi) -------------------------------------------------
     def _update_pet(self, states: dict[str, dict], now: float) -> None:

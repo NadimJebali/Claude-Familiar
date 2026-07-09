@@ -26,7 +26,9 @@ from . import (
     sprite_pixel,
     ui_icons,
 )
+from . import effort as effort_mod
 from . import overlay as overlay_mod
+from . import usage as usage_mod
 from .pet_host import PetHost
 from .pet_view import PetView, pet_view
 from .popups import BubbleWindow, StatsTooltip
@@ -88,7 +90,10 @@ CARD_W = _s(158)
 # Height carries enough headroom above the caption for the *adult* sprite (the
 # tallest stage at 16x7px); the creature zone (margin..caption) is sized to it so
 # the grown-up's ears clear the top border and its feet clear the caption text.
-CARD_H = _s(211)
+# The extra USAGE_ROW_H at the bottom holds the 5h/weekly usage bars (below the
+# info line) — a pure addition, so nothing above it moves.
+USAGE_ROW_H = _s(24)
+CARD_H = _s(211) + USAGE_ROW_H
 WIN_BG = "#101117"          # window backdrop (blends with the panel's corners)
 CHROMA = "#ff00ff"          # chroma key -> transparent when TRANSPARENT_BG (unused elsewhere)
 # Chroma-key transparency (-transparentcolor) is a Windows-only Tk feature; on
@@ -119,6 +124,19 @@ LABEL_FG = "#8b8fa3"
 INFO_FG = "#6b6f82"
 BADGE_GAP = _s(26)          # spacing between sub-agent mini-mascots
 MINI_PIXEL_PX = _s(1)       # pixel size for a mini sub-agent -> ~16px
+
+# Usage bars (5h / weekly) — two thin labeled bars at the very bottom, in the same
+# visual language as the tooltip's need bars. Laid out below INFO_Y so no existing
+# element moves; the row is empty space when there's no usage data to show.
+USAGE_BAR_H = _s(6)
+USAGE_BAR_GAP = _s(5)               # vertical gap between the two bars
+USAGE_ROW_TOP = _s(205)             # first bar's top edge (below the info line)
+USAGE_LABEL_X = PANEL_MARGIN + _s(10)   # "5h" / "7d" label, west-anchored
+USAGE_BAR_X0 = PANEL_MARGIN + _s(26)    # track left
+USAGE_BAR_X1 = CARD_W - PANEL_MARGIN - _s(34)   # track right
+USAGE_PCT_X = CARD_W - PANEL_MARGIN - _s(6)     # "NN%" text, east-anchored
+USAGE_TRACK = "#2a2d3b"             # bar track (matches PANEL_EDGE)
+USAGE_FONT = _font(6)
 
 # Animation
 BOB_AMPLITUDE = _s(4)
@@ -296,7 +314,7 @@ def _format_duration(seconds: float) -> str:
 
 
 def _render_sig(state: dict[str, Any], effective: str, face: str,
-                view: PetView) -> tuple:
+                view: PetView, effort: str) -> tuple:
     """Signature of the *visible* content (excludes the `ts` heartbeat)."""
     subs = tuple((s.get("type") or "?") for s in (state.get("subagents") or []))
     # Include the active tool so the caption refreshes as it changes (only while
@@ -305,7 +323,14 @@ def _render_sig(state: dict[str, Any], effective: str, face: str,
     # Include the display face (it can change while the effective state doesn't —
     # e.g. the tool kind swaps mid-working) and the pet's look `view` (stage /
     # flourish / worn hat) so the card redraws when the pet evolves or re-dresses.
-    return (effective, face, view, subs, state.get("cwd", ""), tool)
+    # `effort` drives the panel tint, so a level change repaints the card once.
+    return (effective, face, view, subs, state.get("cwd", ""), tool, effort)
+
+
+def _usage_sig(bars: list) -> tuple:
+    """Signature of the usage row — labels + rounded percents, so the card
+    repaints when a bar's value changes (incl. a window decaying to 0 at reset)."""
+    return tuple((b.label, round(b.pct)) for b in bars)
 
 
 # Faces whose caption is superseded by the running tool's name (the working family
@@ -378,10 +403,18 @@ class MascotWindow:
 
         # canvas item ids we animate / restyle in place
         self._border_id: int | None = None
+        self._panel_id: int | None = None      # the filled panel; restyled for the effort tint
         self._info_id: int | None = None
         self._info_text_val = ""
         self._started = state.get("started")
         self._bob_y = 0.0
+        # The resolved effort (per-session state -> global settings fallback) drives
+        # the panel tint. Computed here so the first _render below can use it.
+        self._effort_display = self._resolve_effort()
+        # The account-global usage snapshot (pushed by the manager) drives the two
+        # bottom bars. None until the first push -> an empty row.
+        self._usage: dict[str, Any] | None = None
+        self._usage_bars: list[usage_mod.UsageBar] = []
 
         # IMPORTANT: extra windows must be Toplevel, not Tk(). Only one Tk root.
         # Outside the rounded panel is painted with this bg; when transparency is
@@ -438,10 +471,13 @@ class MascotWindow:
         c = self.canvas
         c.delete("all")
         accent = _accent(self._display_face)
+        panel = self._panel_color(time.time() - self._anim_t0)
 
-        # rounded panel + accent border (the border pulses while waiting)
-        round_rect(c, PANEL_MARGIN, PANEL_MARGIN, CARD_W - PANEL_MARGIN,
-                   CARD_H - PANEL_MARGIN, PANEL_RADIUS, fill=PANEL_FILL, outline="")
+        # rounded panel (tinted by the session's effort) + accent border (the
+        # border pulses while waiting). The panel id is kept so the effort tint
+        # can be restyled in place on the animate clock.
+        self._panel_id = round_rect(c, PANEL_MARGIN, PANEL_MARGIN, CARD_W - PANEL_MARGIN,
+                                    CARD_H - PANEL_MARGIN, PANEL_RADIUS, fill=panel, outline="")
         self._border_id = round_rect(
             c, PANEL_MARGIN, PANEL_MARGIN, CARD_W - PANEL_MARGIN, CARD_H - PANEL_MARGIN,
             PANEL_RADIUS, fill="", outline=accent, width=2,
@@ -467,7 +503,14 @@ class MascotWindow:
         self._info_id = c.create_text(CREATURE_CX, INFO_Y, text=self._info_text_val,
                                       font=INFO_FONT, fill=INFO_FG)
 
-        self._sig = _render_sig(self.state, self._effective_state, self._display_face, view)
+        self._draw_usage(c)
+
+        # Keep the paw button on the tinted panel (it's a real widget, not canvas).
+        if self._pet_btn is not None:
+            self._pet_btn.configure(bg=panel)
+
+        self._sig = (*_render_sig(self.state, self._effective_state, self._display_face,
+                                  view, self._effort_display), _usage_sig(self._usage_bars))
 
     def _info_line(self, now: float) -> str:
         """'<model> · <duration>' — either part omitted if unknown."""
@@ -491,6 +534,25 @@ class MascotWindow:
             x = x0 + i * BADGE_GAP
             sprite_pixel.draw_creature(c, x, BADGE_Y, "working", accent, MINI_PIXEL_PX,
                                        tag="subagent")
+
+    def _draw_usage(self, c: tk.Canvas) -> None:
+        """Draw the 5h / weekly usage bars at the bottom of the card (nothing when
+        there's no usage data — API-key users, or before the first snapshot). Each
+        bar: a short label, a track, a traffic-light fill, and a NN% readout."""
+        for i, bar in enumerate(self._usage_bars):
+            top = USAGE_ROW_TOP + i * (USAGE_BAR_H + USAGE_BAR_GAP)
+            mid = top + USAGE_BAR_H / 2
+            c.create_text(USAGE_LABEL_X, mid, text=bar.label, anchor="e",
+                          font=USAGE_FONT, fill=LABEL_FG)
+            c.create_rectangle(USAGE_BAR_X0, top, USAGE_BAR_X1, top + USAGE_BAR_H,
+                               fill=USAGE_TRACK, outline="")
+            frac = max(0.0, min(1.0, bar.pct / 100.0))
+            if frac > 0:
+                fill_x = USAGE_BAR_X0 + (USAGE_BAR_X1 - USAGE_BAR_X0) * frac
+                c.create_rectangle(USAGE_BAR_X0, top, fill_x, top + USAGE_BAR_H,
+                                   fill=_hex(usage_mod.bar_color(bar.pct)), outline="")
+            c.create_text(USAGE_PCT_X, mid, text=f"{round(bar.pct)}%", anchor="e",
+                          font=USAGE_FONT, fill=INFO_FG)
 
     # --- positioning ------------------------------------------------------
     def _place_initial(self, index: int) -> None:
@@ -634,6 +696,12 @@ class MascotWindow:
         if self._tooltip is not None:
             self._tooltip.set_pet(pet)
 
+    def set_usage(self, snapshot: dict[str, Any] | None) -> None:
+        """Receive the latest account-global usage snapshot from the manager; the
+        next animate tick recomputes the bars (with reset decay) and repaints if
+        they changed. Cheap — like set_pet, this only stores the data."""
+        self._usage = snapshot
+
     # --- state ------------------------------------------------------------
     def update_state(self, state: dict[str, Any], now: float | None = None) -> None:
         if now is None:
@@ -661,11 +729,35 @@ class MascotWindow:
         content changed."""
         self._effective_state = self._compute_effective_state(now)
         self._display_face = self._compute_display_face(now)
+        self._effort_display = self._resolve_effort()
+        self._usage_bars = usage_mod.usage_view(self._usage, now)
         view = self._pet_view()
-        new_sig = _render_sig(self.state, self._effective_state, self._display_face, view)
+        new_sig = (*_render_sig(self.state, self._effective_state, self._display_face,
+                                view, self._effort_display), _usage_sig(self._usage_bars))
         if new_sig == self._sig:
             return
         self._render()
+
+    def _resolve_effort(self) -> str:
+        """The effort level to display: the session's per-turn level (from the
+        state file) wins, falling back to Claude's global ``effortLevel``."""
+        return effort_mod.resolve(self.state.get("effort", ""), effort_mod.settings_effort())
+
+    def _panel_color(self, t: float = 0.0) -> str:
+        """The card panel fill for the current effort at animation time ``t`` — a
+        subtle tint in the effort's own color (xhigh waves purple, max cycles the
+        rainbow). The gravestone (dead) suppresses the tint so a finished session
+        stays sombre; unknown/absent effort keeps the default panel."""
+        if self._display_face == "dead":
+            return PANEL_FILL
+        fill = effort_mod.panel_fill(self._effort_display, _PANEL_FILL_RGB, t)
+        return _hex(fill) if fill is not None else PANEL_FILL
+
+    def _effort_animates(self) -> bool:
+        """True while the current effort has a moving background (xhigh/max) and
+        the card isn't a gravestone — the only case that needs per-frame restyle."""
+        return (self._display_face != "dead"
+                and effort_mod.border_accent(self._effort_display, 0.0) is not None)
 
     def _pet_view(self) -> PetView:
         """The pet's look (stage/hat/flourish) for the sprite draw, via the pure
@@ -797,13 +889,27 @@ class MascotWindow:
             # path (mascot/particles.py). Repaints the live ones, drops the expired.
             self._particles.draw(self.canvas, now)
 
-            # Gentle border pulse while the raw state needs the user's attention.
+            # Effort background animation: xhigh waves purple, max cycles the
+            # rainbow. Cheap in-place restyle of the existing panel item (never a
+            # full redraw) on this same clock — only the two animated levels move.
+            if self._panel_id is not None and self._effort_animates():
+                fill = self._panel_color(elapsed)
+                self.canvas.itemconfig(self._panel_id, fill=fill)
+                if self._pet_btn is not None:
+                    self._pet_btn.configure(bg=fill)
+
+            # Border: the waiting attention pulse always wins; otherwise the two
+            # animated effort levels tint the border in their live color.
             if self._border_id is not None:
                 if self.state.get("state", "idle") == "waiting":
                     phase = (elapsed / PULSE_PERIOD_S) * 2 * math.pi
                     t = (math.sin(phase) + 1) / 2
                     color = _hex(_lerp((42, 45, 59), config.STATE_COLORS["waiting"], t))
                     self.canvas.itemconfig(self._border_id, outline=color)
+                elif self._effort_animates():
+                    accent = effort_mod.border_accent(self._effort_display, elapsed)
+                    if accent is not None:
+                        self.canvas.itemconfig(self._border_id, outline=_hex(accent))
 
             # Tick the live session-duration text (cheap: only on change).
             if self._info_id is not None:
