@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 from PySide6.QtWidgets import QApplication
 
 from . import (
@@ -38,6 +38,7 @@ from . import (
     roster,
     settings,
     single_instance,
+    transcript,
     usage,
 )
 from .qt_card import QtCard
@@ -48,6 +49,29 @@ if TYPE_CHECKING:
     from .qt_pet_window import QtPetWindow
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+class _ContextSignals(QObject):
+    done = Signal(dict)
+
+
+class _ContextTask(QRunnable):
+    """One transcript-tailer poll off the UI thread (#72). The tailer's state is
+    only ever touched here; the app serializes tasks (one in flight at a time)."""
+
+    def __init__(self, tailer: transcript.TranscriptTailer,
+                 paths: dict[str, str], signals: _ContextSignals) -> None:
+        super().__init__()
+        self._tailer = tailer
+        self._paths = paths
+        self._signals = signals
+
+    def run(self) -> None:  # executes on a pool thread
+        try:
+            results = self._tailer.poll(self._paths)
+        except Exception:  # noqa: BLE001 — a bad poll must never take down the pool
+            results = {}
+        self._signals.done.emit(results)
 
 
 class QtMascotApp(QObject):
@@ -73,6 +97,15 @@ class QtMascotApp(QObject):
 
         self._ingest = SessionIngest(state_dir)
         self._ingest.sessions_changed.connect(self._on_sessions)
+
+        # Per-session context % from transcript tailing (#72). The tailer reads
+        # files, so each poll runs on the thread pool; one in flight at a time
+        # keeps its state single-threaded. Results land in _on_context.
+        self._tailer = transcript.TranscriptTailer()
+        self._context: dict[str, float] = {}
+        self._context_inflight = False
+        self._context_signals = _ContextSignals()
+        self._context_signals.done.connect(self._on_context)
 
         # The one global pet behind PetService — the per-poll decay -> award ->
         # milestone -> persist choreography over an injected store + clock; this
@@ -143,6 +176,7 @@ class QtMascotApp(QObject):
         self._notify(live)
         self._update_pet(live, now)
         self._push_usage()
+        self._poll_context(live)
 
     def _notify(self, live: dict) -> None:
         """Edge-triggered native toast when a session's ``notify`` first appears.
@@ -198,6 +232,25 @@ class QtMascotApp(QObject):
                 card.set_pet(result.pet)
         except Exception as exc:  # noqa: BLE001 — the pet must never crash the widget
             print("[mascot] pet update failed:", exc)
+
+    def _poll_context(self, live: dict) -> None:
+        """Kick one off-thread transcript poll for this snapshot's sessions (#72).
+        Skipped while one is already in flight — the next snapshot re-kicks, so
+        the gauge lags a tick at worst and the tailer stays single-threaded."""
+        if self._context_inflight:
+            return
+        paths = {sid: str(state.get("transcript_path") or "")
+                 for sid, state in live.items()}
+        self._context_inflight = True
+        QThreadPool.globalInstance().start(
+            _ContextTask(self._tailer, paths, self._context_signals))
+
+    def _on_context(self, results: dict) -> None:
+        """Adopt a finished context poll and push each session's % to its card."""
+        self._context_inflight = False
+        self._context = dict(results)
+        for sid, card in self._cards.items():
+            card.set_context(self._context.get(sid))
 
     def _push_usage(self) -> None:
         """Push the account-global usage snapshot (5h + weekly) to every card each poll,

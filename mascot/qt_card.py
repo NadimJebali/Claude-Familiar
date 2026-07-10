@@ -538,6 +538,9 @@ class QtCard(QWidget):
         # drives the two bottom bars; None until the first push -> an empty row.
         self._effort_display = self._resolve_effort()
         self._usage: dict | None = None
+        # Per-session context-window fill % (#72), pushed by the manager from the
+        # transcript tailer. None until the first result; drives the ring gauge.
+        self._context_pct: float | None = None
         # Satellite popups: the speech bubble (while notify present) and the pet hover
         # tooltip (pet-enabled only). Both follow the card and are dismissed on hide.
         self._bubble: QtBubble | None = None
@@ -599,6 +602,13 @@ class QtCard(QWidget):
         repaints if they changed. Independent of the pet toggle — usage is Claude status,
         so simple-mode cards show it too. Cheap; only stores the data."""
         self._usage = snapshot
+        self._render(time.time())
+
+    def set_context(self, pct: float | None) -> None:
+        """Adopt this session's context-window fill % (#72), pushed by the manager
+        from the transcript tailer. ``None`` = not known yet (no gauge). Drives the
+        ring gauge; like the pet/usage pushes, an unchanged value repaints nothing."""
+        self._context_pct = pct
         self._render(time.time())
 
     def _resolve_effort(self) -> str:
