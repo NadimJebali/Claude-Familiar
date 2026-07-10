@@ -39,9 +39,13 @@ WINDOW_SPACING = 8             # gap between stacked per-session mascots
 TRANSPARENT_BG = _S["transparent_bg"]
 
 # Widget size: scales the whole card (geometry, creature, fonts). "small" is the
-# original size; "medium"/"large" are uniform multiples of it.
+# authored size; medium/large are uniform multiples, applied by the Qt views as
+# one painter transform (#93). The factors keep the creature's 5px sprite cells
+# integral under that transform (5 -> 7 / 9 device px) so the pixel art stays
+# crisp — which is why they aren't the Tk card's old 1.3/1.6.
 WIDGET_SIZE = _S["widget_size"]
-UI_SCALE = {"small": 1.0, "medium": 1.3, "large": 1.6}.get(WIDGET_SIZE, 1.0)
+UI_SCALE_BY_SIZE = {"small": 1.0, "medium": 1.4, "large": 1.8}
+UI_SCALE = UI_SCALE_BY_SIZE.get(WIDGET_SIZE, 1.0)
 
 # Attention shake (see tkinter_app): how long an unanswered permission/attention
 # prompt waits before the card starts shaking, and how violent (wide) the sway

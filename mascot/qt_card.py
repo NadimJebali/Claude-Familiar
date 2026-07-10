@@ -336,11 +336,17 @@ class _CardPanel(QWidget):
 
     A child of the translucent card so a ``QGraphicsDropShadowEffect`` applies to
     it (an effect on a translucent top-level is unreliable). Dumb by design — the
-    card computes what to show and pushes it in via :meth:`show_art`."""
+    card computes what to show and pushes it in via :meth:`show_art`.
 
-    def __init__(self) -> None:
+    The widget-size setting (#93) is one uniform scale ``k``: everything stays
+    authored at the small size and the panel paints through a single
+    ``p.scale(k, k)`` transform, sized to match. The UI_SCALE factors keep the
+    creature's 5px sprite cells integral so the pixel art stays crisp."""
+
+    def __init__(self, k: float = 1.0) -> None:
         super().__init__()
-        self.setFixedSize(CARD_W, CARD_H)
+        self._k = k
+        self.setFixedSize(round(CARD_W * k), round(CARD_H * k))
         self._pixmap: QPixmap | None = None
         self._prev: QPixmap | None = None     # the fading-out face during a crossfade
         self._fade = 1.0                      # 0..1 — how much the new face is shown
@@ -400,6 +406,7 @@ class _CardPanel(QWidget):
         p = QPainter(self)
         try:
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            p.scale(self._k, self._k)     # the widget-size transform (#93)
             panel = QRectF(0.5, 0.5, CARD_W - 1, CARD_H - 1)
             path = QPainterPath()
             path.addRoundedRect(panel, PANEL_RADIUS, PANEL_RADIUS)
@@ -569,9 +576,13 @@ class QtCard(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(CARD_W + 2 * SHADOW_PAD, CARD_H + 2 * SHADOW_PAD)
+        # The widget-size scale (#93), snapshotted per card so the window and its
+        # panel always agree; a live size change rebuilds the cards (qt_app).
+        self._k = float(config.UI_SCALE)
+        self.setFixedSize(round(CARD_W * self._k) + 2 * SHADOW_PAD,
+                          round(CARD_H * self._k) + 2 * SHADOW_PAD)
 
-        self._panel = _CardPanel()
+        self._panel = _CardPanel(self._k)
         # The panel fills the card body; make it click-through so drag / tap / hover
         # all reach this QtCard (the paw button, a mouse-opaque sibling, still clicks).
         self._panel.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -871,10 +882,14 @@ class QtCard(QWidget):
 
     # --- paw button (opens the Pet window) -------------------------------
     def _build_paw(self) -> QPushButton:
-        """A flat, pixel-art paw button anchored at the panel's top-left corner."""
-        icon_px = PAW_PX * 12                      # the paw grid is 12 cells square
+        """A flat, pixel-art paw button anchored at the panel's top-left corner.
+
+        A real child widget, so the panel's paint transform doesn't reach it —
+        it scales itself (#93), rounding to integer pixel cells to stay crisp."""
+        paw_px = max(1, round(PAW_PX * self._k))
+        icon_px = paw_px * 12                      # the paw grid is 12 cells square
         button = QPushButton(self)
-        button.setIcon(QIcon(_paw_pixmap(PAW_PX)))
+        button.setIcon(QIcon(_paw_pixmap(paw_px)))
         button.setIconSize(QSize(icon_px, icon_px))
         button.setFixedSize(icon_px + 8, icon_px + 8)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -883,7 +898,8 @@ class QtCard(QWidget):
             "QPushButton{background:transparent;border:none;border-radius:6px}"
             f"QPushButton:hover{{background:{PANEL_EDGE}}}")
         button.clicked.connect(lambda: self.open_pet_requested.emit())
-        button.move(SHADOW_PAD + PAW_INSET, SHADOW_PAD + PAW_INSET)
+        inset = round(PAW_INSET * self._k)
+        button.move(SHADOW_PAD + inset, SHADOW_PAD + inset)
         button.raise_()
         return button
 
@@ -954,8 +970,10 @@ class QtCard(QWidget):
     # --- satellite popups (speech bubble + hover tooltip) -----------------
     def _panel_global(self) -> tuple[int, int, int, int]:
         """The visible panel's global rect — the card window is padded by SHADOW_PAD,
-        so popups anchor to the panel, not the padded window."""
-        return (self.x() + SHADOW_PAD, self.y() + SHADOW_PAD, CARD_W, CARD_H)
+        so popups anchor to the panel, not the padded window. The panel's real
+        (scaled) size, not the small-size constants (#93)."""
+        return (self.x() + SHADOW_PAD, self.y() + SHADOW_PAD,
+                self._panel.width(), self._panel.height())
 
     def _card_bounds(self) -> tuple[int, int, int, int]:
         """The work area of the monitor the card sits on, so popups clamp to the same
