@@ -205,6 +205,45 @@ def test_a_gentle_drag_does_not_make_the_card_dizzy(app):
     card.close()
 
 
+# --- QtCard: rising particles (pet hearts + mood emotes) ---------------------
+def test_petting_emits_rising_hearts(app):
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer(), pet_enabled=True)
+    _tap(card)
+    assert card._particles.alive("heart", time.time())    # a heart burst spawned
+    card.close()
+
+
+def test_hearts_paint_then_clear_from_the_panel(app):
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer(), pet_enabled=True)
+    t0 = time.time()
+    card._emit_hearts(t0)
+    card._update_particles(t0 + 0.2)                      # past the stagger -> visible
+    assert card._panel._particles                        # cells handed to the panel
+    card._update_particles(t0 + qt_card.HEART_LIFETIME_S + 1)   # all expired
+    assert card._panel._particles == []                  # the last frame cleared them
+    card.close()
+
+
+def test_a_hungry_mood_pops_a_food_emote(app):
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer(), pet_enabled=True)
+    card.set_pet(PetView("baby", None, False, "hungry"))  # effective face -> idle_hungry
+    now = time.time()
+    card._schedule_emote(now)                             # first call arms the timer
+    card._schedule_emote(now + qt_card.EMOTE_MAX_GAP_S + 0.1)   # past the gap -> emit
+    assert card._particles.alive("food", now + qt_card.EMOTE_MAX_GAP_S + 0.1)
+    card.close()
+
+
+def test_no_mood_emote_when_content(app):
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer(), pet_enabled=True)
+    now = time.time()
+    card._schedule_emote(now)
+    card._schedule_emote(now + qt_card.EMOTE_MAX_GAP_S + 0.1)
+    assert not card._particles.alive("food", now + 10)   # a content pet emits nothing
+    assert not card._particles.alive("zzz", now + 10)
+    card.close()
+
+
 # --- QtCard: the pushed pet look (mood tint + stage/hat) ---------------------
 # The manager only pushes a pet to a pet-enabled card, so these construct with
 # pet_enabled=True (a simple-mode card ignores the push and shows the fixed stage).

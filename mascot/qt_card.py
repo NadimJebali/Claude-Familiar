@@ -21,7 +21,9 @@ manager to open the Pet window via the ``open_pet_requested`` signal.
 
 While a prompt sits unanswered the whole card jostles (the pure ``shake.Shake`` seam),
 gently at first then more frantic the longer it's ignored — settling the moment it's
-answered or grabbed.
+answered or grabbed. Petting spawns rising pixel hearts, and a hungry/tired mood pops
+food/Z emotes — the shared lifetime math is the pure ``particles`` core, painted by
+the panel.
 
 Each live sub-agent shows as a small mini-mascot badge in a centered row below the
 caption (capped so a swarm can't crowd the card). The card anchors to the *home*
@@ -55,9 +57,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import config, effective_state, osplatform, shake
+from . import config, effective_state, osplatform, particles, shake, sprite_pixel
 from .overlay import Overlay, OverlayConfig
 from .pet_view import PetView
+from .pixel_grid import grid_cells
 from .sprite_qt import SpriteRenderer, SpriteSpec
 
 # --- card geometry (mirrors the Tk card's authored "small" size) ------------
@@ -135,6 +138,49 @@ _SHAKE_CONFIG = shake.ShakeConfig(
     freq_max=WAITING_SHAKE_FREQ_MAX,
 )
 
+# Rising particles: pixel hearts from a pet, plus food/Z mood emotes while the pet
+# is hungry/tired. The shared lifetime/position/fade math is the pure particles core;
+# here we register the kinds (no Tk draw callback — the panel paints the cells the
+# field returns) and paint them via the same pixel grids the Tk card uses.
+_PANEL_FILL_RGB = (29, 31, 41)   # PANEL_FILL as RGB — the color a fading emote lerps to
+HEART_PX = 2
+HEART_RISE_PX = 34
+HEART_LIFETIME_S = 0.85
+MAX_HEARTS = 6
+EMOTE_PX = 3
+EMOTE_RISE_PX = 16
+EMOTE_LIFETIME_S = 1.4
+EMOTE_MIN_GAP_S = 3.0
+EMOTE_MAX_GAP_S = 5.0
+_ZZZ_FADE_RGB = (247, 243, 238)   # the "Z" starts near-white and fades to the panel
+# Which mood emote (if any) to pop for an effective state.
+_EMOTE_FOR_STATE = {"idle_hungry": "food", "idle_tired": "zzz", "sleeping": "zzz"}
+
+_PARTICLE_KINDS = {
+    "heart": particles.ParticleKind(
+        name="heart", lifetime_s=HEART_LIFETIME_S, rise_px=HEART_RISE_PX,
+        pixel_px=HEART_PX, tag="heart", max_count=MAX_HEARTS,
+        fade_from=config.STATE_COLORS["happy"]),
+    "food": particles.ParticleKind(
+        name="food", lifetime_s=EMOTE_LIFETIME_S, rise_px=EMOTE_RISE_PX,
+        pixel_px=EMOTE_PX, tag="emote", max_count=3, fade_from=None),
+    "zzz": particles.ParticleKind(
+        name="zzz", lifetime_s=EMOTE_LIFETIME_S, rise_px=EMOTE_RISE_PX,
+        pixel_px=EMOTE_PX, tag="emote", max_count=3, fade_from=_ZZZ_FADE_RGB),
+}
+
+
+def _particle_cells(name: str, color: tuple[int, int, int] | None
+                    ) -> tuple[list[str], dict[str, str]]:
+    """The pixel grid + resolved char->color map for a particle kind. Hearts and Z's
+    take the particle's live fade ``color``; food is a fixed little apple."""
+    if name == "food":
+        return sprite_pixel._FOOD, sprite_pixel._FOOD_COLORS
+    hexed = _hex(color) if color is not None else CAPTION_FG
+    if name == "zzz":
+        return sprite_pixel._ZED, {"Z": hexed}
+    return sprite_pixel._HEART, {"O": hexed}
+
 # Caption per displayed face (mirrors the Tk STATE_CAPTIONS); unknown -> the raw.
 _CAPTIONS = {
     "idle": "idle", "idle_blink": "idle", "idle_happy": "idle", "idle_hungry": "idle",
@@ -150,7 +196,8 @@ _CAPTIONS = {
 
 
 def _hex(rgb: tuple[int, int, int]) -> str:
-    r, g, b = rgb
+    # Clamp + round so a faded particle color (lerped floats) hexes cleanly too.
+    r, g, b = (max(0, min(255, round(c))) for c in rgb)
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
@@ -206,6 +253,8 @@ class _CardPanel(QWidget):
         # times in a centered row (all badges are identical, so a count is enough).
         self._badge: QPixmap | None = None
         self._badge_count = 0
+        # Rising particles to paint this frame: (grid, char->color, cx, cy, px).
+        self._particles: list[tuple[list[str], dict[str, str], float, float, int]] = []
 
     def show_art(self, pixmap: QPixmap | None, caption: str, bob: int, *,
                  badge: QPixmap | None = None, badge_count: int = 0) -> None:
@@ -214,6 +263,13 @@ class _CardPanel(QWidget):
             return
         self._pixmap, self._caption, self._bob = pixmap, caption, bob
         self._badge, self._badge_count = badge, badge_count
+        self.update()
+
+    def set_particles(self, cells: list[tuple[list[str], dict[str, str],
+                                              float, float, int]]) -> None:
+        """The rising particles (hearts / mood emotes) to paint on top this frame.
+        Always repaints — particle positions change every tick."""
+        self._particles = cells
         self.update()
 
     def paintEvent(self, _event) -> None:
@@ -239,6 +295,7 @@ class _CardPanel(QWidget):
                        self._caption)
 
             self._paint_badges(p)
+            self._paint_particles(p)
         finally:
             p.end()
 
@@ -251,6 +308,15 @@ class _CardPanel(QWidget):
         for i in range(self._badge_count):
             cx = center0 + i * BADGE_GAP
             p.drawPixmap(round(cx - bw / 2), BADGE_CY - bh // 2, self._badge)
+
+    def _paint_particles(self, p: QPainter) -> None:
+        """Paint each rising particle's pixel grid, centered at its (cx, cy)."""
+        for grid, colors, cx, cy, px in self._particles:
+            x0 = cx - len(grid[0]) * px / 2
+            y0 = cy - len(grid) * px / 2
+            for col, row, ch in grid_cells(grid):
+                p.fillRect(round(x0 + col * px), round(y0 + row * px), px, px,
+                           QColor(colors[ch]))
 
 
 class QtCard(QWidget):
@@ -303,6 +369,12 @@ class QtCard(QWidget):
         self._last_shake_pos: tuple[int, int] | None = None
         self._last_move: tuple[int, int] | None = None
         self._reversals: list[float] = []
+        # Rising-particle field (hearts from a pet, food/Z mood emotes) + its emote
+        # scheduler clock; ``_had_particles`` lets the last empty frame clear the panel.
+        self._particles = particles.Particles(_PARTICLE_KINDS, panel_fill=_PANEL_FILL_RGB)
+        self._next_emote = 0.0
+        self._had_particles = False
+        self._eff = self._raw
         # Attention shake: the pure Shake seam owns the intensity ramp, the amplitude/
         # frequency derivation and the absolute-from-rest offset (it captures rest once
         # when a shake begins, then every frame moves to rest+offset — see shake.py for
@@ -360,10 +432,11 @@ class QtCard(QWidget):
         return self._pet_view
 
     def celebrate(self) -> None:
-        """Play the happy hop — the host calls this when the pet is cared for (fed or
-        played with in the Pet window), so care reads the same as an on-card pet."""
+        """Play the happy hop + hearts — the host calls this when the pet is cared for
+        (fed or played with in the Pet window), so care reads the same as an on-card pet."""
         now = time.time()
         self._overlay.note_celebrate(now)
+        self._emit_hearts(now)
         self._render(now)
 
     def _tick(self) -> None:
@@ -374,10 +447,13 @@ class QtCard(QWidget):
                                 + random.uniform(BLINK_MIN_GAP_S, BLINK_MAX_GAP_S))
         self._render(now)
         self._apply_attention_shake(now)
+        self._schedule_emote(now)
+        self._update_particles(now)
 
     def _render(self, now: float) -> None:
         view = self._effective_pet_view()
         eff = self._overlay.effective(self._raw, now, ts=self._state.get("ts"), mood=view.mood)
+        self._eff = eff
         face = self._display_face(eff, now)
         self._face = face
         # The drawn sprite depends on the face AND the pet's look, so re-render the
@@ -465,6 +541,7 @@ class QtCard(QWidget):
                     and not self._overlay.is_dizzy(now)
                     and self._raw not in ("waiting", "dead")):
                 self._overlay.note_celebrate(now)   # a happy hop
+                self._emit_hearts(now)              # rising pixel hearts
                 self.petted.emit(self.session_id)
                 self._render(now)
             self._press_pos = None
@@ -497,6 +574,39 @@ class QtCard(QWidget):
     def _trigger_dizzy(self, now: float) -> None:
         self._overlay.note_dizzy(now)
         self._render(now)
+
+    # --- rising particles (pet hearts + mood emotes) ----------------------
+    def _emit_hearts(self, now: float) -> None:
+        """A small staggered burst of hearts at the creature's upper-right (a pet)."""
+        ox, oy = CARD_W / 2 + 20, CREATURE_CY - 14
+        for _ in range(3):
+            self._particles.emit("heart", (ox + random.uniform(-4, 6), oy), now,
+                                 stagger_s=0.15, drift_range=(2.0, 12.0))
+
+    def _schedule_emote(self, now: float) -> None:
+        """Pop a mood emote (food when hungry, a drifting Z when tired/asleep) every
+        few seconds while in that mood — the kind follows the effective state."""
+        kind = _EMOTE_FOR_STATE.get(self._eff)
+        if kind is None:
+            self._next_emote = 0.0
+            return
+        if self._next_emote == 0.0:
+            self._next_emote = now + random.uniform(EMOTE_MIN_GAP_S, EMOTE_MAX_GAP_S)
+        elif now >= self._next_emote:
+            origin = (CARD_W / 2 + 24 + random.uniform(-2, 6), CREATURE_CY - 20)
+            self._particles.emit(kind, origin, now, drift_range=(2.0, 9.0))
+            self._next_emote = now + random.uniform(EMOTE_MIN_GAP_S, EMOTE_MAX_GAP_S)
+
+    def _update_particles(self, now: float) -> None:
+        """Advance the field and hand the visible particles' cells to the panel. The
+        last empty frame is pushed once so a finished burst clears."""
+        cells = [
+            (*_particle_cells(kind.name, color), x, y, kind.pixel_px)
+            for kind, x, y, color in self._particles.advance(now)
+        ]
+        if cells or self._had_particles:
+            self._panel.set_particles(cells)
+            self._had_particles = bool(cells)
 
     # --- placement --------------------------------------------------------
     def _place(self, index: int, screen: QScreen | None) -> None:

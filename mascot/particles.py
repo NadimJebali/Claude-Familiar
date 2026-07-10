@@ -47,7 +47,11 @@ class ParticleKind:
     pixel_px: int
     tag: str
     max_count: int
-    draw_sprite: Callable[[tk.Canvas, float, float, int, tuple[int, int, int] | None], None]
+    # The Tk canvas painter. Optional: the Qt card drives the field through
+    # :meth:`Particles.advance` and paints the returned cells itself, so it needs no
+    # Tk callback. ``draw`` (the Tk path) skips a kind that has none.
+    draw_sprite: Callable[
+        [tk.Canvas, float, float, int, tuple[int, int, int] | None], None] | None = None
     fade_from: tuple[int, int, int] | None = None
 
 
@@ -150,23 +154,28 @@ class Particles:
         spec = self._kinds[kind]
         return [p for p in self._particles if p.kind is spec and p.alive(now)]
 
-    def draw(self, canvas: tk.Canvas, now: float) -> None:
-        """Repaint every kind at ``now`` and drop expired particles. Each canvas tag
-        is cleared first, then visible particles are painted via their kind's thin
-        sprite shell — the lone per-kind branch.
-
-        Painting walks the tags in registration order (hearts before emotes), and
-        within a tag keeps emission order, so the on-screen stacking matches the old
-        two-pass ``_animate_hearts`` then ``_animate_emotes`` — emotes always over
-        hearts — rather than a raw shared-list emission order."""
-        for tag in self._tag_order:
-            canvas.delete(tag)
+    def advance(self, now: float) -> list[tuple[ParticleKind, float, float,
+                                                 tuple[int, int, int] | None]]:
+        """Drop expired particles and return the visible ones to paint this frame as
+        ``(kind, x, y, color)``, walking the tags in registration order (hearts before
+        emotes) and keeping emission order within a tag — so emotes always stack over
+        hearts. View-free: the Tk ``draw`` and the Qt panel both paint from this."""
         live = [p for p in self._particles if p.alive(now)]
+        painted: list[tuple[ParticleKind, float, float, tuple[int, int, int] | None]] = []
         for tag in self._tag_order:
             for p in live:
-                if p.kind.tag != tag:
-                    continue
-                if p.visible(now):
+                if p.kind.tag == tag and p.visible(now):
                     x, y = p.position(now)
-                    p.kind.draw_sprite(canvas, x, y, p.kind.pixel_px, p.color(now))
+                    painted.append((p.kind, x, y, p.color(now)))
         self._particles = live
+        return painted
+
+    def draw(self, canvas: tk.Canvas, now: float) -> None:
+        """Repaint every kind at ``now`` and drop expired particles (via
+        :meth:`advance`). Each canvas tag is cleared first, then each visible particle
+        is painted via its kind's thin sprite shell — the lone per-kind branch."""
+        for tag in self._tag_order:
+            canvas.delete(tag)
+        for kind, x, y, color in self.advance(now):
+            if kind.draw_sprite is not None:
+                kind.draw_sprite(canvas, x, y, kind.pixel_px, color)
