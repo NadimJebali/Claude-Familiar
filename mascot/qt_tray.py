@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QActionGroup, QIcon
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 # --- menu model (pure data) ------------------------------------------------
@@ -25,6 +25,7 @@ MENU_SPEC: tuple[tuple[str | None, str | None], ...] = (
     ("Show / hide cards", "toggle"),
     ("Settings…", "settings"),
     ("Notifications", "notifications"),
+    ("Theme", "theme"),
     (SEPARATOR, None),
     ("Quit", "quit"),
 )
@@ -34,6 +35,9 @@ DEFAULT_ACTION = "toggle"
 # Rows that render as checkable items: their callback takes the NEW checked state
 # (bool) instead of no arguments — a live mute/unmute, not a command.
 CHECKABLE_KEYS = frozenset({"notifications"})
+# The Theme row renders as a radio submenu (#76): one entry per theme, the current
+# one checked; its callback receives the picked theme value.
+THEME_ROWS = (("Classic", "classic"), ("Compact", "compact"))
 
 # How long the OS should keep a toast up (ms); mirrors notifier.NOTIFY_TIMEOUT_S.
 TOAST_TIMEOUT_MS = 10_000
@@ -79,6 +83,9 @@ class QtSystemTray:
       * ``on_settings``      — the "Settings…" item
       * ``on_notifications`` — the checkable "Notifications" row; receives the NEW
         checked state (a live mute/unmute), initial check from ``notifications_on``
+      * ``on_theme``         — a pick in the radio "Theme" submenu; receives the
+        chosen theme value, initial check from ``current_theme``. The app confirms
+        an applied switch back via :meth:`set_theme`.
       * ``on_quit``          — the "Quit" item
     """
 
@@ -88,18 +95,22 @@ class QtSystemTray:
                  on_settings: Callable[[], None] | None = None,
                  on_notifications: Callable[[bool], None] | None = None,
                  notifications_on: bool = False,
+                 on_theme: Callable[[str], None] | None = None,
+                 current_theme: str = "classic",
                  on_quit: Callable[[], None] | None = None,
                  icon: QIcon | None = None) -> None:
         self._tray: QSystemTrayIcon | None = None   # sentinel: dispose() is safe if init fails
         provided: dict[str, Callable[..., None] | None] = {
             "pet": on_pet, "toggle": on_toggle, "settings": on_settings,
-            "notifications": on_notifications, "quit": on_quit}
+            "notifications": on_notifications, "theme": on_theme, "quit": on_quit}
         self._actions: dict[str, Callable[..., None]] = {
             k: cb for k, cb in provided.items() if cb is not None
         }
         # Initial checked state per provided checkable row (today: notifications).
         self._check_state: dict[str, bool] = (
             {"notifications": notifications_on} if on_notifications is not None else {})
+        self._theme_current = current_theme
+        self._theme_actions: dict[str, object] = {}   # value -> QAction (radio checks)
 
         tray = QSystemTrayIcon()
         tray.setToolTip(tooltip)
@@ -116,6 +127,9 @@ class QtSystemTray:
             if label is SEPARATOR:
                 menu.addSeparator()
                 continue
+            if key == "theme":
+                menu.addMenu(self._build_theme_menu(menu))
+                continue
             action = menu.addAction(label)
             # Bind key per-iteration; QAction.triggered passes a `checked` bool.
             if key in CHECKABLE_KEYS:
@@ -129,6 +143,28 @@ class QtSystemTray:
                 action.triggered.connect(
                     lambda _checked=False, k=key: self._actions[k]())
         return menu
+
+    def _build_theme_menu(self, parent: QMenu) -> QMenu:
+        """The radio Theme submenu (#76): one exclusive entry per theme; a pick
+        routes the value to the app, which confirms back via :meth:`set_theme`."""
+        sub = QMenu("Theme", parent)
+        group = QActionGroup(sub)
+        group.setExclusive(True)
+        for label, value in THEME_ROWS:
+            action = sub.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(value == self._theme_current)
+            group.addAction(action)
+            action.triggered.connect(
+                lambda _checked=False, v=value: self._actions["theme"](v))
+            self._theme_actions[value] = action
+        return sub
+
+    def set_theme(self, theme: str) -> None:
+        """Reflect an applied theme switch in the submenu's radio checks."""
+        self._theme_current = theme
+        for value, action in self._theme_actions.items():
+            action.setChecked(value == theme)  # type: ignore[attr-defined]
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:

@@ -158,6 +158,50 @@ def test_compact_theme_routes_sessions_to_the_window_not_cards(app, tmp_path,
     assert mgr._compact is None                       # closed + dropped on quit
 
 
+# --- the live theme switch (#76) ----------------------------------------------
+def test_live_theme_switch_round_trips_preserving_sessions(app, tmp_path, monkeypatch):
+    from mascot import settings as settings_mod
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", tmp_path / "settings.json")
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    _write(state_dir, "s1", ts=time.time(), state="working")
+
+    mgr = qt_app.QtMascotApp(state_dir)               # classic
+    mgr._on_sessions({"s1": _state("s1", "working")})
+    assert set(mgr.cards) == {"s1"} and mgr._compact is None
+
+    mgr._set_theme("compact")                         # live: classic -> compact
+    assert mgr.cards == {}                            # cards torn down
+    assert mgr._compact is not None
+    assert set(mgr._compact.sessions) == {"s1"}       # rebuilt from the snapshot
+    assert settings_mod.load_settings()["theme"] == "compact"   # persisted
+
+    mgr._set_theme("classic")                         # and back
+    assert mgr._compact is None
+    assert set(mgr.cards) == {"s1"}
+    assert settings_mod.load_settings()["theme"] == "classic"
+    mgr._quit()
+
+
+def test_live_theme_switch_honors_hidden_state_and_same_theme_is_a_noop(
+        app, tmp_path, monkeypatch):
+    from mascot import settings as settings_mod
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", tmp_path / "settings.json")
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+
+    mgr = qt_app.QtMascotApp(state_dir)
+    mgr._toggle_cards()                               # tray "hide"
+    mgr._set_theme("compact")
+    assert mgr._compact is not None
+    assert not mgr._compact.isVisible()               # a hidden widget stays hidden
+
+    compact_before = mgr._compact
+    mgr._set_theme("compact")                         # same theme -> no rebuild
+    assert mgr._compact is compact_before
+    mgr._quit()
+
+
 # --- QtCard: constructs and swaps state without error ------------------------
 def test_card_constructs_and_swaps_state(app):
     renderer = QtPixmapRenderer()

@@ -46,6 +46,7 @@ from .qt_ingest import SessionIngest
 from .sprite_qt import QtPixmapRenderer
 
 if TYPE_CHECKING:
+    from .qt_compact import CompactWindow
     from .qt_pet_window import QtPetWindow
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -135,6 +136,8 @@ class QtMascotApp(QObject):
                 on_settings=self._open_settings,
                 on_notifications=self._set_notifications,
                 notifications_on=self._notifications_on,
+                on_theme=self._set_theme,
+                current_theme=self._theme,
                 on_quit=self._quit,
             )
         except Exception as exc:  # noqa: BLE001 — never let the tray stop startup
@@ -143,16 +146,10 @@ class QtMascotApp(QObject):
         # The presentation seam (#74): classic = one QtCard per session (below,
         # unchanged); compact = the one-panel session list, which consumes the
         # same pushes (sessions / usage / context) instead of the cards.
-        self._theme = config.THEME
-        self._compact = None
+        self._theme: str = config.THEME
+        self._compact: CompactWindow | None = None
         if self._theme == "compact":
-            try:
-                from .qt_compact import CompactWindow
-                self._compact = CompactWindow()
-                self._compact.show()
-            except Exception as exc:  # noqa: BLE001 — fall back to the classic cards
-                print("[mascot] compact window unavailable:", exc)
-                self._compact = None
+            self._build_compact()
 
         # Opt-in usage poller (#70): live 5h/weekly numbers without a CLI session.
         # Consent-first — built only when the setting is on; best-effort like the
@@ -228,6 +225,44 @@ class QtMascotApp(QObject):
             settings.save_settings({"native_notifications": self._notifications_on})
         except OSError as exc:
             print("[mascot] could not persist the notifications setting:", exc)
+
+    def _build_compact(self) -> None:
+        """Bring up the compact panel (best-effort; a failure falls back to cards)."""
+        try:
+            from .qt_compact import CompactWindow
+            self._compact = CompactWindow()
+            if not self._cards_hidden:        # honor a tray "hide" across a switch
+                self._compact.show()
+        except Exception as exc:  # noqa: BLE001 — fall back to the classic cards
+            print("[mascot] compact window unavailable:", exc)
+            self._compact = None
+
+    def _set_theme(self, theme: str) -> None:
+        """Apply a theme switch live (#76): persist it, tear down the current
+        presentation, and rebuild from the current snapshot — all state lives in
+        the files, so a rebuild is exactly the startup path. The pet window, tray
+        and pollers are untouched."""
+        theme = settings.valid_theme(theme)
+        if theme == self._theme:
+            return
+        self._theme = theme
+        try:
+            settings.save_settings({"theme": theme})
+        except OSError as exc:
+            print("[mascot] could not persist the theme setting:", exc)
+
+        for card in list(self._cards.values()):   # tear down the old presentation
+            card.close()
+        self._cards.clear()
+        if self._compact is not None:
+            self._compact.close()
+            self._compact = None
+
+        if theme == "compact":
+            self._build_compact()
+        if self._tray is not None:
+            self._tray.set_theme(theme)
+        self._ingest.read_now()                   # rebuild from the current snapshot
 
     def _on_petted(self, _session_id: str) -> None:
         """A card was petted: the happy hop already played on the card; award the

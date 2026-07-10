@@ -112,6 +112,32 @@ def test_omitting_the_notifications_callback_hides_the_row(app):
     tray.dispose()
 
 
+# --- the Theme submenu (#76) --------------------------------------------------
+def test_theme_submenu_radio_checks_current_and_routes_the_choice(app):
+    got: list[str] = []
+    tray = qt_tray.QtSystemTray(on_quit=lambda: None,
+                                on_theme=got.append, current_theme="classic")
+    menu = tray._build_menu()
+    sub = next(a.menu() for a in menu.actions() if a.text() == "Theme")
+    labels = {a.text(): a for a in sub.actions()}
+    assert set(labels) == {"Classic", "Compact"}
+    assert labels["Classic"].isChecked() and not labels["Compact"].isChecked()
+
+    labels["Compact"].trigger()               # the user picks Compact
+    assert got == ["compact"]
+
+    tray.set_theme("compact")                 # the app confirms the switch
+    assert labels["Compact"].isChecked() and not labels["Classic"].isChecked()
+    tray.dispose()
+
+
+def test_omitting_the_theme_callback_hides_the_submenu(app):
+    tray = qt_tray.QtSystemTray(on_quit=lambda: None)
+    menu = tray._build_menu()
+    assert all(a.text() != "Theme" for a in menu.actions())
+    tray.dispose()
+
+
 # --- manager toast routing through the notifier core ------------------------
 class _FakeTray:
     def __init__(self, sink: list[tuple[str, str]]):
