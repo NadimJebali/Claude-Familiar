@@ -68,6 +68,17 @@ def test_row_text_carries_the_working_file():
     assert qt_compact.row_text(st, now) == "working · qt_app.py"
 
 
+def test_shadow_lives_on_a_child_panel_not_the_translucent_top_level(app):
+    # #88: a QGraphicsDropShadowEffect on a translucent TOP-LEVEL renders once
+    # into its cache and then ignores update() on real compositors — the frozen
+    # first frame. Same rule qt_card._CardPanel documents; the effect (and the
+    # painting) must live on a child.
+    w = qt_compact.CompactWindow()
+    assert w.graphicsEffect() is None
+    assert w._panel.graphicsEffect() is not None
+    w.close()
+
+
 def test_row_bg_markers_follow_the_effort_level():
     # #86: the card's panel_bg split at row scale — the animated levels get a
     # marker for the pixel wash/ripple; everything else stays a solid panel.
