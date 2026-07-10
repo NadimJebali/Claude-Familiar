@@ -165,8 +165,10 @@ def test_tap_emits_petted_and_hops(app):
 
 
 # --- QtCard: the pushed pet look (mood tint + stage/hat) ---------------------
+# The manager only pushes a pet to a pet-enabled card, so these construct with
+# pet_enabled=True (a simple-mode card ignores the push and shows the fixed stage).
 def test_card_tints_the_idle_face_by_pet_mood(app):
-    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer())
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer(), pet_enabled=True)
     card.set_pet(PetView(stage="baby", hat=None, flourish=False, mood="hungry"))
     assert card._face == "idle_hungry"      # a hungry mood droops the idle face
     card.close()
@@ -174,7 +176,7 @@ def test_card_tints_the_idle_face_by_pet_mood(app):
 
 def test_card_dresses_the_sprite_in_the_pushed_stage_hat_and_flourish(app):
     rec = _RecordingRenderer()
-    card = qt_card.QtCard("s", _state("s", "idle"), 0, rec)
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, rec, pet_enabled=True)
     card.set_pet(PetView(stage="adult", hat="crown", flourish=True, mood="content"))
     spec = rec.specs[-1]
     assert (spec.stage, spec.hat, spec.flourish) == ("adult", "crown", True)
@@ -339,3 +341,44 @@ def test_badges_appear_and_clear_as_subagents_come_and_go(app):
     card.set_state(_state("s", "working"))     # the sub-agents finished
     assert card._panel._badge_count == 0
     card.close()
+
+
+# --- QtCard: placement math (pure) + home-monitor anchoring ------------------
+def test_anchor_places_bottom_right_and_stacks_upward():
+    area = (0, 0, 800, 600)
+    x0, y0 = qt_card._anchor_xy(area, 100, 200, 0)
+    x1, y1 = qt_card._anchor_xy(area, 100, 200, 1)
+    assert (x0, y0) == (800 - 100 - 20, 600 - (200 + 12) - 20)
+    assert x1 == x0 and y1 == y0 - (200 + 12)   # a second card stacks straight up
+
+
+def test_anchor_clamps_into_the_work_area():
+    x, y = qt_card._anchor_xy((0, 0, 300, 150), 100, 200, 3)  # too tall to fit
+    assert y == 0 and 0 <= x <= 200              # clamped, never off-screen
+
+
+def test_card_anchors_to_the_chosen_home_monitor(app, monkeypatch):
+    monkeypatch.setattr(qt_card.osplatform, "enumerate_work_areas",
+                        lambda: [(1000, 0, 800, 600)])
+    monkeypatch.setattr(qt_card.osplatform, "primary_work_area",
+                        lambda: (1000, 0, 800, 600))
+    monkeypatch.setattr(qt_card.config, "HOME_MONITOR", 0)
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer())
+    expect = qt_card._anchor_xy((1000, 0, 800, 600), card.width(), card.height(), 0)
+    assert (card.x(), card.y()) == expect        # placed on the chosen monitor
+    card.close()
+
+
+# --- QtCard: simple hook-visualiser mode -------------------------------------
+def test_simple_mode_card_uses_the_configured_simple_stage(app, monkeypatch):
+    monkeypatch.setattr(qt_card.config, "SIMPLE_STAGE", "adult")
+    rec = _RecordingRenderer()
+    qt_card.QtCard("s", _state("s", "idle"), 0, rec, pet_enabled=False)
+    assert rec.specs[-1].stage == "adult"        # no pet -> the fixed simple stage
+    assert rec.specs[-1].hat is None
+
+
+def test_pet_enabled_card_before_first_push_is_a_bare_baby(app):
+    rec = _RecordingRenderer()
+    qt_card.QtCard("s", _state("s", "idle"), 0, rec, pet_enabled=True)
+    assert rec.specs[-1].stage == "baby"

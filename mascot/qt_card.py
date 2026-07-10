@@ -23,9 +23,10 @@ gently at first then more frantic the longer it's ignored — settling the momen
 answered or grabbed.
 
 Each live sub-agent shows as a small mini-mascot badge in a centered row below the
-caption (capped so a swarm can't crowd the card).
-
-Still on the parity list (later #57 work / #60): home-monitor placement.
+caption (capped so a swarm can't crowd the card). The card anchors to the *home*
+monitor's work area (the one picked in Settings, via the same ``osplatform`` lookup
+the Tk card uses), and in simple hook-visualiser mode (pet off) it shows the fixed
+life stage from Settings with no paw button — a read-only indicator.
 """
 from __future__ import annotations
 
@@ -53,7 +54,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import config, effective_state, shake
+from . import config, effective_state, osplatform, shake
 from .overlay import Overlay, OverlayConfig
 from .pet_view import PetView
 from .sprite_qt import SpriteRenderer, SpriteSpec
@@ -144,6 +145,19 @@ _CAPTIONS = {
 def _hex(rgb: tuple[int, int, int]) -> str:
     r, g, b = rgb
     return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _anchor_xy(area: tuple[int, int, int, int], w: int, h: int,
+               index: int) -> tuple[int, int]:
+    """Bottom-right anchor within a work ``area`` (x, y, width, height), stacking
+    extra sessions upward, clamped so a card can never land off-screen. Pure, so the
+    placement math is unit-tested without a window."""
+    ax, ay, aw, ah = area
+    x = ax + aw - w - 20
+    y = ay + ah - (h + 12) * (index + 1) - 20
+    x = max(ax, min(x, ax + aw - w))
+    y = max(ay, min(y, ay + ah - h))
+    return x, y
 
 
 def _paw_pixmap(px: int) -> QPixmap:
@@ -286,6 +300,10 @@ class QtCard(QWidget):
         self._shake = shake.Shake(_SHAKE_CONFIG, t0=self._anim_t0)
         self._shake_offset: tuple[int, int] = (0, 0)
 
+        # Simple hook-visualiser mode (pet disabled): the card shows the fixed life
+        # stage picked in Settings, and there's no paw button (a read-only indicator).
+        self._pet_enabled = pet_enabled
+
         # A small paw button (only when the pet is live) at the panel's top-left that
         # asks the manager to open the Pet window. As a child button it swallows its
         # own clicks, so pressing the paw neither drags nor pets the card.
@@ -319,6 +337,16 @@ class QtCard(QWidget):
         self._pet_view = view
         self._render(time.time())
 
+    def _effective_pet_view(self) -> PetView:
+        """The look to draw, mirroring the Tk card's two edge cases: simple mode (pet
+        off) shows the fixed life stage from Settings, and a pet-enabled card before
+        the first push is a bare baby. Both are hatless with a neutral mood."""
+        if not self._pet_enabled:
+            return PetView(config.SIMPLE_STAGE, None, False, "content")
+        if self._pet_view is None:
+            return PetView("baby", None, False, "content")
+        return self._pet_view
+
     def celebrate(self) -> None:
         """Play the happy hop — the host calls this when the pet is cared for (fed or
         played with in the Pet window), so care reads the same as an on-card pet."""
@@ -336,16 +364,16 @@ class QtCard(QWidget):
         self._apply_attention_shake(now)
 
     def _render(self, now: float) -> None:
-        mood = self._pet_view.mood if self._pet_view is not None else "content"
-        eff = self._overlay.effective(self._raw, now, ts=self._state.get("ts"), mood=mood)
+        view = self._effective_pet_view()
+        eff = self._overlay.effective(self._raw, now, ts=self._state.get("ts"), mood=view.mood)
         face = self._display_face(eff, now)
         self._face = face
         # The drawn sprite depends on the face AND the pet's look, so re-render the
         # pixmap when either changes (a re-dress or evolution, not just a new face).
-        key = (face, self._pet_view)
+        key = (face, view)
         if key != self._pixmap_key:
             self._pixmap_key = key
-            self._pixmap = self._pixmap_for(face)
+            self._pixmap = self._pixmap_for(face, view)
         bob = 0 if (eff == "sleeping" or self._raw == "dead") else round(
             BOB_AMPLITUDE * math.sin((now - self._anim_t0) * 2 * math.pi / BOB_PERIOD_S))
         count = min(len(self._state.get("subagents") or []), MAX_BADGES)
@@ -369,16 +397,13 @@ class QtCard(QWidget):
         return self._renderer.creature(
             SpriteSpec(stage="baby", state="working", accent=accent), BADGE_MINI_PX)
 
-    def _pixmap_for(self, face: str) -> QPixmap:
+    def _pixmap_for(self, face: str, view: PetView) -> QPixmap:
         if self._raw == "dead":
             return self._renderer.gravestone(CREATURE_PX)
-        view = self._pet_view
-        stage = view.stage if view is not None else "baby"
-        hat = view.hat if view is not None else None
-        flourish = view.flourish if view is not None else False
         accent = _hex(config.STATE_COLORS.get(face, config.STATE_COLORS["idle"]))
         return self._renderer.creature(
-            SpriteSpec(stage=stage, state=face, accent=accent, hat=hat, flourish=flourish),
+            SpriteSpec(stage=view.stage, state=face, accent=accent,
+                       hat=view.hat, flourish=view.flourish),
             CREATURE_PX)
 
     # --- paw button (opens the Pet window) -------------------------------
@@ -425,18 +450,20 @@ class QtCard(QWidget):
 
     # --- placement --------------------------------------------------------
     def _place(self, index: int, screen: QScreen | None) -> None:
-        """Anchor bottom-right of the work area, stacking extra sessions upward,
-        clamped so a card can never land off-screen."""
-        screen = screen or QGuiApplication.primaryScreen()
-        if screen is None:            # no screen (headless with no platform) — leave at 0,0
-            return
-        area = screen.availableGeometry()
-        w, h = self.width(), self.height()
-        x = area.x() + area.width() - w - 20
-        y = area.y() + area.height() - (h + 12) * (index + 1) - 20
-        x = max(area.x(), min(x, area.x() + area.width() - w))
-        y = max(area.y(), min(y, area.y() + area.height() - h))
-        self.move(x, y)
+        """Anchor to the bottom-right of the *home* monitor's work area (the one
+        picked in Settings), stacking extra sessions upward. Uses the same
+        ``osplatform`` monitor lookup as the Tk card so both honor the setting;
+        falls back to the Qt primary screen off Windows / on any lookup failure."""
+        area = osplatform.choose_work_area(
+            config.HOME_MONITOR, osplatform.enumerate_work_areas(),
+            osplatform.primary_work_area())
+        if area is None:
+            screen = screen or QGuiApplication.primaryScreen()
+            if screen is None:        # no screen (headless with no platform) — leave at 0,0
+                return
+            g = screen.availableGeometry()
+            area = (g.x(), g.y(), g.width(), g.height())
+        self.move(*_anchor_xy(area, self.width(), self.height(), index))
 
     # --- attention shake --------------------------------------------------
     def _apply_attention_shake(self, now: float) -> None:
