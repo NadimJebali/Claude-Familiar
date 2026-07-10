@@ -105,6 +105,22 @@ def test_notifications_row_reflects_an_off_setting(app):
     tray.dispose()
 
 
+def test_set_notifications_syncs_the_row_without_firing_the_callback(app):
+    # #81: a panel-side flip reaches the row programmatically; setChecked emits
+    # no `triggered`, so the sync can never loop back into the app.
+    got: list[bool] = []
+    tray = qt_tray.QtSystemTray(on_quit=lambda: None,
+                                on_notifications=got.append, notifications_on=False)
+    menu = tray._build_menu()
+    action = next(a for a in menu.actions() if a.text() == "Notifications")
+    assert not action.isChecked()
+
+    tray.set_notifications(True)             # the app confirms a panel-side flip
+    assert action.isChecked()
+    assert got == []                         # no callback fired
+    tray.dispose()
+
+
 def test_omitting_the_notifications_callback_hides_the_row(app):
     tray = qt_tray.QtSystemTray(on_quit=lambda: None)
     menu = tray._build_menu()
@@ -145,6 +161,9 @@ class _FakeTray:
 
     def show_toast(self, title, message):
         self._sink.append((title, message))
+
+    def set_notifications(self, on):
+        pass    # interface parity (#81); the row-sync itself is tested in test_qt_app
 
 
 def _waiting_state(message: str) -> dict:

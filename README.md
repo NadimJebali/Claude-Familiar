@@ -91,8 +91,10 @@ baby / teen / adult) in **Settings → Appearance → Mascot Look**.
   **Compact** is a single small panel with one slim row per session — effort dot ·
   state text · model · sub-agent count · context ring — with the usage bars once
   at the bottom: a quiet "work mode" with no mascot, no shake, and the needs-you
-  message inline in its row. Switch from the tray's **Theme** submenu (applies
-  instantly) or the Settings dropdown.
+  message inline in its row. Switch from the tray's **Theme** submenu or the
+  Settings dropdown — both apply instantly, no restart (the widget watches
+  `settings.json`, so a panel **Save** lands live; same for the Notifications
+  checkbox).
 - **System tray (Windows / Linux / macOS).** A `QSystemTrayIcon` sits in the
   notification area; its menu has *Pet…*, *Show / hide cards*, *Settings…*, a
   checkable *Notifications* mute, a *Theme* submenu, and *Quit*. On Windows a

@@ -233,6 +233,117 @@ def test_tray_is_constructed_with_the_startup_theme(app, tmp_path, monkeypatch):
     mgr._quit()
 
 
+# --- live settings-apply from the panel (#81) -----------------------------------
+def _write_settings(path, **over):
+    from mascot import settings as settings_mod
+    data = dict(settings_mod.DEFAULTS)
+    data.update(over)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_panel_theme_save_applies_live(app, tmp_path, monkeypatch):
+    from mascot import settings as settings_mod
+    sp = tmp_path / "settings.json"
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", sp)
+    _write_settings(sp)                               # theme: classic on disk
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    _write(state_dir, "s1", ts=time.time(), state="working")
+
+    mgr = qt_app.QtMascotApp(state_dir)               # classic
+    mgr._on_sessions({"s1": _state("s1", "working")})
+    assert set(mgr.cards) == {"s1"} and mgr._compact is None
+
+    _write_settings(sp, theme="compact")              # the panel hits Save
+    mgr._apply_settings_change()
+    assert mgr._compact is not None
+    assert mgr.cards == {}                            # cards torn down live
+    assert set(mgr._compact.sessions) == {"s1"}       # rebuilt from the snapshot
+    mgr._quit()
+
+
+def test_panel_notifications_save_applies_live_and_syncs_the_tray(app, tmp_path,
+                                                                  monkeypatch):
+    from mascot import qt_tray
+    from mascot import settings as settings_mod
+    sp = tmp_path / "settings.json"
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", sp)
+    _write_settings(sp)                               # notifications off (default)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    synced: list[bool] = []
+
+    class _FakeTray:
+        def __init__(self, **kwargs):
+            pass
+
+        def set_theme(self, theme):
+            pass
+
+        def set_notifications(self, on):
+            synced.append(on)
+
+        def show_toast(self, *args):
+            pass
+
+        def dispose(self):
+            pass
+
+    monkeypatch.setattr(qt_tray, "QtSystemTray", _FakeTray)
+    mgr = qt_app.QtMascotApp(state_dir)
+    assert mgr._notifications_on is False
+
+    _write_settings(sp, native_notifications=True)    # panel Save: unmute
+    mgr._apply_settings_change()
+    assert mgr._notifications_on is True
+    assert synced[-1] is True                         # the tray row reflects it
+    assert settings_mod.load_settings()["native_notifications"] is True
+    mgr._quit()
+
+
+def test_midwrite_garbage_settings_never_flip_the_presentation(app, tmp_path,
+                                                               monkeypatch):
+    from mascot import settings as settings_mod
+    sp = tmp_path / "settings.json"
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", sp)
+    _write_settings(sp, theme="compact")
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    monkeypatch.setattr(qt_app.config, "THEME", "compact")
+
+    mgr = qt_app.QtMascotApp(state_dir)               # compact from the start
+    panel_before = mgr._compact
+    assert panel_before is not None
+
+    sp.write_text('{"theme": "cl', encoding="utf-8")  # a torn mid-write read
+    mgr._apply_settings_change()
+    assert mgr._compact is panel_before               # nothing applied, no rebuild
+
+    _write_settings(sp, theme="classic")              # the write completes
+    mgr._apply_settings_change()
+    assert mgr._compact is None                       # now it applies
+    mgr._quit()
+
+
+def test_settings_echo_does_not_rebuild(app, tmp_path, monkeypatch):
+    from mascot import settings as settings_mod
+    sp = tmp_path / "settings.json"
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", sp)
+    _write_settings(sp)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+
+    mgr = qt_app.QtMascotApp(state_dir)
+    _write_settings(sp, theme="compact")
+    mgr._apply_settings_change()
+    panel = mgr._compact
+    assert panel is not None
+
+    mgr._apply_settings_change()                      # _set_theme's echo save refires
+    assert mgr._compact is panel                      # absorbed: same instance
+    mgr._quit()
+
+
 # --- QtCard: constructs and swaps state without error ------------------------
 def test_card_constructs_and_swaps_state(app):
     renderer = QtPixmapRenderer()
