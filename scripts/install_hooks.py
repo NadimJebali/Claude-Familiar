@@ -86,7 +86,8 @@ def _matcher_block(event: str) -> dict[str, Any]:
 # --- statusLine (usage feed + terminal footer) -----------------------------
 # Claude Code runs one `statusLine` command per update, handing it the statusline
 # JSON on stdin. We install status_emit.py there so the widget gets the 5h/weekly
-# usage numbers (its only official source) and the terminal gains a compact footer.
+# usage numbers whenever a terminal session runs (the opt-in live-usage poller in
+# the settings panel is the other source) and the terminal gains a compact footer.
 # The slot is user-visible and singular, so we never clobber a foreign statusline —
 # we install only into a free slot, refresh our own, and remove only our own.
 def _status_command() -> str:
@@ -180,8 +181,9 @@ def install() -> None:
     if sl_action == "skipped":
         print()
         print("A custom statusLine is already configured — leaving it untouched.")
-        print("The card's 5h/weekly usage bars need our statusline feed; to enable")
-        print("them, switch your statusLine command to (or tee stdin into) ours:")
+        print("Easiest way to feed the card's 5h/weekly usage bars anyway: enable the")
+        print('"Live usage" opt-in in the settings panel (no statusline changes).')
+        print("Alternatively, switch your statusLine command to (or tee stdin into) ours:")
         print(f"  {_status_command()}")
     else:
         print(f"{'Refreshed' if sl_action == 'refreshed' else 'Added'} statusLine "
