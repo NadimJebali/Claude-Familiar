@@ -45,12 +45,10 @@ import time
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
-    QBrush,
     QColor,
     QFont,
     QGuiApplication,
     QIcon,
-    QLinearGradient,
     QMouseEvent,
     QPainter,
     QPainterPath,
@@ -89,9 +87,21 @@ CARD_W = 158
 USAGE_ROW_H = 24
 CARD_H = 211 + USAGE_ROW_H
 CREATURE_PX = 5
+CREATURE_CX = CARD_W // 2   # horizontal center of the creature (rings radiate from here)
 CREATURE_CY = 68        # vertical center of the creature zone
 CAPTION_Y = 132
 SHADOW_PAD = 18         # room around the panel so the drop shadow isn't clipped
+
+# Effort backgrounds are painted as chunky pixel cells (larger than the creature's 5px
+# so they read as a *background* pixel field, not competing with the sprite). max tiles
+# a flowing rainbow (one full spectrum every RAINBOW_WAVELENGTH_PX along the diagonal —
+# short enough that neighbouring cells are visibly different hues, so it reads as pixels
+# not a smooth wash); xhigh tiles purple rings that radiate from the mascot — one
+# ring+gap per wavelength, expanding one wavelength every period.
+EFFORT_PIXEL = 10
+RAINBOW_WAVELENGTH_PX = 120
+RIPPLE_WAVELENGTH_PX = 34
+RIPPLE_PERIOD_S = 1.8
 
 # Usage bars (5h / weekly) — two thin labeled bars at the very bottom, in the same
 # visual language as the tooltip's need bars (the layout mirrors the Tk card).
@@ -295,21 +305,21 @@ class _CardPanel(QWidget):
         # Rising particles to paint this frame: (grid, char->color, cx, cy, px).
         self._particles: list[tuple[list[str], dict[str, str], float, float, int]] = []
         # Effort-reactive chrome + the usage bars, pushed by the card each render.
-        self._panel_fill = PANEL_FILL         # effort tint (xhigh animates)
+        self._panel_fill = PANEL_FILL         # solid base / quiet-level tint
         self._border = PANEL_EDGE             # accent border for the animated levels
         self._bars: tuple[tuple[str, float, str], ...] = ()   # (label, pct, color)
-        # `max`'s moving rainbow wash: (fraction, color) stops; empty for every other
-        # level (which use the solid `_panel_fill`).
-        self._panel_gradient: tuple[tuple[float, str], ...] = ()
+        # The animated background over the base fill: ("solid",) for the quiet levels,
+        # ("rainbow", t) for max's pixel wash, ("ripple", t) for xhigh's radiating rings.
+        self._panel_bg: tuple = ("solid",)
 
     def show_art(self, pixmap: QPixmap | None, caption: str, bob: float, *,
                  prev: QPixmap | None = None, fade: float = 1.0, scale: float = 1.0,
                  badge: QPixmap | None = None, badge_count: int = 0,
                  panel_fill: str = PANEL_FILL, border: str = PANEL_EDGE,
                  bars: tuple[tuple[str, float, str], ...] = (),
-                 panel_gradient: tuple[tuple[float, str], ...] = ()) -> None:
+                 panel_bg: tuple = ("solid",)) -> None:
         frame = (pixmap, caption, bob, prev, fade, scale, badge, badge_count,
-                 panel_fill, border, bars, panel_gradient)
+                 panel_fill, border, bars, panel_bg)
         if frame == self._frame:          # nothing changed this tick — skip the repaint
             return
         self._frame = frame
@@ -317,7 +327,7 @@ class _CardPanel(QWidget):
         self._prev, self._fade, self._scale = prev, fade, scale
         self._badge, self._badge_count = badge, badge_count
         self._panel_fill, self._border, self._bars = panel_fill, border, bars
-        self._panel_gradient = panel_gradient
+        self._panel_bg = panel_bg
         self.update()
 
     def set_particles(self, cells: list[tuple[list[str], dict[str, str],
@@ -334,7 +344,12 @@ class _CardPanel(QWidget):
             panel = QRectF(0.5, 0.5, CARD_W - 1, CARD_H - 1)
             path = QPainterPath()
             path.addRoundedRect(panel, PANEL_RADIUS, PANEL_RADIUS)
-            p.fillPath(path, self._panel_brush())
+            p.fillPath(path, QColor(self._panel_fill))
+            if self._panel_bg[0] != "solid":     # max wash / xhigh rings, clipped to the panel
+                p.save()
+                p.setClipPath(path)
+                self._paint_effort_bg(p)
+                p.restore()
             p.setPen(QColor(self._border))
             p.drawPath(path)
 
@@ -352,16 +367,26 @@ class _CardPanel(QWidget):
         finally:
             p.end()
 
-    def _panel_brush(self) -> QBrush:
-        """The panel fill: ``max``'s moving rainbow wash is a diagonal linear gradient
-        (its stops flow corner-to-corner and scroll every frame); every other level is
-        a solid tint."""
-        if not self._panel_gradient:
-            return QBrush(QColor(self._panel_fill))
-        grad = QLinearGradient(0.0, 0.0, float(CARD_W), float(CARD_H))   # diagonal flow
-        for frac, color in self._panel_gradient:
-            grad.setColorAt(frac, QColor(color))
-        return QBrush(grad)
+    def _paint_effort_bg(self, p: QPainter) -> None:
+        """Tile the animated effort background as chunky pixel cells: ``max`` flows a
+        rainbow across the card, ``xhigh`` radiates purple rings from the mascot. The
+        per-cell color is the pure ``effort`` math; here we own the geometry."""
+        kind, t = self._panel_bg[0], self._panel_bg[1]
+        if kind == "rainbow":
+            for y in range(0, CARD_H, EFFORT_PIXEL):
+                for x in range(0, CARD_W, EFFORT_PIXEL):
+                    f = (x + y) / RAINBOW_WAVELENGTH_PX      # diagonal position, repeats per ring
+                    r, g, b = effort.rainbow_wash_color(_PANEL_FILL_RGB, t, f)
+                    p.fillRect(x, y, EFFORT_PIXEL, EFFORT_PIXEL, QColor(r, g, b))
+        elif kind == "ripple":
+            half = EFFORT_PIXEL / 2
+            for y in range(0, CARD_H, EFFORT_PIXEL):
+                for x in range(0, CARD_W, EFFORT_PIXEL):
+                    d = math.hypot(x + half - CREATURE_CX, y + half - CREATURE_CY)
+                    phase = d / RIPPLE_WAVELENGTH_PX - t / RIPPLE_PERIOD_S
+                    rgb = effort.ripple_color(_PANEL_FILL_RGB, phase)
+                    if rgb != _PANEL_FILL_RGB:            # gap cells stay bare -> base shows
+                        p.fillRect(x, y, EFFORT_PIXEL, EFFORT_PIXEL, QColor(*rgb))
 
     def _paint_creature(self, p: QPainter) -> None:
         """Blit the creature: crossfade the outgoing face under the incoming one, and
@@ -634,14 +659,16 @@ class QtCard(QWidget):
         # where the default edge leaves the attention shake/glare uncontested.
         t = now - self._anim_t0
         dead = self._raw == "dead"
-        fill_rgb = None if dead else effort.panel_fill(self._effort_display, _PANEL_FILL_RGB, t)
-        panel_fill = _hex(fill_rgb) if fill_rgb is not None else PANEL_FILL
-        # `max` overlays a moving rainbow wash (a spatial gradient) instead of the flat
-        # tint; the gravestone keeps none.
-        grad_stops = None if dead else effort.panel_gradient(self._effort_display,
-                                                             _PANEL_FILL_RGB, t)
-        gradient = (tuple((f, _hex(rgb)) for f, rgb in grad_stops)
-                    if grad_stops is not None else ())
+        level = "" if dead else self._effort_display
+        # Quiet levels tint the whole panel a static color; max/xhigh keep the dark base
+        # and animate a pixel background over it (a rainbow wash / rings from the mascot).
+        if level in ("max", "xhigh"):
+            panel_fill = PANEL_FILL
+            panel_bg: tuple = ("rainbow" if level == "max" else "ripple", round(t, 3))
+        else:
+            fill_rgb = effort.panel_fill(level, _PANEL_FILL_RGB, t)
+            panel_fill = _hex(fill_rgb) if fill_rgb is not None else PANEL_FILL
+            panel_bg = ("solid",)
         border = PANEL_EDGE
         if not dead and self._raw != "waiting":
             accent = effort.border_accent(self._effort_display, t)
@@ -654,7 +681,7 @@ class QtCard(QWidget):
                              prev=self._prev_pixmap, fade=fade, scale=self._scale_now(now),
                              badge=badge, badge_count=count,
                              panel_fill=panel_fill, border=border, bars=bars,
-                             panel_gradient=gradient)
+                             panel_bg=panel_bg)
 
     def _adopt_pixmap(self, pixmap: QPixmap, stage: str, now: float) -> None:
         """Swap in a new creature pixmap with the right transition: a stage change

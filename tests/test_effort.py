@@ -231,41 +231,42 @@ def test_border_accent_moves_with_the_clock():
     assert len(xs) > 2
 
 
-# --- max's moving rainbow wash (the flowing background gradient) ------------
-def test_panel_gradient_only_for_max():
-    # Only `max` gets the spatial rainbow wash; every other level uses the single
-    # panel color (a solid fill), so the gradient is None for them.
-    for level in ("", "auto", "low", "medium", "high", "xhigh"):
-        assert effort_mod.panel_gradient(level, PANEL, 0.0) is None
-    assert effort_mod.panel_gradient("max", PANEL, 0.0) is not None
-
-
-def test_panel_gradient_spans_zero_to_one_in_order():
-    stops = effort_mod.panel_gradient("max", PANEL, 0.0)
-    fracs = [f for f, _ in stops]
-    assert fracs[0] == 0.0 and fracs[-1] == 1.0        # covers the whole axis
-    assert fracs == sorted(fracs) and len(set(fracs)) == len(fracs)   # strictly ascending
-
-
-def test_panel_gradient_stops_are_valid_blended_colors():
-    for f, color in effort_mod.panel_gradient("max", PANEL, 1.3):
-        assert 0.0 <= f <= 1.0
-        assert _valid_rgb(color)
-
-
-def test_panel_gradient_shows_many_hues_across_the_card():
-    # Across the axis at one instant it is a rainbow — many distinct colors, not a
-    # single wash (this is what makes it read as a spectrum rather than a tint).
-    colors = {color for _, color in effort_mod.panel_gradient("max", PANEL, 0.0)}
+# --- max's pixelated rainbow wash (per-cell color) --------------------------
+def test_rainbow_wash_color_is_valid_and_spans_many_hues():
+    # Across the card (f in 0..1) at one instant it is a rainbow — many distinct
+    # colors, so the tiled cells read as a spectrum rather than one tint.
+    colors = {effort_mod.rainbow_wash_color(PANEL, 0.0, k / 8) for k in range(9)}
+    for c in colors:
+        assert _valid_rgb(c)
     assert len(colors) >= 5
 
 
-def test_panel_gradient_flows_over_time():
-    # The whole wash scrolls with the clock: the stop colors at a later instant
-    # differ, so the rainbow visibly moves across the card.
-    a = effort_mod.panel_gradient("max", PANEL, 0.0)
-    b = effort_mod.panel_gradient("max", PANEL, effort_mod.RAINBOW_PERIOD_S / 4)
+def test_rainbow_wash_color_flows_over_time():
+    # The wash scrolls with the clock: a fixed cell's color changes as t advances.
+    a = effort_mod.rainbow_wash_color(PANEL, 0.0, 0.3)
+    b = effort_mod.rainbow_wash_color(PANEL, effort_mod.RAINBOW_PERIOD_S / 4, 0.3)
     assert a != b
+
+
+# --- xhigh's radiating purple ripple (per-cell color) -----------------------
+def test_ripple_trough_is_the_bare_base():
+    # Where the sine is <= 0 (the gap between rings) the cell is the untouched base —
+    # a transparent band, so the dark panel shows between the purple rings.
+    assert effort_mod.ripple_color(PANEL, 0.0) == PANEL       # sin(0) = 0
+    assert effort_mod.ripple_color(PANEL, 0.75) == PANEL      # sin = -1 -> clamped to 0
+
+
+def test_ripple_crest_blends_toward_the_shimmer_purple():
+    crest = effort_mod.ripple_color(PANEL, 0.25)              # sin = 1 -> peak ring
+    assert _valid_rgb(crest) and crest != PANEL
+    # the crest moves toward WAVE_HI (a blue-heavy purple), so blue rises off the base.
+    assert crest[2] > PANEL[2]
+
+
+def test_ripple_rings_vary_with_phase():
+    # Distinct values across a wavelength -> rings + gaps (not a flat wash).
+    vals = {effort_mod.ripple_color(PANEL, ph) for ph in (0.0, 0.15, 0.25, 0.5, 0.65)}
+    assert len(vals) >= 3
 
 
 # --- state shape: effort is a first-class, carried field -------------------

@@ -157,29 +157,30 @@ def panel_fill(effort: str | None, base: RGB, t: float = 0.0) -> RGB | None:
     return blend(base, color, _BLEND_STRENGTH[level])
 
 
-# `max`'s background is a moving rainbow *wash* — a spatial gradient rather than the
-# single tint the other levels get, so the whole spectrum shows and flows across the
-# card (matching Claude Code's own rainbow "max" shimmer). More stops read as a
-# smoother spectrum; the wash is a touch stronger than the flat tint so the rainbow
-# actually reads over the dark panel without drowning the creature.
-GRADIENT_STOPS = 8
-_GRADIENT_STRENGTH = 0.42
+# `max`'s background is a moving rainbow *wash* and `xhigh`'s is a set of purple rings
+# *radiating from the mascot*. Both are painted as discrete pixel cells by the card (it
+# owns the geometry — cell size, the mascot center); these pure helpers give the per-cell
+# color. Strengths are tuned so each effect reads over the dark panel without drowning
+# the creature; the ring crest is bolder since only its narrow band is lit.
+_GRADIENT_STRENGTH = 0.42   # max rainbow wash
+_RIPPLE_STRENGTH = 0.6      # xhigh ring crest (peak blend toward the shimmer purple)
 
 
-def panel_gradient(effort: str | None, base: RGB, t: float) -> list[tuple[float, RGB]] | None:
-    """The ``max`` background as a moving rainbow wash: gradient ``(fraction, color)``
-    stops over the dark ``base`` at time ``t``. One full rainbow ring spans the axis
-    (so the first and last stop match, wrapping seamlessly) and the whole pattern
-    scrolls as ``t`` advances — the wave moves. ``None`` for every other level, which
-    use the single-color :func:`panel_fill`.
-    """
-    if normalize(effort) != "max":
-        return None
-    stops: list[tuple[float, RGB]] = []
-    for i in range(GRADIENT_STOPS):
-        f = i / (GRADIENT_STOPS - 1)
-        stops.append((f, blend(base, rainbow_color(t + f * RAINBOW_PERIOD_S), _GRADIENT_STRENGTH)))
-    return stops
+def rainbow_wash_color(base: RGB, t: float, f: float) -> RGB:
+    """The pixelated ``max`` wash: the blended rainbow color at diagonal fraction ``f``
+    (0..1 across the card) and time ``t``. One full rainbow ring spans ``f`` and scrolls
+    as ``t`` advances, so the card tiles this into a flowing pixel rainbow."""
+    return blend(base, rainbow_color(t + f * RAINBOW_PERIOD_S), _GRADIENT_STRENGTH)
+
+
+def ripple_color(base: RGB, phase: float) -> RGB:
+    """The pixelated ``xhigh`` ripple: the panel color at wave ``phase`` for one pixel
+    cell. The crest (the positive half of the sine) blends toward the bright shimmer
+    purple; the trough returns ``base`` unchanged — a transparent gap. The card passes a
+    ``phase`` from each cell's distance to the mascot minus the clock, so it tiles
+    concentric purple rings that radiate outward (ring, gap, ring) as time advances."""
+    intensity = max(0.0, math.sin(2 * math.pi * phase))   # positive half -> distinct rings
+    return blend(base, WAVE_HI, _RIPPLE_STRENGTH * intensity)
 
 
 # The two "special" levels whose background animates; the quiet levels stay static.
