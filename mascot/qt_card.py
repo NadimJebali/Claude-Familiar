@@ -116,6 +116,14 @@ USAGE_TRACK = "#2a2d3b"             # bar track (matches PANEL_EDGE)
 USAGE_LABEL_FG = "#8b8fa3"
 USAGE_PCT_FG = "#6b6f82"
 
+# Context ring (#73): a VS Code-style gauge at the panel's top-right (the paw owns
+# top-left) that fills clockwise from 12 o'clock as the session's context window
+# fills, in the usage traffic-light colors. Absent until the first tailer result.
+RING_DIAMETER = 22
+RING_STROKE = 3
+RING_MARGIN = 8                     # inset from the panel's top-right corner
+RING_TRACK = "#2a2d3b"              # faint full-circle track (matches the bar tracks)
+
 # Sub-agent badges: each live sub-agent shows as a small "working" mini-mascot in
 # the sub-agent accent, in a centered row below the caption (capped so a swarm can't
 # crowd the card).
@@ -309,6 +317,7 @@ class _CardPanel(QWidget):
         self._border = PANEL_EDGE             # accent border for the animated levels
         self._bars: tuple[tuple[str, float, str], ...] = ()   # (label, pct, color)
         self._stale = False                   # aged snapshot -> dim bars + "stale" (#69)
+        self._ring: tuple[float, str] | None = None   # context gauge: (pct, color) (#73)
         # The animated background over the base fill: ("solid",) for the quiet levels,
         # ("rainbow", t) for max's pixel wash, ("ripple", t) for xhigh's radiating rings.
         self._panel_bg: tuple = ("solid",)
@@ -319,9 +328,10 @@ class _CardPanel(QWidget):
                  panel_fill: str = PANEL_FILL, border: str = PANEL_EDGE,
                  bars: tuple[tuple[str, float, str], ...] = (),
                  usage_stale: bool = False,
+                 ring: tuple[float, str] | None = None,
                  panel_bg: tuple = ("solid",)) -> None:
         frame = (pixmap, caption, bob, prev, fade, scale, badge, badge_count,
-                 panel_fill, border, bars, usage_stale, panel_bg)
+                 panel_fill, border, bars, usage_stale, ring, panel_bg)
         if frame == self._frame:          # nothing changed this tick — skip the repaint
             return
         self._frame = frame
@@ -330,6 +340,7 @@ class _CardPanel(QWidget):
         self._badge, self._badge_count = badge, badge_count
         self._panel_fill, self._border, self._bars = panel_fill, border, bars
         self._stale = usage_stale
+        self._ring = ring
         self._panel_bg = panel_bg
         self.update()
 
@@ -366,6 +377,7 @@ class _CardPanel(QWidget):
 
             self._paint_badges(p)
             self._paint_usage(p)
+            self._paint_ring(p)
             self._paint_particles(p)
         finally:
             p.end()
@@ -454,6 +466,28 @@ class _CardPanel(QWidget):
             p.setPen(QColor(USAGE_LABEL_FG))
             p.drawText(QRectF(0, USAGE_ROW_TOP - 4, CARD_W, block_h + 8),
                        Qt.AlignmentFlag.AlignCenter, "stale")
+
+    def _paint_ring(self, p: QPainter) -> None:
+        """The context gauge (#73): a faint circular track at the panel's top-right
+        with a traffic-light arc filling clockwise from 12 o'clock as the session's
+        context window fills. Nothing at all before the first tailer result."""
+        if self._ring is None:
+            return
+        pct, color = self._ring
+        rect = QRectF(CARD_W - RING_MARGIN - RING_DIAMETER, RING_MARGIN,
+                      RING_DIAMETER, RING_DIAMETER)
+        pen = p.pen()
+        pen.setWidth(RING_STROKE)
+        pen.setColor(QColor(RING_TRACK))
+        p.setPen(pen)
+        p.drawEllipse(rect)                      # the full track
+        span = round(max(0.0, min(100.0, pct)) / 100.0 * 360.0 * 16)
+        if span > 0:
+            pen.setColor(QColor(color))
+            p.setPen(pen)
+            # Qt angles: 1/16 deg, 0 = 3 o'clock, positive = counter-clockwise —
+            # so start at 12 o'clock (90 deg) and sweep negative for clockwise.
+            p.drawArc(rect, 90 * 16, -span)
 
     def _paint_particles(self, p: QPainter) -> None:
         """Paint each rising particle's pixel grid, centered at its (cx, cy), at
@@ -699,13 +733,15 @@ class QtCard(QWidget):
                 border = _hex(accent)
         bars = tuple((b.label, b.pct, _hex(usage.bar_color(b.pct)))
                      for b in usage.usage_view(self._usage, now))
+        ring = (None if self._context_pct is None else
+                (self._context_pct, _hex(usage.bar_color(self._context_pct))))
 
         self._panel.show_art(self._pixmap, _CAPTIONS.get(face, self._raw), bob,
                              prev=self._prev_pixmap, fade=fade, scale=self._scale_now(now),
                              badge=badge, badge_count=count,
                              panel_fill=panel_fill, border=border, bars=bars,
                              usage_stale=usage.is_stale(self._usage, now),
-                             panel_bg=panel_bg)
+                             ring=ring, panel_bg=panel_bg)
 
     def _adopt_pixmap(self, pixmap: QPixmap, stage: str, now: float) -> None:
         """Swap in a new creature pixmap with the right transition: a stage change

@@ -589,6 +589,32 @@ def test_usage_window_past_its_reset_reads_zero(app):
     card.close()
 
 
+def test_context_ring_absent_until_data_then_traffic_lit(app):
+    # The ring gauge (#73): nothing before the first tailer result; then a
+    # top-right arc colored by the usage thresholds (calm / amber / red).
+    card = qt_card.QtCard("s", _state("s", "working"), 0, QtPixmapRenderer())
+    assert card._panel._ring is None                  # no data -> no ring at all
+
+    card.set_context(50.0)
+    assert card._panel._ring == (50.0, qt_card._hex(usage.CALM))
+    card.set_context(76.0)
+    assert card._panel._ring == (76.0, qt_card._hex(usage.WARN))
+    card.set_context(93.0)
+    assert card._panel._ring == (93.0, qt_card._hex(usage.ALARM))
+
+    card.set_context(None)                            # session's % unknown again
+    assert card._panel._ring is None
+    card.close()
+
+
+def test_context_ring_shows_frozen_on_a_gravestone_and_paints(app):
+    card = qt_card.QtCard("s", _state("s", "dead"), 0, QtPixmapRenderer())
+    card.set_context(64.0)
+    assert card._panel._ring is not None              # frozen at last value, not hidden
+    card._panel.repaint()                             # smoke: the arc math paints clean
+    card.close()
+
+
 def test_stale_usage_flags_the_panel_and_fresh_clears_it(app):
     # The stale label (#69): an aged snapshot dims the bars + shows "stale"; a
     # fresh one shows plain bars. The flag rides the repaint-guard frame.
