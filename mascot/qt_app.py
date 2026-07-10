@@ -216,7 +216,7 @@ class QtMascotApp(QObject):
 
     def _open_settings(self) -> None:
         try:
-            subprocess.Popen([sys.executable, "-m", "mascot.control_panel"],
+            subprocess.Popen([sys.executable, "-m", "mascot.qt_control_panel"],
                              cwd=str(PROJECT_ROOT))
         except OSError as exc:
             print("[mascot] could not open settings:", exc)

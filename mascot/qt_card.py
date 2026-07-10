@@ -27,10 +27,10 @@ the panel.
 
 Each live sub-agent shows as a small mini-mascot badge in a centered row below the
 caption (capped so a swarm can't crowd the card). The card anchors to the *home*
-monitor's work area (the one picked in Settings, via the same ``osplatform`` lookup
-the Tk card uses), and in simple hook-visualiser mode (pet off) it shows the fixed
-life stage from Settings with no paw button and no hover tooltip — a read-only
-indicator.
+monitor's work area (the one picked in Settings, enumerated via ``qt_screens`` — the
+same index space the settings picker uses), and in simple hook-visualiser mode (pet
+off) it shows the fixed life stage from Settings with no paw button and no hover
+tooltip — a read-only indicator.
 
 Two satellite popups (``mascot.qt_popups``) follow the card: a speech bubble while
 Claude needs the user, and a pet-status tooltip on hover (pet-enabled only).
@@ -60,7 +60,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import config, effective_state, osplatform, particles, pixel_qt, shake, sprite_pixel
+from . import (
+    config,
+    effective_state,
+    osplatform,
+    particles,
+    pixel_qt,
+    qt_screens,
+    shake,
+    sprite_pixel,
+)
 from .overlay import Overlay, OverlayConfig
 from .pet_view import PetView, pet_view
 from .pixel_grid import grid_cells
@@ -706,12 +715,10 @@ class QtCard(QWidget):
     # --- placement --------------------------------------------------------
     def _place(self, index: int, screen: QScreen | None) -> None:
         """Anchor to the bottom-right of the *home* monitor's work area (the one
-        picked in Settings), stacking extra sessions upward. Uses the same
-        ``osplatform`` monitor lookup as the Tk card so both honor the setting;
-        falls back to the Qt primary screen off Windows / on any lookup failure."""
-        area = osplatform.choose_work_area(
-            config.HOME_MONITOR, osplatform.enumerate_work_areas(),
-            osplatform.primary_work_area())
+        picked in Settings), stacking extra sessions upward. Enumerates monitors via
+        Qt (:mod:`mascot.qt_screens`), the same index space the settings picker uses,
+        so both honor the ``home_monitor`` setting consistently."""
+        area = qt_screens.choose(config.HOME_MONITOR, qt_screens.work_areas())
         if area is None:
             screen = screen or QGuiApplication.primaryScreen()
             if screen is None:        # no screen (headless with no platform) — leave at 0,0

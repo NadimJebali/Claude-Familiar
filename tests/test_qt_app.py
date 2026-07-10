@@ -506,10 +506,7 @@ def test_anchor_clamps_into_the_work_area():
 
 
 def test_card_anchors_to_the_chosen_home_monitor(app, monkeypatch):
-    monkeypatch.setattr(qt_card.osplatform, "enumerate_work_areas",
-                        lambda: [(1000, 0, 800, 600)])
-    monkeypatch.setattr(qt_card.osplatform, "primary_work_area",
-                        lambda: (1000, 0, 800, 600))
+    monkeypatch.setattr(qt_card.qt_screens, "work_areas", lambda: [(1000, 0, 800, 600)])
     monkeypatch.setattr(qt_card.config, "HOME_MONITOR", 0)
     card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer())
     expect = qt_card._anchor_xy((1000, 0, 800, 600), card.width(), card.height(), 0)
