@@ -31,7 +31,6 @@ from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QApplication
 
 from . import config, notifier, pet_actions, pet_service, roster, single_instance
-from .pet_view import pet_view
 from .qt_card import QtCard
 from .qt_ingest import SessionIngest
 from .sprite_qt import QtPixmapRenderer
@@ -155,9 +154,8 @@ class QtMascotApp(QObject):
             result = self._pet_service.poll(live, now=now)
             if result.celebrate:
                 self.notify_care()
-            view = pet_view(result.pet, now=now)
             for card in self._cards.values():
-                card.set_pet(view)
+                card.set_pet(result.pet)
         except Exception as exc:  # noqa: BLE001 — the pet must never crash the widget
             print("[mascot] pet update failed:", exc)
 

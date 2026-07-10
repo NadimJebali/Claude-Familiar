@@ -23,7 +23,6 @@ from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
 
 from mascot import config, pet_service, qt_app, qt_card, qt_ingest
-from mascot.pet_view import PetView
 from mascot.sprite_qt import QtPixmapRenderer, SpriteSpec
 
 
@@ -53,6 +52,19 @@ class _RecordingRenderer:
 
     def gravestone(self, px):
         return self._real.gravestone(px)
+
+
+def _pet(**over):
+    """A full, valid pet dict the card can project + a tooltip can read."""
+    p = {
+        "name": "Pixel", "born": 0.0, "last_seen": 0.0,
+        "hunger": 60, "happiness": 60, "energy": 60,
+        "coins": 100, "xp": 0, "coins_today": 0, "last_award_date": "",
+        "inventory": {}, "cooldowns": {}, "wardrobe": [], "equipped": {},
+        "days_active": 0,
+    }
+    p.update(over)
+    return p
 
 
 def _state(sid: str, st: str = "idle") -> dict:
@@ -226,7 +238,7 @@ def test_hearts_paint_then_clear_from_the_panel(app):
 
 def test_a_hungry_mood_pops_a_food_emote(app):
     card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer(), pet_enabled=True)
-    card.set_pet(PetView("baby", None, False, "hungry"))  # effective face -> idle_hungry
+    card.set_pet(_pet(hunger=10, happiness=80, energy=80))  # effective face -> idle_hungry
     now = time.time()
     card._schedule_emote(now)                             # first call arms the timer
     card._schedule_emote(now + qt_card.EMOTE_MAX_GAP_S + 0.1)   # past the gap -> emit
@@ -249,7 +261,7 @@ def test_no_mood_emote_when_content(app):
 # pet_enabled=True (a simple-mode card ignores the push and shows the fixed stage).
 def test_card_tints_the_idle_face_by_pet_mood(app):
     card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer(), pet_enabled=True)
-    card.set_pet(PetView(stage="baby", hat=None, flourish=False, mood="hungry"))
+    card.set_pet(_pet(hunger=10, happiness=80, energy=80))   # most-depleted -> hungry
     assert card._face == "idle_hungry"      # a hungry mood droops the idle face
     card.close()
 
@@ -257,7 +269,9 @@ def test_card_tints_the_idle_face_by_pet_mood(app):
 def test_card_dresses_the_sprite_in_the_pushed_stage_hat_and_flourish(app):
     rec = _RecordingRenderer()
     card = qt_card.QtCard("s", _state("s", "idle"), 0, rec, pet_enabled=True)
-    card.set_pet(PetView(stage="adult", hat="crown", flourish=True, mood="content"))
+    now = time.time()
+    # level 11 (xp 1000) + 4 days old -> adult stage + milestone flourish; crown worn.
+    card.set_pet(_pet(xp=1000, born=now - 4 * 86400, equipped={"head": "crown"}))
     spec = rec.specs[-1]
     assert (spec.stage, spec.hat, spec.flourish) == ("adult", "crown", True)
     card.close()
@@ -275,7 +289,7 @@ def test_manager_is_a_pet_host_and_pushes_the_pet_to_cards(app, tmp_path):
     mgr = qt_app.QtMascotApp(tmp_path, service=_svc(tmp_path))
     assert mgr.pet_enabled is True
     mgr._on_sessions({"s1": _state("s1", "idle")})
-    assert mgr.cards["s1"]._pet_view is not None   # a pet look was projected + pushed
+    assert mgr.cards["s1"]._pet_data is not None   # the global pet was pushed
 
 
 def test_petting_a_card_awards_a_trickle_through_the_service(app, tmp_path):

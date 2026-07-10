@@ -59,7 +59,7 @@ from PySide6.QtWidgets import (
 
 from . import config, effective_state, osplatform, particles, shake, sprite_pixel
 from .overlay import Overlay, OverlayConfig
-from .pet_view import PetView
+from .pet_view import PetView, pet_view
 from .pixel_grid import grid_cells
 from .sprite_qt import SpriteRenderer, SpriteSpec
 
@@ -356,10 +356,11 @@ class QtCard(QWidget):
         self._anim_t0 = now
         self._next_blink = now + random.uniform(BLINK_MIN_GAP_S, BLINK_MAX_GAP_S)
         self._face: str | None = None
-        # The global pet's look (mood tints the idle face; stage/hat/flourish dress
-        # the sprite), pushed by the manager each poll. None until the first push —
-        # a bare baby with a neutral "content" mood, matching the Tk card.
-        self._pet_view: PetView | None = None
+        # The global pet dict, pushed by the manager each poll — projected to a look
+        # (mood tints the idle face; stage/hat/flourish dress the sprite) via pet_view,
+        # and read by the hover tooltip. None until the first push -> a bare baby with
+        # a neutral "content" mood, matching the Tk card.
+        self._pet_data: dict | None = None
         self._pixmap: QPixmap | None = None
         self._pixmap_key: tuple[object, ...] | None = None
         self._drag_offset: QPoint | None = None
@@ -414,11 +415,11 @@ class QtCard(QWidget):
         self._overlay.note_raw(raw, now)
         self._render(now)
 
-    def set_pet(self, view: PetView) -> None:
-        """Adopt the latest global pet look (the manager pushes it every poll): the
-        mood tints the idle face and the stage/hat/flourish dress the sprite. Cheap —
-        an unchanged look re-renders no pixmap (the view is part of the cache key)."""
-        self._pet_view = view
+    def set_pet(self, pet: dict) -> None:
+        """Adopt the latest global pet (the manager pushes it every poll): it drives
+        the idle-face mood + the sprite's stage/hat/flourish (via pet_view) and the
+        hover tooltip. Cheap — an unchanged look re-renders no pixmap."""
+        self._pet_data = pet
         self._render(time.time())
 
     def _effective_pet_view(self) -> PetView:
@@ -427,9 +428,9 @@ class QtCard(QWidget):
         the first push is a bare baby. Both are hatless with a neutral mood."""
         if not self._pet_enabled:
             return PetView(config.SIMPLE_STAGE, None, False, "content")
-        if self._pet_view is None:
+        if self._pet_data is None:
             return PetView("baby", None, False, "content")
-        return self._pet_view
+        return pet_view(self._pet_data, now=time.time())
 
     def celebrate(self) -> None:
         """Play the happy hop + hearts — the host calls this when the pet is cared for
