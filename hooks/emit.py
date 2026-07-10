@@ -129,6 +129,10 @@ def _debug_log(event: str, payload: dict[str, Any]) -> None:
         keys = ("message", "reason", "title", "notification_type", "subtype",
                 "tool_name", "error_type")
         fields = {k: payload.get(k) for k in keys if payload.get(k) is not None}
+        if event in ("StopFailure", "Notification", "PreCompact"):
+            # Rare events log the WHOLE payload: the whitelist hid StopFailure's
+            # real shape ({} logged twice) and the tombstone never fired (#91).
+            fields = payload
         line = f"{time.time():.0f}\t{event}\t{json.dumps(fields, ensure_ascii=False)}\n"
         log = STATE_DIR.parent / "debug.log"
         log.parent.mkdir(parents=True, exist_ok=True)

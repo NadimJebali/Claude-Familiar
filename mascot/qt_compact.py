@@ -91,9 +91,14 @@ def _draw_raw(state: dict[str, Any], now: float) -> str:
         permission_wait_s=PERMISSION_WAIT_S, working_stall_s=WORKING_STALL_S)
 
 
-def row_text(state: dict[str, Any], now: float) -> str:
+def row_text(state: dict[str, Any], now: float,
+             dead_until: float | None = None) -> str:
     """The row's state text. Waiting (real or promoted) carries the notify
-    message inline, truncated — compact has no popup bubbles."""
+    message inline, truncated — compact has no popup bubbles. An exhausted
+    account (#91) overrides everything with the reset time."""
+    if dead_until is not None:
+        return "out of usage · resets " + time.strftime(
+            "%H:%M", time.localtime(dead_until))
     raw = _draw_raw(state, now)
     if raw == "dead":
         return "out of usage"
@@ -120,15 +125,22 @@ def row_text(state: dict[str, Any], now: float) -> str:
     return str(raw)
 
 
-def row_dim(state: dict[str, Any], now: float) -> bool:
-    """Idle rows dim (the Rust widget's trick); every active state reads full."""
+def row_dim(state: dict[str, Any], now: float,
+            dead_until: float | None = None) -> bool:
+    """Idle rows dim (the Rust widget's trick); every active state reads full —
+    and so does the tombstone (#91), which must not whisper."""
+    if dead_until is not None:
+        return False
     return _draw_raw(state, now) == "idle"
 
 
-def dot_color(state: dict[str, Any], now: float) -> str:
+def dot_color(state: dict[str, Any], now: float,
+              dead_until: float | None = None) -> str:
     """The activity dot: attention states win (waiting — real or promoted — and
     dead wear their accents), then the resolved effort tint, then the state
     accent (unknown states read as idle grey)."""
+    if dead_until is not None:
+        return _hex(config.STATE_COLORS["dead"])
     raw = _draw_raw(state, now)
     if raw in ("waiting", "dead"):
         return _hex(config.STATE_COLORS[raw])
@@ -138,12 +150,13 @@ def dot_color(state: dict[str, Any], now: float) -> str:
     return _hex(config.STATE_COLORS.get(raw, config.STATE_COLORS["idle"]))
 
 
-def row_backdrop(state: dict[str, Any], now: float, t: float) -> str | None:
+def row_backdrop(state: dict[str, Any], now: float, t: float,
+                 dead_until: float | None = None) -> str | None:
     """The row's flat effort tint, or ``None`` for the plain panel: the pure
     ``effort.panel_fill`` static 18% tint for low/medium/high. The two animated
     levels (xhigh/max) return ``None`` here — :func:`row_bg` owns them with the
     card's pixel animations (#86). Waiting/dead stay uncontested."""
-    if _draw_raw(state, now) in ("waiting", "dead"):
+    if dead_until is not None or _draw_raw(state, now) in ("waiting", "dead"):
         return None
     level = effort.resolve(state.get("effort", ""), effort.settings_effort())
     if level in ("xhigh", "max"):
@@ -152,11 +165,12 @@ def row_backdrop(state: dict[str, Any], now: float, t: float) -> str | None:
     return None if rgb is None else _hex(rgb)
 
 
-def row_bg(state: dict[str, Any], now: float, t: float) -> tuple:
+def row_bg(state: dict[str, Any], now: float, t: float,
+           dead_until: float | None = None) -> tuple:
     """The row's animated-background marker — the card's ``panel_bg`` split at
     row scale (#86): ``("rainbow", t)`` for max, ``("ripple", t)`` for xhigh,
     ``("solid",)`` otherwise (waiting/dead stay uncontested, like the tint)."""
-    if _draw_raw(state, now) in ("waiting", "dead"):
+    if dead_until is not None or _draw_raw(state, now) in ("waiting", "dead"):
         return ("solid",)
     level = effort.resolve(state.get("effort", ""), effort.settings_effort())
     if level == "max":
@@ -304,10 +318,13 @@ class CompactWindow(QWidget):
     # --- animation: repaint only when the frame really changed --------------------
     def _tick(self) -> None:
         now = time.time()
+        # Account-level death (#91): a full usage window tombstones every row.
+        dead_until = usage.exhausted_until(self._usage, now)
         rows = tuple(
-            (sid, row_text(st, now), dot_color(st, now), row_dim(st, now),
-             row_backdrop(st, now, now - self._anim_t0),
-             row_bg(st, now, now - self._anim_t0),
+            (sid, row_text(st, now, dead_until), dot_color(st, now, dead_until),
+             row_dim(st, now, dead_until),
+             row_backdrop(st, now, now - self._anim_t0, dead_until),
+             row_bg(st, now, now - self._anim_t0, dead_until),
              model_label(st.get("model")),
              len(st.get("subagents") or []),
              self._context.get(sid))

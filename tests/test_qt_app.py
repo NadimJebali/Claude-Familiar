@@ -353,6 +353,26 @@ def test_info_line_joins_file_basename_and_model_tag():
     assert qt_card.info_line(None, None) == ""
 
 
+# --- the usage-driven tombstone (#91) --------------------------------------------
+def test_card_tombstones_when_usage_is_exhausted_and_revives(app):
+    renderer = QtPixmapRenderer()
+    now = time.time()
+    card = qt_card.QtCard("s1", _state("s1", "working"), 0, renderer)
+
+    card.set_usage({"ts": now, "five_hour": {"used_percentage": 100.0,
+                                             "resets_at": now + 3600}})
+    card._render(time.time())
+    assert card._draw_raw == "dead"
+    assert card._panel._caption == "out of usage"
+    assert card._panel._info.startswith("resets ")   # the reset time on the dim line
+
+    card.set_usage({"ts": now, "five_hour": {"used_percentage": 100.0,
+                                             "resets_at": now - 60}})
+    card._render(time.time())                        # the reset passed: auto-revive
+    assert card._draw_raw == "working"
+    card.close()
+
+
 # --- QtCard: constructs and swaps state without error ------------------------
 def test_card_constructs_and_swaps_state(app):
     renderer = QtPixmapRenderer()

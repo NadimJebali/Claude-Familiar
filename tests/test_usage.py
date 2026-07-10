@@ -107,3 +107,28 @@ def test_load_usage_cache_invalidates_when_file_changes(tmp_path):
     p.write_text(json.dumps(_snap(five=(55, 99))), encoding="utf-8")
     os.utime(p, (2000, 2000))
     assert usage.load_usage(p)["five_hour"]["used_percentage"] == 55
+
+
+# --- exhausted_until: the account-level death signal (#91) -----------------------
+def test_exhausted_until_reads_full_windows():
+    now = 1000.0
+    ok = {"five_hour": {"used_percentage": 47, "resets_at": 5000.0},
+          "seven_day": {"used_percentage": 90, "resets_at": 9000.0}}
+    assert usage.exhausted_until(ok, now) is None             # under the limit
+    five = {"five_hour": {"used_percentage": 100, "resets_at": 5000.0}}
+    assert usage.exhausted_until(five, now) == 5000.0
+    weekly = {"five_hour": {"used_percentage": 40, "resets_at": 5000.0},
+              "seven_day": {"used_percentage": 100.0, "resets_at": 9000.0}}
+    assert usage.exhausted_until(weekly, now) == 9000.0
+    both = {"five_hour": {"used_percentage": 100, "resets_at": 5000.0},
+            "seven_day": {"used_percentage": 100, "resets_at": 9000.0}}
+    assert usage.exhausted_until(both, now) == 9000.0         # the later reset rules
+
+
+def test_exhausted_until_expires_and_tolerates_garbage():
+    past = {"five_hour": {"used_percentage": 100, "resets_at": 500.0}}
+    assert usage.exhausted_until(past, now=1000.0) is None    # reset passed: revive
+    assert usage.exhausted_until(None, 0.0) is None
+    assert usage.exhausted_until({}, 0.0) is None
+    assert usage.exhausted_until(
+        {"five_hour": {"used_percentage": "x", "resets_at": None}}, 0.0) is None
