@@ -529,8 +529,12 @@ class QtCard(QWidget):
             self._adopt_pixmap(self._pixmap_for(face, view), view.stage, now)
 
         # Sub-pixel bob (float), the face crossfade, and the evolution scale-up.
-        bob = 0.0 if (eff == "sleeping" or self._raw == "dead") else (
-            BOB_AMPLITUDE * math.sin((now - self._anim_t0) * 2 * math.pi / BOB_PERIOD_S))
+        if eff == "happy":                      # an excited celebrate hop, not the idle bob
+            bob = -abs(math.sin((now - self._anim_t0) * 9.0)) * BOB_AMPLITUDE * 2.0
+        elif eff == "sleeping" or self._raw == "dead":
+            bob = 0.0                           # a sleeper / gravestone sits still
+        else:
+            bob = BOB_AMPLITUDE * math.sin((now - self._anim_t0) * 2 * math.pi / BOB_PERIOD_S)
         fade = 1.0 if self._prev_pixmap is None else min(
             1.0, (now - self._fade_start) / CROSSFADE_S)
         if fade >= 1.0:
