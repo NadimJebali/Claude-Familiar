@@ -15,6 +15,14 @@ import sys
 import time
 from pathlib import Path
 
+# The status output below uses check-marks; force UTF-8 so a non-UTF-8 Windows
+# console (cp1252) renders them instead of crashing with UnicodeEncodeError.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 BASE = Path.home() / ".claude" / "mascot"
 STATE_DIR = BASE / "state"
 PET_PATH = BASE / "pet.json"
@@ -91,25 +99,31 @@ print("Creating demo state files + a demo pet...")
 for state in states:
     (STATE_DIR / f"{state['session_id']}.json").write_text(json.dumps(state, indent=2))
 
-# Back up any real pet so the demo never clobbers your progress.
-pet_backup = PET_PATH.read_bytes() if PET_PATH.exists() else None
-PET_PATH.write_text(json.dumps(demo_pet, indent=2), encoding="utf-8")
+# Back up any real pet to a FILE before overwriting, so the demo never clobbers
+# your progress even if it dies before cleanup — the finally restores from this
+# backup no matter how the run ends (a plain in-memory copy is lost on a crash).
+PET_BACKUP = BASE / "pet.json.demo-backup"
+had_real_pet = PET_PATH.exists()
+if had_real_pet:
+    PET_BACKUP.write_bytes(PET_PATH.read_bytes())
 
-print()
-print("Launching the Claude Familiar widget (PySide6/Qt)...")
-print("✓ Three cards appear bottom-right: one working, one idle, one on a face tour")
-print("✓ The tour card cycles: reading / editing / running / browsing eyes,")
-print("  planning (plan mode), tidying memories (compacting), and a brief 'oops…'")
-print("✓ The idle card shows the pet's mood face + a food popup (it's hungry)")
-print("✓ Hover a card for the status tooltip (needs / coins / level / name)")
-print("✓ Click the paw button (or tray 'Pet…') to open the Pet window — shop, feed, play")
-print("✓ Tap a card to pet it (+1 coin, rising hearts); faces crossfade, motion is smooth")
-print("✓ Press Ctrl+C here to stop")
-print()
-
-proc = subprocess.Popen([sys.executable, "-m", "mascot.qt_app"], cwd=Path(__file__).parent)
-
+proc = None
 try:
+    PET_PATH.write_text(json.dumps(demo_pet, indent=2), encoding="utf-8")
+
+    print()
+    print("Launching the Claude Familiar widget (PySide6/Qt)...")
+    print("✓ Three cards appear bottom-right: one working, one idle, one on a face tour")
+    print("✓ The tour card cycles: reading / editing / running / browsing eyes,")
+    print("  planning (plan mode), tidying memories (compacting), and a brief 'oops…'")
+    print("✓ The idle card shows the pet's mood face + a food popup (it's hungry)")
+    print("✓ Hover a card for the status tooltip (needs / coins / level / name)")
+    print("✓ Click the paw button (or tray 'Pet…') to open the Pet window — shop, feed, play")
+    print("✓ Tap a card to pet it (+1 coin, rising hearts); faces crossfade, motion is smooth")
+    print("✓ Press Ctrl+C here to stop")
+    print()
+
+    proc = subprocess.Popen([sys.executable, "-m", "mascot.qt_app"], cwd=Path(__file__).parent)
     step = 0
     while proc.poll() is None:
         _write_tour_phase(step)
@@ -117,16 +131,18 @@ try:
         time.sleep(TOUR_STEP_S)
 except KeyboardInterrupt:
     print("\nStopping...")
-    proc.terminate()
-    proc.wait(timeout=2)
+    if proc is not None:
+        proc.terminate()
+        proc.wait(timeout=2)
 finally:
     print("Cleaning up demo state files...")
     for state in states:
         (STATE_DIR / f"{state['session_id']}.json").unlink(missing_ok=True)
     (STATE_DIR / "demo-tour.json").unlink(missing_ok=True)
     # Restore your real pet (or remove the demo pet if you had none).
-    if pet_backup is not None:
-        PET_PATH.write_bytes(pet_backup)
+    if had_real_pet:
+        PET_PATH.write_bytes(PET_BACKUP.read_bytes())
+        PET_BACKUP.unlink(missing_ok=True)
         print("Restored your real pet.json.")
     else:
         PET_PATH.unlink(missing_ok=True)
