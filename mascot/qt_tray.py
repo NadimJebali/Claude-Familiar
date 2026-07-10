@@ -24,12 +24,16 @@ MENU_SPEC: tuple[tuple[str | None, str | None], ...] = (
     ("Pet…", "pet"),
     ("Show / hide cards", "toggle"),
     ("Settings…", "settings"),
+    ("Notifications", "notifications"),
     (SEPARATOR, None),
     ("Quit", "quit"),
 )
 # What a left-click (Trigger) runs where the platform supports it (Windows);
 # elsewhere it's just a normal menu row, so behavior degrades gracefully.
 DEFAULT_ACTION = "toggle"
+# Rows that render as checkable items: their callback takes the NEW checked state
+# (bool) instead of no arguments — a live mute/unmute, not a command.
+CHECKABLE_KEYS = frozenset({"notifications"})
 
 # How long the OS should keep a toast up (ms); mirrors notifier.NOTIFY_TIMEOUT_S.
 TOAST_TIMEOUT_MS = 10_000
@@ -70,24 +74,32 @@ class QtSystemTray:
     """A notification-area icon with a popup menu and native toasts, via Qt.
 
     Callbacks (any may be omitted) run on the UI thread:
-      * ``on_toggle``   — left-click (where supported) or "Show / hide cards"
-      * ``on_pet``      — the "Pet…" item
-      * ``on_settings`` — the "Settings…" item
-      * ``on_quit``     — the "Quit" item
+      * ``on_toggle``        — left-click (where supported) or "Show / hide cards"
+      * ``on_pet``           — the "Pet…" item
+      * ``on_settings``      — the "Settings…" item
+      * ``on_notifications`` — the checkable "Notifications" row; receives the NEW
+        checked state (a live mute/unmute), initial check from ``notifications_on``
+      * ``on_quit``          — the "Quit" item
     """
 
     def __init__(self, *, tooltip: str = "Claude Familiar",
                  on_toggle: Callable[[], None] | None = None,
                  on_pet: Callable[[], None] | None = None,
                  on_settings: Callable[[], None] | None = None,
+                 on_notifications: Callable[[bool], None] | None = None,
+                 notifications_on: bool = False,
                  on_quit: Callable[[], None] | None = None,
                  icon: QIcon | None = None) -> None:
         self._tray: QSystemTrayIcon | None = None   # sentinel: dispose() is safe if init fails
-        provided = {"pet": on_pet, "toggle": on_toggle,
-                    "settings": on_settings, "quit": on_quit}
-        self._actions: dict[str, Callable[[], None]] = {
+        provided: dict[str, Callable[..., None] | None] = {
+            "pet": on_pet, "toggle": on_toggle, "settings": on_settings,
+            "notifications": on_notifications, "quit": on_quit}
+        self._actions: dict[str, Callable[..., None]] = {
             k: cb for k, cb in provided.items() if cb is not None
         }
+        # Initial checked state per provided checkable row (today: notifications).
+        self._check_state: dict[str, bool] = (
+            {"notifications": notifications_on} if on_notifications is not None else {})
 
         tray = QSystemTrayIcon()
         tray.setToolTip(tooltip)
@@ -106,8 +118,16 @@ class QtSystemTray:
                 continue
             action = menu.addAction(label)
             # Bind key per-iteration; QAction.triggered passes a `checked` bool.
-            action.triggered.connect(
-                lambda _checked=False, k=key: self._actions[k]())
+            if key in CHECKABLE_KEYS:
+                # A checkable row: Qt flips the check itself; the callback gets
+                # the NEW state so the app can apply + persist it.
+                action.setCheckable(True)
+                action.setChecked(self._check_state.get(key, False))
+                action.triggered.connect(
+                    lambda checked=False, k=key: self._actions[k](bool(checked)))
+            else:
+                action.triggered.connect(
+                    lambda _checked=False, k=key: self._actions[k]())
         return menu
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:

@@ -20,8 +20,11 @@ DEFAULTS: dict[str, Any] = {
     "shake_after_s": 30,         # unanswered prompt waits this long before shaking
     "shake_max_amp_px": 16,      # how violent: max sway (px) at full aggression
     "home_monitor": -1,          # which monitor cards spawn on; -1 = auto (primary)
-    "tamagotchi_enabled": True,  # False -> simple hook visualiser (no pet layer)
-    "native_notifications": True,  # False -> no native OS toasts (in-app bubble only)
+    # Quiet by default (PRD #67): a fresh install is a simple hook visualiser with
+    # no OS toasts — the pet layer and notifications are each one toggle away
+    # (Settings panel; the tray's checkable Notifications row applies live).
+    "tamagotchi_enabled": False,   # True -> the Tamagotchi pet layer
+    "native_notifications": False,  # True -> native OS toasts (in-app bubble always on)
 }
 
 

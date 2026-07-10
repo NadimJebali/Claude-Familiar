@@ -30,7 +30,16 @@ from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QApplication
 
-from . import config, notifier, pet_actions, pet_service, roster, single_instance, usage
+from . import (
+    config,
+    notifier,
+    pet_actions,
+    pet_service,
+    roster,
+    settings,
+    single_instance,
+    usage,
+)
 from .qt_card import QtCard
 from .qt_ingest import SessionIngest
 from .sprite_qt import QtPixmapRenderer
@@ -57,6 +66,10 @@ class QtMascotApp(QObject):
         self._cards: dict[str, QtCard] = {}
         self._cards_hidden = False
         self._notify_prev: dict[str, dict] = {}   # sid -> last state (toast edge-trigger)
+        # Live OS-toast mute (#68). Starts from the persisted setting (which the
+        # dead-setting bug used to ignore — toasts fired unconditionally); the
+        # tray's checkable Notifications row flips it live and persists it.
+        self._notifications_on: bool = config.NATIVE_NOTIFICATIONS_ENABLED
 
         self._ingest = SessionIngest(state_dir)
         self._ingest.sessions_changed.connect(self._on_sessions)
@@ -87,6 +100,8 @@ class QtMascotApp(QObject):
                 on_toggle=self._toggle_cards,
                 on_pet=self.open_pet if self.pet_enabled else None,
                 on_settings=self._open_settings,
+                on_notifications=self._set_notifications,
+                notifications_on=self._notifications_on,
                 on_quit=self._quit,
             )
         except Exception as exc:  # noqa: BLE001 — never let the tray stop startup
@@ -119,8 +134,11 @@ class QtMascotApp(QObject):
 
     def _notify(self, live: dict) -> None:
         """Edge-triggered native toast when a session's ``notify`` first appears.
-        Reuses the pure notifier core; the tray is the sink instead of plyer."""
-        if self._tray is None:
+        Reuses the pure notifier core; the tray is the sink instead of plyer.
+
+        Gated on the live mute (#68) — but the edge tracker keeps running while
+        muted, so unmuting never dumps a stale notify as a fresh toast."""
+        if self._tray is None or not self._notifications_on:
             self._notify_prev = dict(live)
             return
         try:
@@ -131,6 +149,15 @@ class QtMascotApp(QObject):
         except Exception as exc:  # noqa: BLE001 — a toast must never crash the widget
             print("[mascot] toast failed:", exc)
         self._notify_prev = dict(live)
+
+    def _set_notifications(self, on: bool) -> None:
+        """The tray's Notifications row flipped: apply the mute live and persist it,
+        so the choice survives a restart (and the Settings checkbox agrees)."""
+        self._notifications_on = bool(on)
+        try:
+            settings.save_settings({"native_notifications": self._notifications_on})
+        except OSError as exc:
+            print("[mascot] could not persist the notifications setting:", exc)
 
     def _on_petted(self, _session_id: str) -> None:
         """A card was petted: the happy hop already played on the card; award the

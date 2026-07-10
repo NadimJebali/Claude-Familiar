@@ -451,6 +451,15 @@ def test_settings_defaults_include_home_monitor():
     assert settings_mod.DEFAULTS.get("home_monitor") == -1
 
 
+def test_settings_default_to_quiet():
+    # PRD #67 (#68): a fresh install is a simple hook visualiser — no pet layer,
+    # no OS toasts. Both stay one toggle away (the Settings panel; the tray's
+    # checkable Notifications row for toasts).
+    from mascot import settings as settings_mod
+    assert settings_mod.DEFAULTS["tamagotchi_enabled"] is False
+    assert settings_mod.DEFAULTS["native_notifications"] is False
+
+
 def test_config_clamp_handles_bounds_and_bad_values():
     from mascot import config
     assert config._clamp("nope", 5, 120, 30) == 30   # unparseable -> default

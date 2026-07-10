@@ -120,17 +120,33 @@ for state in states:
 # backups no matter how the run ends (a plain in-memory copy is lost on a crash).
 PET_BACKUP = BASE / "pet.json.demo-backup"
 USAGE_BACKUP = BASE / "usage.json.demo-backup"
+SETTINGS_PATH = BASE / "settings.json"
+SETTINGS_BACKUP = BASE / "settings.json.demo-backup"
 had_real_pet = PET_PATH.exists()
 had_real_usage = USAGE_PATH.exists()
+had_real_settings = SETTINGS_PATH.exists()
 if had_real_pet:
     PET_BACKUP.write_bytes(PET_PATH.read_bytes())
 if had_real_usage:
     USAGE_BACKUP.write_bytes(USAGE_PATH.read_bytes())
+if had_real_settings:
+    SETTINGS_BACKUP.write_bytes(SETTINGS_PATH.read_bytes())
 
 proc = None
 try:
     PET_PATH.write_text(json.dumps(demo_pet, indent=2), encoding="utf-8")
     USAGE_PATH.write_text(json.dumps(demo_usage, indent=2), encoding="utf-8")
+    # The demo showcases the pet layer, which ships OFF by default (quiet defaults,
+    # #68) — seed a settings.json with the pet on for the run. Your other settings
+    # ride along untouched, and your real file is restored on exit like the pet.
+    demo_settings = {}
+    if had_real_settings:
+        try:
+            demo_settings = json.loads(SETTINGS_BACKUP.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            demo_settings = {}
+    demo_settings["tamagotchi_enabled"] = True
+    SETTINGS_PATH.write_text(json.dumps(demo_settings, indent=2), encoding="utf-8")
 
     print()
     print("Launching the Claude Familiar widget (PySide6/Qt)...")
@@ -176,4 +192,10 @@ finally:
         USAGE_BACKUP.unlink(missing_ok=True)
     else:
         USAGE_PATH.unlink(missing_ok=True)
+    if had_real_settings:
+        SETTINGS_PATH.write_bytes(SETTINGS_BACKUP.read_bytes())
+        SETTINGS_BACKUP.unlink(missing_ok=True)
+        print("Restored your real settings.json.")
+    else:
+        SETTINGS_PATH.unlink(missing_ok=True)
     print("Done.")
