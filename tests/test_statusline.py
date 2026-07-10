@@ -99,6 +99,56 @@ def test_footer_line_empty_payload_is_empty_string():
     assert statusline.footer_line({}, color=False) == ""
 
 
+# --- merge_snapshots: the two-writer discipline (#69) -----------------------
+# usage.json gains a second writer (the OAuth poller) beside status_emit.py.
+# Adopted rule: the freshest snapshot wins, and a writer never erases a field it
+# has no opinion on (the poller carries no effort; the statusline's must survive).
+
+def _snap(ts, **fields):
+    return {"ts": ts, **fields}
+
+
+def test_merge_newer_incoming_replaces_and_fills_gaps():
+    existing = _snap(100.0, effort="high",
+                     five_hour={"used_percentage": 10, "resets_at": 999.0})
+    incoming = _snap(200.0,
+                     five_hour={"used_percentage": 50, "resets_at": 999.0},
+                     seven_day={"used_percentage": 61, "resets_at": 999.0})
+    merged = statusline.merge_snapshots(existing, incoming)
+    assert merged["ts"] == 200.0
+    assert merged["five_hour"]["used_percentage"] == 50   # newer data wins
+    assert merged["seven_day"]["used_percentage"] == 61
+    assert merged["effort"] == "high"    # incoming had no opinion -> preserved
+
+
+def test_merge_older_or_equal_incoming_is_ignored():
+    existing = _snap(200.0, five_hour={"used_percentage": 50, "resets_at": 9.0})
+    older = _snap(100.0, five_hour={"used_percentage": 10, "resets_at": 9.0})
+    assert statusline.merge_snapshots(existing, older) == existing
+    same_ts = _snap(200.0, five_hour={"used_percentage": 10, "resets_at": 9.0})
+    assert statusline.merge_snapshots(existing, same_ts) == existing
+
+
+def test_merge_tolerates_missing_or_malformed_sides():
+    incoming = _snap(5.0, effort="max")
+    assert statusline.merge_snapshots(None, incoming) == incoming
+    assert statusline.merge_snapshots("garbage", incoming) == incoming
+    existing = _snap(5.0, effort="low")
+    assert statusline.merge_snapshots(existing, None) == existing
+    assert statusline.merge_snapshots(existing, "junk") == existing
+    # A ts-less incoming can't prove freshness -> the existing snapshot stands.
+    assert statusline.merge_snapshots(existing, {"effort": "max"}) == existing
+
+
+def test_merge_never_mutates_its_inputs():
+    existing = _snap(1.0, effort="low")
+    incoming = _snap(2.0, five_hour={"used_percentage": 1, "resets_at": 9.0})
+    existing_copy, incoming_copy = dict(existing), dict(incoming)
+    merged = statusline.merge_snapshots(existing, incoming)
+    assert existing == existing_copy and incoming == incoming_copy
+    assert merged is not existing and merged is not incoming
+
+
 # --- end-to-end: hooks/status_emit.py --------------------------------------
 STATUS_EMIT = PROJECT_ROOT / "hooks" / "status_emit.py"
 
@@ -135,6 +185,24 @@ def test_emitter_survives_malformed_stdin_without_corrupting(tmp_path):
     snap = json.loads(usage.read_text(encoding="utf-8"))
     assert snap["effort"] == "max"       # previous good snapshot intact
     assert list(usage.parent.glob("*.tmp")) == []  # no stranded temp files
+
+
+def test_emitter_merges_preserving_fields_it_has_no_opinion_on(tmp_path):
+    # The two-writer discipline (#69) through the real shell: an existing snapshot
+    # carries an effort; a fresh statusline payload WITHOUT one must update the
+    # windows yet leave the recorded effort standing (merge, not overwrite).
+    usage_path = tmp_path / ".claude" / "mascot" / "usage.json"
+    usage_path.parent.mkdir(parents=True, exist_ok=True)
+    usage_path.write_text(json.dumps(
+        {"ts": 1.0, "effort": "max",
+         "five_hour": {"used_percentage": 10, "resets_at": 999.0}}), encoding="utf-8")
+
+    payload = {"rate_limits": SAMPLE["rate_limits"]}   # windows only, no effort
+    code, _out, usage = _run_emitter(json.dumps(payload), tmp_path)
+    assert code == 0
+    snap = json.loads(usage.read_text(encoding="utf-8"))
+    assert snap["five_hour"]["used_percentage"] == 34  # fresh windows landed
+    assert snap["effort"] == "max"                     # preserved across the write
 
 
 # --- installer: statusLine install / skip-warn / refresh / uninstall -------

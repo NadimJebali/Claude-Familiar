@@ -43,6 +43,7 @@ writer produced. The current version is **1**.
 | `cwd` | string | – | Working directory the session was launched from. |
 | `model` | string | – | Model id reported by the hook payload. |
 | `effort` | string | – | Per-turn reasoning effort from `CLAUDE_EFFORT` (`low`/`medium`/`high`/`xhigh`/`max`); drives the effort-reactive card background + statusline footer. Only written when the env var is present. |
+| `transcript_path` | string | – | Absolute path of the session's transcript JSONL (from the hook payload); lets a reader tail the transcript, e.g. for the context-window gauge. Non-empty-only: an event that omits it never erases the recorded value. `""` in a fresh state until the first payload carries one. |
 | `owner_pid` | integer \| null | – | PID of the owning `claude` process, stamped once. Null when it could not be determined; a reader then falls back to the `ts` staleness timeout instead of liveness. |
 | `started` | number | – | Unix epoch seconds when the session's file was first written. |
 

@@ -469,6 +469,71 @@ decisions + 6 derived).
 
 ---
 
+## Rust-widget parity — dynamic usage, session context, quiet defaults, Compact theme (PRD #67) — ✅ 2026-07-10
+
+A study of `smairio/claude-widget` (Rust/egui, same concept) + a `/grill-me`
+session produced PRD #67 and ten slices (#68–#77), all built TDD on
+`feat/rust-parity`. Key architecture ruling: **hook transport stays file-based**
+(their curl→localhost push saves ~30-40ms/event — ours measured 50ms median —
+but the versioned state-file contract (#53) is load-bearing for the planned VS
+Code extension and survives the widget being closed); what we adopted instead:
+the freshest-wins/never-erase merge discipline, the stale label, transcript
+tailing, and the opt-in OAuth poller. Their smaller hook set is a feature gap
+on their side (no Notification/PreCompact/AskUserQuestion handling), not
+leanness to copy. Their palette is byte-identical to ours (both extracted from
+the CLI binary), so "minimal theme" meant structure, not colors.
+
+- **#68 quiet defaults + notification fixes** — `tamagotchi_enabled` and
+  `native_notifications` now default **False**; fixed the dead setting
+  (`qt_app._notify` toasted unconditionally since the Tk→Qt cutover); the tray
+  gained a checkable **Notifications** mute (live + persisted); demo seeds a
+  pet-on settings.json (crash-safe backup/restore).
+- **#69 two-writer discipline** — `statusline.merge_snapshots` (freshest `ts`
+  wins; a writer never erases a field it has no opinion on — the poller carries
+  no `effort`); `status_emit` writes through the merge; `usage.is_stale`
+  (15 min) + dimmed bars under a "stale" caption on the card.
+- **#70 opt-in OAuth usage poller** — `mascot/usage_api.py`: consent-first
+  (default OFF; panel checkbox spells out what is read), reads
+  `.credentials.json`, GETs `api.anthropic.com/api/oauth/usage` every 300s
+  (429 → doubling backoff cap 1h), tolerant response parser (fraction/percent
+  utilization, epoch/ISO resets), never logs/refreshes the token, merges via
+  #69; QThreadPool shell, injectable transport (no network in tests).
+- **#71 transcript_path stamp** — hook payloads carry the session transcript
+  path; `state_logic` records it (non-empty-only, like the identity fields);
+  optional schema field + doc row (non-breaking, same as `effort`).
+- **#72 transcript tailer** — `mascot/transcript.py`: incremental
+  complete-lines-only reads (partial tail retried), 512KB first-read tail cap,
+  **isSidechain filtered** (sub-agent turns ride the same file — discovered
+  live), context = input+cache_read+cache_creation vs a named 200k constant
+  (1M sessions clamp to 100%); per-session offsets, shrink/rotation recovery;
+  polls ride the QThreadPool (one in flight). Live-verified against this
+  session's real 2.8MB transcript.
+- **#73 context ring** — the VS Code-style gauge top-right on the Classic card:
+  faint track + traffic-light arc clockwise from 12 o'clock; absent until first
+  data; frozen on a gravestone; verified offscreen at 30/76/95%.
+- **#74 theme seam** — `theme: classic|compact` (validated; default classic);
+  Appearance dropdown; `qt_app` routes the same pushes to cards or the panel;
+  classic path pixel-identical.
+- **#75 CompactWindow** — the Rust widget's shape: one frameless panel, a slim
+  row per session (effort dot · state text · model · ×N · small ring), inline
+  truncated notify (no popup bubbles), dimmed idle rows, **no jostle**, effort
+  tint/shimmer/rainbow as row backdrops via the pure `effort` core, usage bars
+  + stale once at the bottom; rows inherit the #52 pending-permission
+  promotion via the same pure core the card runs.
+- **#76 live theme switch** — tray radio **Theme** submenu; a switch persists,
+  tears down the current presentation, and rebuilds from the snapshot via
+  `read_now()` (a switch is exactly the startup path); tray "hide" survives it.
+- **#77 docs + demo** — README (stale label, ring, themes, quiet defaults, the
+  opt-in poller's exact consent contract); `demo.py --compact` / `--stale` +
+  demo transcripts so the rings fill (76/96/30%); this entry.
+
+Suite 552 → **636** green across the arc; ruff + mypy clean throughout; one
+commit per slice, each issue closed on landing. The #52 heuristic (merged to
+main mid-arc via PR #66) was folded in at 4fb5995 so compact rows show
+"needs you!" for stuck permission prompts too.
+
+---
+
 ## Considered & rejected
 
 ### Real-.exe packaging for a Task Manager identity — 2026-06-17

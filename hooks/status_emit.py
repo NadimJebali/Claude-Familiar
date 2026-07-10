@@ -41,9 +41,17 @@ def main() -> None:
         payload = {}
 
     # Only persist real input; malformed/empty stdin must not clobber a good file.
+    # The write is a MERGE (#69): usage.json has two independent writers (this
+    # emitter + the opt-in usage-API poller), so the freshest snapshot wins and a
+    # field this writer has no opinion on is never erased.
     if isinstance(payload, dict) and payload:
         snapshot = statusline.snapshot_from_status(payload, time.time())
-        write_state_atomic(statusline.USAGE_PATH, snapshot)
+        try:
+            existing = json.loads(statusline.USAGE_PATH.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 — missing/corrupt existing file merges as empty
+            existing = None
+        write_state_atomic(statusline.USAGE_PATH,
+                           statusline.merge_snapshots(existing, snapshot))
 
     # The footer prints for any payload ("" when there's nothing to show).
     try:

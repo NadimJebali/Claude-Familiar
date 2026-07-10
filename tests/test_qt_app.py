@@ -137,6 +137,71 @@ def test_manager_creates_updates_and_destroys_cards(app, tmp_path):
     assert mgr.cards == {}
 
 
+# --- the theme seam (#74): classic = cards, compact = the one-panel window ----
+def test_classic_theme_builds_cards_and_no_compact_window(app, tmp_path):
+    mgr = qt_app.QtMascotApp(tmp_path)                # default theme: classic
+    assert mgr._compact is None
+    mgr._on_sessions({"s1": _state("s1", "working")})
+    assert set(mgr.cards) == {"s1"}
+    mgr._on_sessions({})
+
+
+def test_compact_theme_routes_sessions_to_the_window_not_cards(app, tmp_path,
+                                                               monkeypatch):
+    monkeypatch.setattr(qt_app.config, "THEME", "compact")
+    mgr = qt_app.QtMascotApp(tmp_path)
+    assert mgr._compact is not None
+    mgr._on_sessions({"s1": _state("s1", "working"), "s2": _state("s2", "idle")})
+    assert mgr.cards == {}                            # no per-session cards at all
+    assert set(mgr._compact.sessions) == {"s1", "s2"}
+    mgr._quit()
+    assert mgr._compact is None                       # closed + dropped on quit
+
+
+# --- the live theme switch (#76) ----------------------------------------------
+def test_live_theme_switch_round_trips_preserving_sessions(app, tmp_path, monkeypatch):
+    from mascot import settings as settings_mod
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", tmp_path / "settings.json")
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    _write(state_dir, "s1", ts=time.time(), state="working")
+
+    mgr = qt_app.QtMascotApp(state_dir)               # classic
+    mgr._on_sessions({"s1": _state("s1", "working")})
+    assert set(mgr.cards) == {"s1"} and mgr._compact is None
+
+    mgr._set_theme("compact")                         # live: classic -> compact
+    assert mgr.cards == {}                            # cards torn down
+    assert mgr._compact is not None
+    assert set(mgr._compact.sessions) == {"s1"}       # rebuilt from the snapshot
+    assert settings_mod.load_settings()["theme"] == "compact"   # persisted
+
+    mgr._set_theme("classic")                         # and back
+    assert mgr._compact is None
+    assert set(mgr.cards) == {"s1"}
+    assert settings_mod.load_settings()["theme"] == "classic"
+    mgr._quit()
+
+
+def test_live_theme_switch_honors_hidden_state_and_same_theme_is_a_noop(
+        app, tmp_path, monkeypatch):
+    from mascot import settings as settings_mod
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", tmp_path / "settings.json")
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+
+    mgr = qt_app.QtMascotApp(state_dir)
+    mgr._toggle_cards()                               # tray "hide"
+    mgr._set_theme("compact")
+    assert mgr._compact is not None
+    assert not mgr._compact.isVisible()               # a hidden widget stays hidden
+
+    compact_before = mgr._compact
+    mgr._set_theme("compact")                         # same theme -> no rebuild
+    assert mgr._compact is compact_before
+    mgr._quit()
+
+
 # --- QtCard: constructs and swaps state without error ------------------------
 def test_card_constructs_and_swaps_state(app):
     renderer = QtPixmapRenderer()
@@ -651,6 +716,44 @@ def test_usage_window_past_its_reset_reads_zero(app):
     card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer())
     card.set_usage(_usage_snapshot(80.0, 90.0, future=False))   # both already reset
     assert [round(pct) for _, pct, _ in card._panel._bars] == [0, 0]
+    card.close()
+
+
+def test_context_ring_absent_until_data_then_traffic_lit(app):
+    # The ring gauge (#73): nothing before the first tailer result; then a
+    # top-right arc colored by the usage thresholds (calm / amber / red).
+    card = qt_card.QtCard("s", _state("s", "working"), 0, QtPixmapRenderer())
+    assert card._panel._ring is None                  # no data -> no ring at all
+
+    card.set_context(50.0)
+    assert card._panel._ring == (50.0, qt_card._hex(usage.CALM))
+    card.set_context(76.0)
+    assert card._panel._ring == (76.0, qt_card._hex(usage.WARN))
+    card.set_context(93.0)
+    assert card._panel._ring == (93.0, qt_card._hex(usage.ALARM))
+
+    card.set_context(None)                            # session's % unknown again
+    assert card._panel._ring is None
+    card.close()
+
+
+def test_context_ring_shows_frozen_on_a_gravestone_and_paints(app):
+    card = qt_card.QtCard("s", _state("s", "dead"), 0, QtPixmapRenderer())
+    card.set_context(64.0)
+    assert card._panel._ring is not None              # frozen at last value, not hidden
+    card._panel.repaint()                             # smoke: the arc math paints clean
+    card.close()
+
+
+def test_stale_usage_flags_the_panel_and_fresh_clears_it(app):
+    # The stale label (#69): an aged snapshot dims the bars + shows "stale"; a
+    # fresh one shows plain bars. The flag rides the repaint-guard frame.
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer())
+    card.set_usage({**_usage_snapshot(50.0, 60.0), "ts": time.time()})
+    assert card._panel._stale is False
+    card.set_usage({**_usage_snapshot(50.0, 60.0),
+                    "ts": time.time() - usage.STALE_AFTER_S - 5})
+    assert card._panel._stale is True
     card.close()
 
 

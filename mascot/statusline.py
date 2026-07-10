@@ -38,6 +38,33 @@ def _window(raw: Any) -> dict[str, float] | None:
     return {"used_percentage": float(pct), "resets_at": float(reset)}
 
 
+def merge_snapshots(existing: Any, incoming: Any) -> dict[str, Any]:
+    """Merge a writer's snapshot into the one on disk — the two-writer discipline.
+
+    ``usage.json`` has two independent writers (the statusline emitter and the
+    opt-in usage-API poller), so a write must be a *merge*, not an overwrite:
+
+    * **Freshest wins** — the incoming snapshot only lands if its ``ts`` is newer
+      than the existing one's; an out-of-order (or ts-less) write changes nothing.
+    * **No opinion, no erase** — fields the incoming snapshot doesn't carry are
+      kept from the existing one (the poller has no ``effort``; the statusline's
+      recorded level must survive its writes).
+
+    Pure and tolerant: a missing/malformed side reads as an empty snapshot; the
+    inputs are never mutated and the result is always a fresh dict.
+    """
+    old = existing if isinstance(existing, dict) else {}
+    new = incoming if isinstance(incoming, dict) else {}
+
+    def _ts(snap: dict[str, Any]) -> float:
+        ts = snap.get("ts")
+        return float(ts) if isinstance(ts, (int, float)) else 0.0
+
+    if not new or _ts(new) <= _ts(old):
+        return dict(old)
+    return {**old, **new}
+
+
 def snapshot_from_status(payload: dict[str, Any], now: float) -> dict[str, Any]:
     """The usage snapshot to persist, distilled from a statusline JSON payload.
 

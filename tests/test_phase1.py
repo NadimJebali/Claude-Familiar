@@ -299,6 +299,31 @@ def test_stop_returns_idle_and_clears_subagents():
     assert out["subagents"] == []
 
 
+def test_transcript_path_is_stamped_from_the_payload():
+    # #71: hook payloads carry the session's transcript JSONL path; recording it
+    # lets the widget tail the transcript for the context gauge (no path-guessing).
+    out = compute_next_state(
+        base(), "UserPromptSubmit",
+        {"session_id": SID, "transcript_path": "C:/t/sess.jsonl"})
+    assert out["transcript_path"] == "C:/t/sess.jsonl"
+
+
+def test_transcript_path_survives_a_payload_without_one():
+    with_path = compute_next_state(
+        base(), "UserPromptSubmit",
+        {"session_id": SID, "transcript_path": "C:/t/sess.jsonl"})
+    # A later event that omits the field (or carries it empty) must not erase it.
+    out = compute_next_state(with_path, "PreToolUse",
+                             {"session_id": SID, "tool_name": "Bash"})
+    assert out["transcript_path"] == "C:/t/sess.jsonl"
+    out = compute_next_state(out, "Stop", {"session_id": SID, "transcript_path": ""})
+    assert out["transcript_path"] == "C:/t/sess.jsonl"
+
+
+def test_default_state_documents_transcript_path():
+    assert default_state(SID)["transcript_path"] == ""
+
+
 def test_compute_next_state_does_not_mutate_input():
     start = base()
     start["subagents"] = [{"id": "x", "type": "agent", "description": ""}]
@@ -449,6 +474,26 @@ def test_settings_defaults_include_shake_controls():
 def test_settings_defaults_include_home_monitor():
     from mascot import settings as settings_mod
     assert settings_mod.DEFAULTS.get("home_monitor") == -1
+
+
+def test_settings_default_to_quiet():
+    # PRD #67 (#68): a fresh install is a simple hook visualiser — no pet layer,
+    # no OS toasts. Both stay one toggle away (the Settings panel; the tray's
+    # checkable Notifications row for toasts).
+    from mascot import settings as settings_mod
+    assert settings_mod.DEFAULTS["tamagotchi_enabled"] is False
+    assert settings_mod.DEFAULTS["native_notifications"] is False
+
+
+def test_theme_defaults_to_classic_and_validates():
+    # PRD #67 (#74): "classic" = today's mascot cards; "compact" = the one-panel
+    # session list. Unknown values (a hand-edited file) fall back to classic.
+    from mascot import settings as settings_mod
+    assert settings_mod.DEFAULTS["theme"] == "classic"
+    assert settings_mod.valid_theme("classic") == "classic"
+    assert settings_mod.valid_theme("compact") == "compact"
+    assert settings_mod.valid_theme("neon") == "classic"
+    assert settings_mod.valid_theme(None) == "classic"
 
 
 def test_config_clamp_handles_bounds_and_bad_values():

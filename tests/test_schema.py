@@ -151,6 +151,15 @@ def test_non_object_payloads_are_invalid_without_crashing():
         assert schema.is_valid_session_state(bad) is False
 
 
+def test_transcript_path_is_an_optional_string_field():
+    # #71: the optional transcript_path (non-breaking addition, like effort).
+    assert schema.is_valid_session_state(
+        _valid_state(transcript_path="C:/t/sess.jsonl"))
+    assert schema.is_valid_session_state(_valid_state())          # absent is fine
+    problems = schema.validate_session_state(_valid_state(transcript_path=7))
+    assert problems and "transcript_path" in problems[0]
+
+
 # --- the writer and reader agree --------------------------------------------
 def test_writer_and_reader_schema_versions_match():
     assert schema.SCHEMA_VERSION == state_logic.SCHEMA_VERSION
@@ -164,7 +173,8 @@ def test_writer_emits_no_field_the_schema_does_not_know(tmp_path):
     seen: set[str] = set()
     events = [
         ("SessionStart", {}),
-        ("UserPromptSubmit", {"cwd": "/w", "model": "m", "permission_mode": "plan"}),
+        ("UserPromptSubmit", {"cwd": "/w", "model": "m", "permission_mode": "plan",
+                              "transcript_path": "/t/s.jsonl"}),
         ("PreToolUse", {"tool_name": "Bash"}),
         ("PreToolUse", {"tool_name": "Agent", "tool_use_id": "a1",
                         "tool_input": {"subagent_type": "x", "description": "d"}}),

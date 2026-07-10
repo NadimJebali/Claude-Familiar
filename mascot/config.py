@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .settings import load_settings
+from .settings import load_settings, valid_theme
 
 _S = load_settings()
 
@@ -70,6 +70,17 @@ SIMPLE_STAGE = _S["simple_stage"] if _S["simple_stage"] in (
 # this only silences the OS-level pop. Read once at startup, so it's restart-gated like
 # the other settings here.
 NATIVE_NOTIFICATIONS_ENABLED = bool(_S["native_notifications"])
+
+# Opt-in OAuth usage poller (#70). When True the widget reads Claude Code's stored
+# login token and polls Anthropic's usage endpoint for live 5h/weekly numbers (the
+# only fresh source in statusline-less workflows like the VS Code extension). The
+# token is never logged and never refreshed. Read once at startup (restart-gated).
+USAGE_API_ENABLED = bool(_S["usage_api_enabled"])
+
+# Presentation theme (#74): "classic" = one mascot card per session; "compact" =
+# one panel listing sessions as rows (#75). Validated so a hand-edited file can't
+# strand the widget. Startup value; the tray's live switch (#76) re-reads it.
+THEME = valid_theme(_S["theme"])
 
 # Per-state accent colors (R, G, B).
 STATE_COLORS = {

@@ -64,6 +64,26 @@ def test_bar_color_alarms_from_ninety():
     assert usage.bar_color(100.0) == usage.ALARM
 
 
+# --- is_stale: label aged usage data (#69) ----------------------------------
+def test_is_stale_flags_an_aged_snapshot():
+    snap = {"ts": 1000.0}
+    assert usage.is_stale(snap, now=1000.0) is False
+    assert usage.is_stale(snap, now=1000.0 + usage.STALE_AFTER_S) is False   # boundary
+    assert usage.is_stale(snap, now=1000.0 + usage.STALE_AFTER_S + 1) is True
+
+
+def test_is_stale_without_a_timestamp_cannot_vouch():
+    # A snapshot with no (or garbage) ts is of unknown age -> label it stale.
+    assert usage.is_stale({"five_hour": {}}, now=100.0) is True
+    assert usage.is_stale({"ts": "soon"}, now=100.0) is True
+
+
+def test_is_stale_with_no_snapshot_is_false():
+    # Nothing is shown at all, so there is nothing to label.
+    assert usage.is_stale(None, now=100.0) is False
+    assert usage.is_stale("garbage", now=100.0) is False
+
+
 # --- load_usage: mtime-cached snapshot reader ------------------------------
 def test_load_usage_reads_snapshot(tmp_path):
     p = tmp_path / "usage.json"

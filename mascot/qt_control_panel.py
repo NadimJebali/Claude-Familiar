@@ -51,6 +51,7 @@ _DANGER = "#e06c75"
 
 _SIZES = [("Small", "small"), ("Medium", "medium"), ("Large", "large")]
 _STAGES = [("Egg", "egg"), ("Baby", "baby"), ("Teen", "teen"), ("Adult", "adult")]
+_THEMES = [("Classic — mascot cards", "classic"), ("Compact — session list", "compact")]
 _PREVIEW_PX = {"small": 4, "medium": 5, "large": 6}
 
 
@@ -117,6 +118,10 @@ class QtControlPanel(QWidget):
 
         body = QHBoxLayout()
         left = QVBoxLayout()
+        left.addWidget(_section("THEME"))
+        self._theme = _combo(_THEMES, s["theme"], lambda: None)
+        left.addWidget(self._theme)
+
         left.addWidget(_section("WIDGET SIZE"))
         self._size = _combo(_SIZES, s["widget_size"], self._draw_preview)
         left.addWidget(self._size)
@@ -170,6 +175,14 @@ class QtControlPanel(QWidget):
         self._notify = QCheckBox("Show native system notifications")
         self._notify.setChecked(bool(s["native_notifications"]))
         box.addWidget(self._notify)
+
+        box.addWidget(_section("LIVE USAGE"))
+        self._usage_api = QCheckBox("Poll Anthropic for live usage")
+        self._usage_api.setChecked(bool(s["usage_api_enabled"]))
+        box.addWidget(self._usage_api)
+        box.addWidget(_muted("Reads your Claude Code login token to fetch the 5h/weekly "
+                             "numbers every 5 minutes — the only fresh source without a "
+                             "terminal session. The token is never logged or refreshed."))
 
         box.addWidget(_section("TAMAGOTCHI PET"))
         self._pet_enabled = QCheckBox("Enable the Tamagotchi pet")
@@ -307,6 +320,8 @@ class QtControlPanel(QWidget):
             "home_monitor": int(self._monitor.currentData()),
             "tamagotchi_enabled": self._pet_enabled.isChecked(),
             "native_notifications": self._notify.isChecked(),
+            "usage_api_enabled": self._usage_api.isChecked(),
+            "theme": self._theme.currentData(),
         })
         self._autostart.setChecked(setup.set_autostart(self._autostart.isChecked()))
         self._status.setText("Saved. Restart the widget for these changes to take effect.")
