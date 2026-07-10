@@ -589,6 +589,18 @@ def test_usage_window_past_its_reset_reads_zero(app):
     card.close()
 
 
+def test_stale_usage_flags_the_panel_and_fresh_clears_it(app):
+    # The stale label (#69): an aged snapshot dims the bars + shows "stale"; a
+    # fresh one shows plain bars. The flag rides the repaint-guard frame.
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer())
+    card.set_usage({**_usage_snapshot(50.0, 60.0), "ts": time.time()})
+    assert card._panel._stale is False
+    card.set_usage({**_usage_snapshot(50.0, 60.0),
+                    "ts": time.time() - usage.STALE_AFTER_S - 5})
+    assert card._panel._stale is True
+    card.close()
+
+
 def test_effort_tints_the_panel(app, monkeypatch):
     monkeypatch.setattr(qt_card.effort, "settings_effort", lambda *a, **k: "")
     st = {**_state("s", "working"), "effort": "high"}

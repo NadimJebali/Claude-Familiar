@@ -308,6 +308,7 @@ class _CardPanel(QWidget):
         self._panel_fill = PANEL_FILL         # solid base / quiet-level tint
         self._border = PANEL_EDGE             # accent border for the animated levels
         self._bars: tuple[tuple[str, float, str], ...] = ()   # (label, pct, color)
+        self._stale = False                   # aged snapshot -> dim bars + "stale" (#69)
         # The animated background over the base fill: ("solid",) for the quiet levels,
         # ("rainbow", t) for max's pixel wash, ("ripple", t) for xhigh's radiating rings.
         self._panel_bg: tuple = ("solid",)
@@ -317,9 +318,10 @@ class _CardPanel(QWidget):
                  badge: QPixmap | None = None, badge_count: int = 0,
                  panel_fill: str = PANEL_FILL, border: str = PANEL_EDGE,
                  bars: tuple[tuple[str, float, str], ...] = (),
+                 usage_stale: bool = False,
                  panel_bg: tuple = ("solid",)) -> None:
         frame = (pixmap, caption, bob, prev, fade, scale, badge, badge_count,
-                 panel_fill, border, bars, panel_bg)
+                 panel_fill, border, bars, usage_stale, panel_bg)
         if frame == self._frame:          # nothing changed this tick — skip the repaint
             return
         self._frame = frame
@@ -327,6 +329,7 @@ class _CardPanel(QWidget):
         self._prev, self._fade, self._scale = prev, fade, scale
         self._badge, self._badge_count = badge, badge_count
         self._panel_fill, self._border, self._bars = panel_fill, border, bars
+        self._stale = usage_stale
         self._panel_bg = panel_bg
         self.update()
 
@@ -423,8 +426,12 @@ class _CardPanel(QWidget):
     def _paint_usage(self, p: QPainter) -> None:
         """Draw the 5h / weekly usage bars at the card bottom (nothing when there's no
         usage data — API-key users, or before the first snapshot). Each bar: a short
-        label, a track, a traffic-light fill, and a NN% readout."""
+        label, a track, a traffic-light fill, and a NN% readout. An aged snapshot
+        (#69) draws dimmed with a small "stale" caption over the block — the numbers
+        still show (reset decay keeps them honest) but read as old news."""
         p.setFont(QFont("Segoe UI", 6))
+        if self._stale and self._bars:
+            p.setOpacity(0.45)
         for i, (label, pct, color) in enumerate(self._bars):
             top = USAGE_ROW_TOP + i * (USAGE_BAR_H + USAGE_BAR_GAP)
             row = QRectF(0, top - 4, CARD_W, USAGE_BAR_H + 8)   # vertically centers the text
@@ -441,6 +448,12 @@ class _CardPanel(QWidget):
             p.drawText(QRectF(USAGE_PCT_X - 40, row.y(), 40, row.height()),
                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                        f"{round(pct)}%")
+        if self._stale and self._bars:
+            p.setOpacity(1.0)
+            block_h = len(self._bars) * (USAGE_BAR_H + USAGE_BAR_GAP) - USAGE_BAR_GAP
+            p.setPen(QColor(USAGE_LABEL_FG))
+            p.drawText(QRectF(0, USAGE_ROW_TOP - 4, CARD_W, block_h + 8),
+                       Qt.AlignmentFlag.AlignCenter, "stale")
 
     def _paint_particles(self, p: QPainter) -> None:
         """Paint each rising particle's pixel grid, centered at its (cx, cy), at
@@ -681,6 +694,7 @@ class QtCard(QWidget):
                              prev=self._prev_pixmap, fade=fade, scale=self._scale_now(now),
                              badge=badge, badge_count=count,
                              panel_fill=panel_fill, border=border, bars=bars,
+                             usage_stale=usage.is_stale(self._usage, now),
                              panel_bg=panel_bg)
 
     def _adopt_pixmap(self, pixmap: QPixmap, stage: str, now: float) -> None:

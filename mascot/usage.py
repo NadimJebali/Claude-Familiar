@@ -76,6 +76,26 @@ def bar_color(pct: float) -> RGB:
     return CALM
 
 
+# A snapshot older than this is *labeled* stale on the card (#69) — the bars still
+# show (reset decay keeps them honest), but the viewer learns the numbers are aged
+# (e.g. VS Code-only workflows, where no statusline refreshes them).
+STALE_AFTER_S = 15 * 60.0
+
+
+def is_stale(snapshot: Any, now: float) -> bool:
+    """Whether the snapshot's numbers should carry the "stale" label.
+
+    ``False`` for no snapshot at all (nothing is drawn, so there is nothing to
+    label); ``True`` for one with a missing/garbage ``ts`` (unknown age — can't
+    vouch) or one written longer than :data:`STALE_AFTER_S` ago."""
+    if not isinstance(snapshot, dict):
+        return False
+    ts = snapshot.get("ts")
+    if not isinstance(ts, (int, float)):
+        return True
+    return (now - float(ts)) > STALE_AFTER_S
+
+
 # --- snapshot loader (thin mtime-cached I/O shell) -------------------------
 _cache: dict[Path, tuple[float, dict[str, Any] | None]] = {}
 
