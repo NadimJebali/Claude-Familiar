@@ -22,7 +22,7 @@ from PySide6.QtCore import QEvent, QPointF, Qt, QThreadPool
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
 
-from mascot import pet_service, qt_app, qt_card, qt_ingest
+from mascot import config, pet_service, qt_app, qt_card, qt_ingest
 from mascot.pet_view import PetView
 from mascot.sprite_qt import QtPixmapRenderer, SpriteSpec
 
@@ -254,3 +254,52 @@ def test_manager_wires_the_card_paw_to_open_the_pet_window(app, tmp_path):
     mgr.cards["s1"].open_pet_requested.emit()       # as the paw button would
     assert mgr._pet_window is not None
     mgr._pet_window.close()
+
+
+# --- QtCard: the attention-shake jostle while a prompt sits unanswered --------
+def _shake_frames(card, base, n=6):
+    """Drive several animation frames well past the grace window (varied phase, so
+    at least one frame produces a non-zero offset and the shake anchors)."""
+    for i in range(n):
+        card._apply_attention_shake(base + i * 0.05)
+
+
+def test_a_non_waiting_card_never_jostles(app):
+    card = qt_card.QtCard("s", _state("s", "working"), 0, QtPixmapRenderer())
+    _shake_frames(card, time.time() + config.SHAKE_AFTER_S + 5)
+    assert not card._shake.is_shaking
+    assert card._shake_offset == (0, 0)
+    card.close()
+
+
+def test_waiting_within_the_grace_window_does_not_jostle_yet(app):
+    card = qt_card.QtCard("s", _state("s", "waiting"), 0, QtPixmapRenderer())
+    card._apply_attention_shake(time.time() + 1)     # 1s < the (>=5s) grace window
+    assert not card._shake.is_shaking
+    card.close()
+
+
+def test_a_long_ignored_waiting_card_jostles(app):
+    card = qt_card.QtCard("s", _state("s", "waiting"), 0, QtPixmapRenderer())
+    _shake_frames(card, time.time() + config.SHAKE_AFTER_S + 5)
+    assert card._shake.is_shaking                     # it has anchored and is jostling
+    card.close()
+
+
+def test_answering_the_prompt_settles_the_card_back_to_rest(app):
+    card = qt_card.QtCard("s", _state("s", "waiting"), 0, QtPixmapRenderer())
+    future = time.time() + config.SHAKE_AFTER_S + 5
+    _shake_frames(card, future)
+    card.set_state(_state("s", "idle"))               # the user answered
+    card._apply_attention_shake(future + 1.0)
+    assert not card._shake.is_shaking
+    assert card._shake_offset == (0, 0)
+    card.close()
+
+
+def test_dragging_suppresses_the_jostle(app):
+    card = qt_card.QtCard("s", _state("s", "waiting"), 0, QtPixmapRenderer())
+    card._drag_offset = card.frameGeometry().topLeft()   # simulate an active drag
+    _shake_frames(card, time.time() + config.SHAKE_AFTER_S + 5)
+    assert not card._shake.is_shaking                    # don't fight the user's drag
+    card.close()

@@ -18,8 +18,12 @@ the idle face and the stage/hat/flourish dress the sprite (parity with the Tk ca
 A paw button at the panel's top-left (shown only when the pet is live) asks the
 manager to open the Pet window via the ``open_pet_requested`` signal.
 
-Still on the parity list (later #57 work / #60): sub-agent badges, the attention-
-shake jostle, and home-monitor placement.
+While a prompt sits unanswered the whole card jostles (the pure ``shake.Shake`` seam),
+gently at first then more frantic the longer it's ignored — settling the moment it's
+answered or grabbed.
+
+Still on the parity list (later #57 work / #60): sub-agent badges and home-monitor
+placement.
 """
 from __future__ import annotations
 
@@ -47,7 +51,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import config, effective_state
+from . import config, effective_state, shake
 from .overlay import Overlay, OverlayConfig
 from .pet_view import PetView
 from .sprite_qt import SpriteRenderer, SpriteSpec
@@ -92,6 +96,25 @@ _OVERLAY_CONFIG = OverlayConfig(
     shake_after_s=config.SHAKE_AFTER_S,
     thinking_stall_s=THINKING_STALL_S,
     working_stall_s=WORKING_STALL_S,
+)
+
+# Attention shake: while an attention/permission prompt sits unanswered, the whole
+# card jostles after the grace window, growing steadily more frantic the longer it's
+# ignored (the same recipe + pure Shake seam the Tk card uses). No `_s` scale factor
+# here — the Qt card authors its constants at 1x.
+WAITING_SHAKE_RAMP_S = 60.0          # ramps to full aggression over this
+WAITING_SHAKE_FREQ_MIN = 4.0         # sways/sec when gentle
+WAITING_SHAKE_FREQ_MAX = 11.0        # sways/sec when frantic
+WAITING_SHAKE_AMP_MAX = float(config.SHAKE_MAX_AMP_PX)   # configurable max sway (px)
+WAITING_SHAKE_AMP_MIN = min(2.0, WAITING_SHAKE_AMP_MAX)  # gentle start, never > max
+
+_SHAKE_CONFIG = shake.ShakeConfig(
+    after_s=config.SHAKE_AFTER_S,
+    ramp_s=WAITING_SHAKE_RAMP_S,
+    amp_min=WAITING_SHAKE_AMP_MIN,
+    amp_max=WAITING_SHAKE_AMP_MAX,
+    freq_min=WAITING_SHAKE_FREQ_MIN,
+    freq_max=WAITING_SHAKE_FREQ_MAX,
 )
 
 # Caption per displayed face (mirrors the Tk STATE_CAPTIONS); unknown -> the raw.
@@ -225,6 +248,14 @@ class QtCard(QWidget):
         self._pixmap_key: tuple[object, ...] | None = None
         self._drag_offset: QPoint | None = None
         self._press_pos: QPoint | None = None
+        # Attention shake: the pure Shake seam owns the intensity ramp, the amplitude/
+        # frequency derivation and the absolute-from-rest offset (it captures rest once
+        # when a shake begins, then every frame moves to rest+offset — see shake.py for
+        # the Windows drift bug that motivates). Its phase clock is aligned with the
+        # animation clock so the sway is continuous. The last offset is tracked to skip
+        # redundant moves.
+        self._shake = shake.Shake(_SHAKE_CONFIG, t0=self._anim_t0)
+        self._shake_offset: tuple[int, int] = (0, 0)
 
         # A small paw button (only when the pet is live) at the panel's top-left that
         # asks the manager to open the Pet window. As a child button it swallows its
@@ -273,6 +304,7 @@ class QtCard(QWidget):
             self._next_blink = (now + BLINK_DURATION_S
                                 + random.uniform(BLINK_MIN_GAP_S, BLINK_MAX_GAP_S))
         self._render(now)
+        self._apply_attention_shake(now)
 
     def _render(self, now: float) -> None:
         mood = self._pet_view.mood if self._pet_view is not None else "content"
@@ -331,6 +363,9 @@ class QtCard(QWidget):
     # --- drag + tap-to-pet ------------------------------------------------
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            # Undo any active attention-shake first so the grab maps to the card's
+            # true resting position (no jump as the shake is removed).
+            self._reset_shake_offset()
             self._press_pos = event.globalPosition().toPoint()
             self._drag_offset = self._press_pos - self.frameGeometry().topLeft()
 
@@ -363,3 +398,40 @@ class QtCard(QWidget):
         x = max(area.x(), min(x, area.x() + area.width() - w))
         y = max(area.y(), min(y, area.y() + area.height() - h))
         self.move(x, y)
+
+    # --- attention shake --------------------------------------------------
+    def _apply_attention_shake(self, now: float) -> None:
+        """Jostle the card while a prompt sits unanswered; the longer it's ignored,
+        the wider and faster the shake — up to a frantic maximum. Delegates the math
+        to the pure Shake seam; here we only gate it and push the geometry."""
+        if self._drag_offset is not None:
+            return  # the user is holding it; don't fight the drag
+        elapsed = self._overlay.waiting_elapsed(now)
+        if self._raw != "waiting" or elapsed is None or elapsed < config.SHAKE_AFTER_S:
+            self._reset_shake_offset()   # not waiting, or still within the grace window
+            return
+        ox, oy = self._shake.offset(now, elapsed)
+        self._set_shake_offset(ox, oy)
+
+    def _set_shake_offset(self, ox: int, oy: int) -> None:
+        """Apply the Shake seam's (ox, oy) as an absolute move to rest+(ox, oy). The
+        seam holds the resting position (captured once when the shake begins), so the
+        offset is always taken from a fixed anchor — no per-frame delta drift."""
+        if (ox, oy) == self._shake_offset:
+            return
+        if not self._shake.is_shaking:      # starting to shake: remember where it rests
+            self._shake.begin((self.x(), self.y()))
+        rest = self._shake.rest_pos
+        assert rest is not None             # begin() succeeded, so rest is captured
+        self.move(rest[0] + ox, rest[1] + oy)
+        self._shake_offset = (ox, oy)
+
+    def _reset_shake_offset(self) -> None:
+        """Settle the card back onto its captured resting position (zero shake)."""
+        if self._shake_offset == (0, 0):
+            return
+        rest = self._shake.rest_pos
+        if rest is not None:
+            self.move(rest[0], rest[1])
+        self._shake_offset = (0, 0)
+        self._shake.end()
