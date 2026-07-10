@@ -8,11 +8,13 @@ The displayed face is computed by reusing the pure cores the Tk card uses — so
 the port inherits their tested behaviour rather than re-deriving it:
 ``Overlay`` + ``effective_state`` layer dozing, the idle blink, the celebrate
 hop, dizzy, the waiting glare, per-tool working faces, plan-mode and the stumble
-over the raw hook state. The face is a cached pixmap from the ``SpriteRenderer``
-seam, swapped only when the face (or the pet's look) actually changes; a ~25fps
-timer drives the idle bob. The card is draggable, a quick tap (no drag) pets it — a
-happy hop plus a ``petted`` signal the manager turns into the coin trickle — and
-vigorously shaking it with the mouse makes it dizzy.
+over the raw hook state. The face is a cached (integer-scaled, crisp) pixmap from the
+``SpriteRenderer`` seam, re-rendered only when the face (or the pet's look) changes;
+a ~60fps timer drives sub-pixel motion, faces **crossfade** rather than snap, and an
+evolution **scales** the creature up — all transform-based over the cached pixmaps
+(the glow-up, #59). The card is draggable, a quick tap (no drag) pets it — a happy hop
+plus a ``petted`` signal the manager turns into the coin trickle — and vigorously
+shaking it with the mouse makes it dizzy.
 
 The manager pushes the global pet's look via :meth:`QtCard.set_pet`: the mood tints
 the idle face and the stage/hat/flourish dress the sprite (parity with the Tk card).
@@ -103,9 +105,15 @@ PAW_PX = 2              # pixel size of the paw icon (a 12x12 grid -> 24px)
 PAW_INSET = 8          # offset from the panel's top-left corner
 
 # --- animation / interaction constants (match the Tk card) ------------------
-ANIM_MS = 40            # ~25fps
+ANIM_MS = 16            # ~60fps — refresh-synced, smooth motion (the glow-up, #59)
 BOB_AMPLITUDE = 4
 BOB_PERIOD_S = 2.0
+# Glow-up (#59): faces crossfade instead of snapping, and an evolution scales the
+# creature up smoothly. Motion is transform-based over the cached (integer-scaled)
+# pixmaps, so the pixel art stays crisp.
+CROSSFADE_S = 0.18      # fast enough to never mask a real state change
+STAGE_SCALE_S = 0.6     # a stage change grows the creature over this
+STAGE_SCALE_START = 0.5  # ... from half size up to full
 BLINK_DURATION_S = 0.12
 BLINK_MIN_GAP_S = 4.0
 BLINK_MAX_GAP_S = 7.0
@@ -214,6 +222,11 @@ def _hex(rgb: tuple[int, int, int]) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def _ease_out_cubic(t: float) -> float:
+    """Decelerating ease for the evolution scale-up (fast start, gentle settle)."""
+    return 1.0 - (1.0 - t) ** 3
+
+
 def _anchor_xy(area: tuple[int, int, int, int], w: int, h: int,
                index: int) -> tuple[int, int]:
     """Bottom-right anchor within a work ``area`` (x, y, width, height), stacking
@@ -249,21 +262,28 @@ class _CardPanel(QWidget):
         super().__init__()
         self.setFixedSize(CARD_W, CARD_H)
         self._pixmap: QPixmap | None = None
+        self._prev: QPixmap | None = None     # the fading-out face during a crossfade
+        self._fade = 1.0                      # 0..1 — how much the new face is shown
+        self._scale = 1.0                     # evolution scale-up (1.0 = settled)
         self._caption = ""
-        self._bob = 0
+        self._bob = 0.0                       # sub-pixel float offset
         # The sub-agent badges: one shared mini-mascot pixmap, drawn ``_badge_count``
         # times in a centered row (all badges are identical, so a count is enough).
         self._badge: QPixmap | None = None
         self._badge_count = 0
+        self._frame: tuple = ()               # last-shown art tuple (repaint guard)
         # Rising particles to paint this frame: (grid, char->color, cx, cy, px).
         self._particles: list[tuple[list[str], dict[str, str], float, float, int]] = []
 
-    def show_art(self, pixmap: QPixmap | None, caption: str, bob: int, *,
+    def show_art(self, pixmap: QPixmap | None, caption: str, bob: float, *,
+                 prev: QPixmap | None = None, fade: float = 1.0, scale: float = 1.0,
                  badge: QPixmap | None = None, badge_count: int = 0) -> None:
-        if (pixmap is self._pixmap and caption == self._caption and bob == self._bob
-                and badge is self._badge and badge_count == self._badge_count):
+        frame = (pixmap, caption, bob, prev, fade, scale, badge, badge_count)
+        if frame == self._frame:          # nothing changed this tick — skip the repaint
             return
+        self._frame = frame
         self._pixmap, self._caption, self._bob = pixmap, caption, bob
+        self._prev, self._fade, self._scale = prev, fade, scale
         self._badge, self._badge_count = badge, badge_count
         self.update()
 
@@ -285,10 +305,7 @@ class _CardPanel(QWidget):
             p.setPen(QColor(PANEL_EDGE))
             p.drawPath(path)
 
-            if self._pixmap is not None:
-                x = (CARD_W - self._pixmap.width()) // 2
-                y = CREATURE_CY - self._pixmap.height() // 2 + self._bob
-                p.drawPixmap(x, y, self._pixmap)
+            self._paint_creature(p)
 
             p.setPen(QColor(CAPTION_FG))
             p.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
@@ -301,6 +318,28 @@ class _CardPanel(QWidget):
         finally:
             p.end()
 
+    def _paint_creature(self, p: QPainter) -> None:
+        """Blit the creature: crossfade the outgoing face under the incoming one, and
+        scale for an evolution — as sub-pixel transforms over the crisp cached pixmaps
+        (no SmoothPixmapTransform, so the pixels stay hard-edged)."""
+        if self._pixmap is None:
+            return
+        if self._prev is not None and self._fade < 1.0:
+            p.setOpacity(1.0 - self._fade)
+            self._blit(p, self._prev)
+            p.setOpacity(self._fade)
+            self._blit(p, self._pixmap)
+            p.setOpacity(1.0)
+        else:
+            self._blit(p, self._pixmap)
+
+    def _blit(self, p: QPainter, pixmap: QPixmap) -> None:
+        w, h = pixmap.width() * self._scale, pixmap.height() * self._scale
+        x = (CARD_W - w) / 2
+        y = CREATURE_CY - h / 2 + self._bob     # float y -> sub-pixel bob
+        p.drawPixmap(QRectF(x, y, w, h), pixmap,
+                     QRectF(0, 0, pixmap.width(), pixmap.height()))
+
     def _paint_badges(self, p: QPainter) -> None:
         """A centered row of identical sub-agent mini-mascots below the caption."""
         if self._badge is None or self._badge_count <= 0:
@@ -312,12 +351,13 @@ class _CardPanel(QWidget):
             p.drawPixmap(round(cx - bw / 2), BADGE_CY - bh // 2, self._badge)
 
     def _paint_particles(self, p: QPainter) -> None:
-        """Paint each rising particle's pixel grid, centered at its (cx, cy)."""
+        """Paint each rising particle's pixel grid, centered at its (cx, cy), at
+        sub-pixel (float) positions so the drift is smooth."""
         for grid, colors, cx, cy, px in self._particles:
             x0 = cx - len(grid[0]) * px / 2
             y0 = cy - len(grid) * px / 2
             for col, row, ch in grid_cells(grid):
-                p.fillRect(round(x0 + col * px), round(y0 + row * px), px, px,
+                p.fillRect(QRectF(x0 + col * px, y0 + row * px, px, px),
                            QColor(colors[ch]))
 
 
@@ -368,6 +408,12 @@ class QtCard(QWidget):
         self._pet_data: dict | None = None
         self._pixmap: QPixmap | None = None
         self._pixmap_key: tuple[object, ...] | None = None
+        # Glow-up (#59) animation state: the fading-out face + when the crossfade
+        # began, the evolution scale-up start, and the last stage (to detect a change).
+        self._prev_pixmap: QPixmap | None = None
+        self._fade_start = 0.0
+        self._scale_start: float | None = None
+        self._stage: str | None = None
         self._drag_offset: QPoint | None = None
         self._press_pos: QPoint | None = None
         # Shake-to-dizzy bookkeeping: the last sampled drag point, the last move
@@ -480,13 +526,46 @@ class QtCard(QWidget):
         key = (face, view)
         if key != self._pixmap_key:
             self._pixmap_key = key
-            self._pixmap = self._pixmap_for(face, view)
-        bob = 0 if (eff == "sleeping" or self._raw == "dead") else round(
+            self._adopt_pixmap(self._pixmap_for(face, view), view.stage, now)
+
+        # Sub-pixel bob (float), the face crossfade, and the evolution scale-up.
+        bob = 0.0 if (eff == "sleeping" or self._raw == "dead") else (
             BOB_AMPLITUDE * math.sin((now - self._anim_t0) * 2 * math.pi / BOB_PERIOD_S))
+        fade = 1.0 if self._prev_pixmap is None else min(
+            1.0, (now - self._fade_start) / CROSSFADE_S)
+        if fade >= 1.0:
+            self._prev_pixmap = None
         count = min(len(self._state.get("subagents") or []), MAX_BADGES)
         badge = self._badge_pixmap() if count else None
         self._panel.show_art(self._pixmap, _CAPTIONS.get(face, self._raw), bob,
+                             prev=self._prev_pixmap, fade=fade, scale=self._scale_now(now),
                              badge=badge, badge_count=count)
+
+    def _adopt_pixmap(self, pixmap: QPixmap, stage: str, now: float) -> None:
+        """Swap in a new creature pixmap with the right transition: a stage change
+        (evolution) scales up from small; any other face change crossfades; the very
+        first render just appears."""
+        if stage != self._stage and self._stage is not None:
+            self._pixmap = pixmap
+            self._prev_pixmap = None          # scale-up reads better than a crossfade here
+            self._scale_start = now
+        elif self._pixmap is not None:
+            self._prev_pixmap = self._pixmap
+            self._pixmap = pixmap
+            self._fade_start = now
+        else:
+            self._pixmap = pixmap             # first render — no transition
+        self._stage = stage
+
+    def _scale_now(self, now: float) -> float:
+        """The current evolution scale (1.0 once settled), eased from STAGE_SCALE_START."""
+        if self._scale_start is None:
+            return 1.0
+        t = (now - self._scale_start) / STAGE_SCALE_S
+        if t >= 1.0:
+            self._scale_start = None
+            return 1.0
+        return STAGE_SCALE_START + (1.0 - STAGE_SCALE_START) * _ease_out_cubic(t)
 
     def _display_face(self, eff: str, now: float) -> str:
         ts = self._state.get("ts")

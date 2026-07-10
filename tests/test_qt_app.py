@@ -310,6 +310,33 @@ def test_closing_the_card_cleans_up_its_bubble(app):
     assert card._bubble is None
 
 
+# --- glow-up: crossfade, sub-pixel motion, evolution scale-up (#59) ----------
+def test_a_face_change_crossfades_then_settles(app):
+    card = qt_card.QtCard("s", _state("s", "working"), 0, QtPixmapRenderer())
+    card.set_state(_state("s", "idle"))          # working -> happy: a real face change
+    assert card._prev_pixmap is not None         # the outgoing face is crossfading
+    card._render(time.time() + qt_card.CROSSFADE_S + 0.1)
+    assert card._prev_pixmap is None             # fade complete, settled
+    card.close()
+
+
+def test_the_bob_moves_sub_pixel(app):
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer())
+    card._render(card._anim_t0 + qt_card.BOB_PERIOD_S * 0.13)   # a fractional phase
+    bob = card._panel._bob
+    assert isinstance(bob, float) and bob != round(bob)        # sub-pixel offset
+    card.close()
+
+
+def test_an_evolution_scales_the_creature_up(app):
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer(), pet_enabled=True)
+    card.set_pet(_pet(xp=1000, born=time.time() - 4 * 86400))   # baby -> adult: a stage change
+    now = time.time()
+    assert card._scale_now(now) < 1.0                          # scaling up
+    assert card._scale_now(now + qt_card.STAGE_SCALE_S + 0.1) == 1.0   # settled at full size
+    card.close()
+
+
 # --- QtCard: the pushed pet look (mood tint + stage/hat) ---------------------
 # The manager only pushes a pet to a pet-enabled card, so these construct with
 # pet_enabled=True (a simple-mode card ignores the push and shows the fixed stage).
