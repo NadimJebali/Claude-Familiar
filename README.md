@@ -304,9 +304,15 @@ Claude Code session ──hooks──▶ emit.py ──atomic write──▶ ~/.
   file, last-writer-wins — the limits are account-wide), so it never races the
   per-session state files. The two pure cores behind it are `mascot/statusline.py`
   (JSON → snapshot + footer) and `mascot/usage.py` (snapshot → decayed bars +
-  colors). *The terminal footer and the `usage.json` feed work today; surfacing them
-  on the Qt card (usage bars + an effort-reactive background) is a pending port of
-  the effort/usage visuals main shipped on the now-retired Tk card.*
+  colors). The Qt card surfaces the snapshot as two bottom **usage bars** (5h +
+  weekly, traffic-light colored) and an **effort-reactive panel background** painted
+  as chunky pixels: xhigh radiates purple rings out from the mascot; max flows a
+  pixel rainbow across the card (like Claude Code's own max shimmer). Both are pushed
+  by `QtMascotApp` each poll and animate on the card's ~60fps tick. *Note:
+  the terminal footer + usage feed run wherever Claude executes the statusline
+  command; in editor sessions that don't, the bars show the last-known numbers from
+  your terminal sessions (limits are account-global), decayed by each window's reset
+  time.*
 
 State files live in `~/.claude/mascot/state/`. Each carries a heartbeat (`ts`)
 and the owning `claude.exe` PID; a card is pruned the moment that process exits.

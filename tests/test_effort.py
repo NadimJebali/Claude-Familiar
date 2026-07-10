@@ -231,6 +231,44 @@ def test_border_accent_moves_with_the_clock():
     assert len(xs) > 2
 
 
+# --- max's pixelated rainbow wash (per-cell color) --------------------------
+def test_rainbow_wash_color_is_valid_and_spans_many_hues():
+    # Across the card (f in 0..1) at one instant it is a rainbow — many distinct
+    # colors, so the tiled cells read as a spectrum rather than one tint.
+    colors = {effort_mod.rainbow_wash_color(PANEL, 0.0, k / 8) for k in range(9)}
+    for c in colors:
+        assert _valid_rgb(c)
+    assert len(colors) >= 5
+
+
+def test_rainbow_wash_color_flows_over_time():
+    # The wash scrolls with the clock: a fixed cell's color changes as t advances.
+    a = effort_mod.rainbow_wash_color(PANEL, 0.0, 0.3)
+    b = effort_mod.rainbow_wash_color(PANEL, effort_mod.RAINBOW_PERIOD_S / 4, 0.3)
+    assert a != b
+
+
+# --- xhigh's radiating purple ripple (per-cell color) -----------------------
+def test_ripple_trough_is_the_bare_base():
+    # Where the sine is <= 0 (the gap between rings) the cell is the untouched base —
+    # a transparent band, so the dark panel shows between the purple rings.
+    assert effort_mod.ripple_color(PANEL, 0.0) == PANEL       # sin(0) = 0
+    assert effort_mod.ripple_color(PANEL, 0.75) == PANEL      # sin = -1 -> clamped to 0
+
+
+def test_ripple_crest_blends_toward_the_shimmer_purple():
+    crest = effort_mod.ripple_color(PANEL, 0.25)              # sin = 1 -> peak ring
+    assert _valid_rgb(crest) and crest != PANEL
+    # the crest moves toward WAVE_HI (a blue-heavy purple), so blue rises off the base.
+    assert crest[2] > PANEL[2]
+
+
+def test_ripple_rings_vary_with_phase():
+    # Distinct values across a wavelength -> rings + gaps (not a flat wash).
+    vals = {effort_mod.ripple_color(PANEL, ph) for ph in (0.0, 0.15, 0.25, 0.5, 0.65)}
+    assert len(vals) >= 3
+
+
 # --- state shape: effort is a first-class, carried field -------------------
 def test_default_state_has_empty_effort():
     assert default_state(SID)["effort"] == ""
