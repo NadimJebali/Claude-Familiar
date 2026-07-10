@@ -47,7 +47,6 @@ from PySide6.QtGui import (
     QFont,
     QGuiApplication,
     QIcon,
-    QImage,
     QMouseEvent,
     QPainter,
     QPainterPath,
@@ -61,7 +60,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import config, effective_state, osplatform, particles, shake, sprite_pixel
+from . import config, effective_state, osplatform, particles, pixel_qt, shake, sprite_pixel
 from .overlay import Overlay, OverlayConfig
 from .pet_view import PetView, pet_view
 from .pixel_grid import grid_cells
@@ -226,19 +225,8 @@ def _paw_pixmap(px: int) -> QPixmap:
     pattern the sprite renderer uses for the creature grids; at the #63 cutover the
     pure icon data relocates alongside the sprite data."""
     from . import ui_icons
-    from .pixel_grid import grid_cells
 
-    grid = ui_icons._ICONS["paw"]
-    img = QImage(len(grid[0]) * px, len(grid) * px,
-                 QImage.Format.Format_ARGB32_Premultiplied)
-    img.fill(Qt.GlobalColor.transparent)
-    p = QPainter(img)
-    try:
-        for col, row, ch in grid_cells(grid):
-            p.fillRect(col * px, row * px, px, px, QColor(ui_icons.PALETTE[ch]))
-    finally:
-        p.end()
-    return QPixmap.fromImage(img)
+    return pixel_qt.grid_pixmap(ui_icons._ICONS["paw"], ui_icons.PALETTE, px)
 
 
 class _CardPanel(QWidget):

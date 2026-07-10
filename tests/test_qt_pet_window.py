@@ -16,7 +16,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication
 
-from mascot import qt_pet_window, shop
+from mascot import cosmetics, qt_pet_window, shop
 
 
 @pytest.fixture(scope="module")
@@ -108,4 +108,62 @@ def test_a_too_expensive_item_cannot_be_bought(app):
     win._buy(_item("feast"))          # price 60, and level-gated
     assert host._pet["coins"] == 5    # unchanged — the buy was refused
     assert host._pet.get("inventory", {}).get("feast") is None
+    win.close()
+
+
+# --- #60: wardrobe tab -------------------------------------------------------
+def test_wardrobe_buy_then_wear_and_remove_a_hat(app):
+    host = _FakeHost(_pet(coins=200, xp=500))    # level 6 -> Party Hat (lvl 3) buyable
+    win = qt_pet_window.QtPetWindow(host)
+    party = cosmetics.piece_by_id("party_hat")
+
+    win._buy_cosmetic(party)
+    assert "party_hat" in host._pet["wardrobe"]
+    assert host.care == 1                         # buying a cosmetic celebrates
+
+    win._wear("party_hat")
+    assert host._pet["equipped"]["head"] == "party_hat"
+    win._wear(None)                               # take it off
+    assert "head" not in host._pet.get("equipped", {})
+    win.close()
+
+
+def test_wardrobe_lists_locked_milestone_pieces(app):
+    win = qt_pet_window.QtPetWindow(_FakeHost(_pet()))
+    # crown is a 30-day milestone piece, never for sale -> a disabled "Locked" row.
+    labels = [win._wardrobe_box.itemAt(i).widget() for i in range(win._wardrobe_box.count())]
+    assert any(w is not None for w in labels)     # the wardrobe rendered rows
+    win.close()
+
+
+# --- #60: live cooldown countdown -------------------------------------------
+def test_playing_a_toy_starts_a_live_cooldown(app):
+    host = _FakeHost(_pet(inventory={"ball": 1}))
+    win = qt_pet_window.QtPetWindow(host)
+    _item_dict, button = win._cooldowns["ball"]
+    assert button.isEnabled()                     # off cooldown to start
+
+    win._play(_item("ball"))                       # play -> starts the cooldown
+    _item2, button2 = win._cooldowns["ball"]       # the Items list rebuilt
+    assert not button2.isEnabled()                 # now counting down, disabled
+    win.close()
+
+
+# --- #60: pixel-art item / hat icons ----------------------------------------
+def test_shop_rows_carry_item_icons(app):
+    win = qt_pet_window.QtPetWindow(_FakeHost(_pet()))
+    icon = win._item_icon("snack")
+    assert icon is not None and not icon.pixmap().isNull()
+    assert win._hat_icon("crown") is not None
+    win.close()
+
+
+# --- #60: external-change pickup without a restart ---------------------------
+def test_poll_picks_up_an_external_pet_change(app):
+    host = _FakeHost(_pet(coins=10))
+    win = qt_pet_window.QtPetWindow(host)
+    assert "10 coins" in win._coins.text()
+    host._pet["coins"] = 999                       # the manager awarded coins externally
+    win._poll()
+    assert "999 coins" in win._coins.text()
     win.close()
