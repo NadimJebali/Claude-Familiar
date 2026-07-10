@@ -10,8 +10,9 @@ the port inherits their tested behaviour rather than re-deriving it:
 hop, dizzy, the waiting glare, per-tool working faces, plan-mode and the stumble
 over the raw hook state. The face is a cached pixmap from the ``SpriteRenderer``
 seam, swapped only when the face (or the pet's look) actually changes; a ~25fps
-timer drives the idle bob. The card is draggable, and a quick tap (no drag) pets it
-— a happy hop plus a ``petted`` signal the manager turns into the coin trickle.
+timer drives the idle bob. The card is draggable, a quick tap (no drag) pets it — a
+happy hop plus a ``petted`` signal the manager turns into the coin trickle — and
+vigorously shaking it with the mouse makes it dizzy.
 
 The manager pushes the global pet's look via :meth:`QtCard.set_pet`: the mood tints
 the idle face and the stage/hat/flourish dress the sprite (parity with the Tk card).
@@ -98,6 +99,12 @@ STUMBLE_FACE_S = 8.0
 THINKING_STALL_S = 180.0
 WORKING_STALL_S = 270.0
 PET_TAP_MAX_DIST = 5    # a press+release moving <= this (px) is a pet tap, not a drag
+
+# Shake-to-dizzy easter egg: enough rapid drag reversals within the window make the
+# mascot dizzy (mirrors the Tk card).
+SHAKE_MIN_DIST = 7      # a drag sample must move at least this (px) to count
+SHAKE_WINDOW_S = 0.7    # reversals must fall within this window
+SHAKE_REVERSALS = 4     # this many rapid reversals -> dizzy
 
 _OVERLAY_CONFIG = OverlayConfig(
     dizzy_duration_s=DIZZY_DURATION_S,
@@ -291,6 +298,11 @@ class QtCard(QWidget):
         self._pixmap_key: tuple[object, ...] | None = None
         self._drag_offset: QPoint | None = None
         self._press_pos: QPoint | None = None
+        # Shake-to-dizzy bookkeeping: the last sampled drag point, the last move
+        # vector, and the recent reversal timestamps.
+        self._last_shake_pos: tuple[int, int] | None = None
+        self._last_move: tuple[int, int] | None = None
+        self._reversals: list[float] = []
         # Attention shake: the pure Shake seam owns the intensity ramp, the amplitude/
         # frequency derivation and the absolute-from-rest offset (it captures rest once
         # when a shake begins, then every frame moves to rest+offset — see shake.py for
@@ -432,10 +444,15 @@ class QtCard(QWidget):
             self._reset_shake_offset()
             self._press_pos = event.globalPosition().toPoint()
             self._drag_offset = self._press_pos - self.frameGeometry().topLeft()
+            self._last_shake_pos = None      # fresh shake-to-dizzy tracking per drag
+            self._last_move = None
+            self._reversals = []
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self._drag_offset is not None:
-            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            point = event.globalPosition().toPoint()
+            self.move(point - self._drag_offset)
+            self._track_shake(point.x(), point.y())
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton and self._press_pos is not None:
@@ -452,6 +469,34 @@ class QtCard(QWidget):
                 self._render(now)
             self._press_pos = None
             self._drag_offset = None
+
+    # --- shake-to-dizzy ---------------------------------------------------
+    def _track_shake(self, x: int, y: int) -> None:
+        """Count rapid drag-direction reversals; enough within the window -> dizzy."""
+        if self._last_shake_pos is None:
+            self._last_shake_pos = (x, y)
+            return
+        dx = x - self._last_shake_pos[0]
+        dy = y - self._last_shake_pos[1]
+        if math.hypot(dx, dy) < SHAKE_MIN_DIST:
+            return
+        self._last_shake_pos = (x, y)
+        if self._last_move is not None:
+            dot = dx * self._last_move[0] + dy * self._last_move[1]
+            if dot < 0:                       # direction flipped: one reversal
+                now = time.time()
+                self._reversals = [t for t in self._reversals if t >= now - SHAKE_WINDOW_S]
+                self._reversals.append(now)
+                if len(self._reversals) >= SHAKE_REVERSALS:
+                    self._trigger_dizzy(now)
+                    self._reversals = []
+                    self._last_move = None
+                    return
+        self._last_move = (dx, dy)
+
+    def _trigger_dizzy(self, now: float) -> None:
+        self._overlay.note_dizzy(now)
+        self._render(now)
 
     # --- placement --------------------------------------------------------
     def _place(self, index: int, screen: QScreen | None) -> None:

@@ -184,6 +184,27 @@ def test_no_petting_while_waiting_or_dead(app, raw):
     card.close()
 
 
+# --- QtCard: shake-to-dizzy easter egg ---------------------------------------
+def test_vigorous_shaking_makes_the_card_dizzy(app):
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer())
+    x = 100
+    for _ in range(8):                       # a fast left/right zig-zag drag
+        x += 20
+        card._track_shake(x, 100)
+        x -= 20
+        card._track_shake(x, 100)
+    assert card._overlay.is_dizzy(time.time())
+    card.close()
+
+
+def test_a_gentle_drag_does_not_make_the_card_dizzy(app):
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer())
+    for x in range(100, 200, 10):            # a straight, one-direction drag
+        card._track_shake(x, 100)
+    assert not card._overlay.is_dizzy(time.time())
+    card.close()
+
+
 # --- QtCard: the pushed pet look (mood tint + stage/hat) ---------------------
 # The manager only pushes a pet to a pet-enabled card, so these construct with
 # pet_enabled=True (a simple-mode card ignores the push and shows the fixed stage).
