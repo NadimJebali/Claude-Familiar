@@ -55,6 +55,23 @@ def load_settings() -> dict[str, Any]:
     return data
 
 
+def read_settings_or_none() -> dict[str, Any] | None:
+    """Like :func:`load_settings`, but ``None`` when the file is absent or
+    unparseable instead of silently falling back to the defaults — for the
+    widget's live settings watch (#81), where a torn mid-write read must apply
+    *nothing* rather than "apply factory defaults" (which would e.g. flip a
+    compact user back to classic). The completed write fires its own event."""
+    try:
+        saved = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(saved, dict):
+        return None
+    data = dict(DEFAULTS)
+    data.update({k: saved[k] for k in saved if k in DEFAULTS})
+    return data
+
+
 def save_settings(updates: dict[str, Any]) -> dict[str, Any]:
     """Merge `updates` into the saved settings and persist. Returns the result."""
     data = load_settings()

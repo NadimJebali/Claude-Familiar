@@ -496,6 +496,32 @@ def test_theme_defaults_to_classic_and_validates():
     assert settings_mod.valid_theme(None) == "classic"
 
 
+def test_read_settings_or_none_merges_saved_over_defaults(tmp_path, monkeypatch):
+    # #81: the widget's live settings watch needs "parsed" vs "can't read right
+    # now" — load_settings' silent defaults fallback would misread a torn write
+    # as a factory reset (e.g. flip a compact user back to classic).
+    from mascot import settings as settings_mod
+    sp = tmp_path / "settings.json"
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", sp)
+    sp.write_text(json.dumps({"theme": "compact", "alien_key": 1}), encoding="utf-8")
+    snap = settings_mod.read_settings_or_none()
+    assert snap is not None
+    assert snap["theme"] == "compact"
+    assert snap["native_notifications"] is False      # defaults fill the gaps
+    assert "alien_key" not in snap                    # foreign keys dropped
+
+
+def test_read_settings_or_none_missing_torn_or_non_dict_is_none(tmp_path, monkeypatch):
+    from mascot import settings as settings_mod
+    sp = tmp_path / "settings.json"
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", sp)
+    assert settings_mod.read_settings_or_none() is None       # absent
+    sp.write_text('{"theme": "comp', encoding="utf-8")        # torn mid-write
+    assert settings_mod.read_settings_or_none() is None
+    sp.write_text(json.dumps(["a", "list"]), encoding="utf-8")
+    assert settings_mod.read_settings_or_none() is None
+
+
 def test_config_clamp_handles_bounds_and_bad_values():
     from mascot import config
     assert config._clamp("nope", 5, 120, 30) == 30   # unparseable -> default

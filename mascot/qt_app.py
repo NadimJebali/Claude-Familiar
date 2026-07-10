@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
+from PySide6.QtCore import QFileSystemWatcher, QObject, QRunnable, QThreadPool, Signal
 from PySide6.QtWidgets import QApplication
 
 from . import (
@@ -124,6 +124,16 @@ class QtMascotApp(QObject):
                 self._pet_service = None
         self._pet_window: QtPetWindow | None = None   # the Pet window, when open
 
+        # The presentation seam (#74): classic = one QtCard per session (below,
+        # unchanged); compact = the one-panel session list, which consumes the
+        # same pushes (sessions / usage / context) instead of the cards. Assigned
+        # before the tray: its ctor consumes self._theme, and its best-effort
+        # except would silently eat the AttributeError (#80).
+        self._theme: str = config.THEME
+        self._compact: CompactWindow | None = None
+        if self._theme == "compact":
+            self._build_compact()
+
         # Best-effort tray: no host just means no icon, widget still runs. "Pet…"
         # appears only when the pet is live (its callback opens the in-process Pet
         # window); simple mode omits the callback, so the pure menu drops the row.
@@ -143,14 +153,6 @@ class QtMascotApp(QObject):
         except Exception as exc:  # noqa: BLE001 — never let the tray stop startup
             print("[mascot] system tray unavailable:", exc)
 
-        # The presentation seam (#74): classic = one QtCard per session (below,
-        # unchanged); compact = the one-panel session list, which consumes the
-        # same pushes (sessions / usage / context) instead of the cards.
-        self._theme: str = config.THEME
-        self._compact: CompactWindow | None = None
-        if self._theme == "compact":
-            self._build_compact()
-
         # Opt-in usage poller (#70): live 5h/weekly numbers without a CLI session.
         # Consent-first — built only when the setting is on; best-effort like the
         # tray (a poller failure never stops the widget).
@@ -162,6 +164,15 @@ class QtMascotApp(QObject):
                 self._usage_poller.start()
             except Exception as exc:  # noqa: BLE001 — never let the poller stop startup
                 print("[mascot] usage poller unavailable:", exc)
+
+        # Live settings-apply (#81): the Settings panel is a separate process
+        # writing settings.json; watch the file so a panel Save lands without a
+        # restart. Until the file first exists, watch its directory instead
+        # (the first-ever Save on a fresh machine), then hand over to the file.
+        self._settings_watch = QFileSystemWatcher(self)
+        self._settings_watch.fileChanged.connect(self._on_settings_file_event)
+        self._settings_watch.directoryChanged.connect(self._on_settings_dir_event)
+        self._watch_settings_path()
 
     def start(self) -> None:
         self._ingest.start()
@@ -221,6 +232,8 @@ class QtMascotApp(QObject):
         """The tray's Notifications row flipped: apply the mute live and persist it,
         so the choice survives a restart (and the Settings checkbox agrees)."""
         self._notifications_on = bool(on)
+        if self._tray is not None:   # a panel-side flip reaches the row too (#81)
+            self._tray.set_notifications(self._notifications_on)
         try:
             settings.save_settings({"native_notifications": self._notifications_on})
         except OSError as exc:
@@ -263,6 +276,47 @@ class QtMascotApp(QObject):
         if self._tray is not None:
             self._tray.set_theme(theme)
         self._ingest.read_now()                   # rebuild from the current snapshot
+
+    # --- live settings-apply (#81) ------------------------------------------
+    def _watch_settings_path(self) -> None:
+        """Keep the watcher aimed at settings.json: the file itself once it
+        exists (re-added after every event — a rewrite can drop the watch), its
+        parent directory until then."""
+        p = settings.SETTINGS_PATH
+        if p.exists():
+            if str(p) not in self._settings_watch.files():
+                self._settings_watch.addPath(str(p))
+            for d in self._settings_watch.directories():
+                self._settings_watch.removePath(d)   # the dir watch has done its job
+        elif p.parent.exists() and str(p.parent) not in self._settings_watch.directories():
+            self._settings_watch.addPath(str(p.parent))
+
+    def _on_settings_dir_event(self, _path: str) -> None:
+        first_sight = (not self._settings_watch.files()
+                       and settings.SETTINGS_PATH.exists())
+        self._watch_settings_path()
+        if first_sight:
+            self._apply_settings_change()            # the first-ever Save just landed
+
+    def _on_settings_file_event(self, _path: str) -> None:
+        self._watch_settings_path()
+        self._apply_settings_change()
+
+    def _apply_settings_change(self) -> None:
+        """Adopt the live-appliable keys from a settings.json change (#81) —
+        theme and the notifications mute, each through its normal setter behind
+        an equality gate. The setters persist as a side effect; the gate absorbs
+        that echo. A torn/corrupt read applies nothing (``None`` from the
+        reader); the completed write fires its own event."""
+        snap = settings.read_settings_or_none()
+        if snap is None:
+            return
+        notif = bool(snap["native_notifications"])
+        if notif != self._notifications_on:
+            self._set_notifications(notif)
+        theme = settings.valid_theme(snap["theme"])
+        if theme != self._theme:
+            self._set_theme(theme)
 
     def _on_petted(self, _session_id: str) -> None:
         """A card was petted: the happy hop already played on the card; award the

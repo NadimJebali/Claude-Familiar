@@ -111,6 +111,7 @@ class QtSystemTray:
             {"notifications": notifications_on} if on_notifications is not None else {})
         self._theme_current = current_theme
         self._theme_actions: dict[str, object] = {}   # value -> QAction (radio checks)
+        self._check_actions: dict[str, object] = {}   # key -> QAction (check sync, #81)
 
         tray = QSystemTrayIcon()
         tray.setToolTip(tooltip)
@@ -137,6 +138,7 @@ class QtSystemTray:
                 # the NEW state so the app can apply + persist it.
                 action.setCheckable(True)
                 action.setChecked(self._check_state.get(key, False))
+                self._check_actions[key] = action
                 action.triggered.connect(
                     lambda checked=False, k=key: self._actions[k](bool(checked)))
             else:
@@ -165,6 +167,14 @@ class QtSystemTray:
         self._theme_current = theme
         for value, action in self._theme_actions.items():
             action.setChecked(value == theme)  # type: ignore[attr-defined]
+
+    def set_notifications(self, on: bool) -> None:
+        """Reflect an applied mute flip in the checkable row (#81) — programmatic
+        ``setChecked`` emits no ``triggered``, so this can't loop back into the app."""
+        self._check_state["notifications"] = bool(on)
+        action = self._check_actions.get("notifications")
+        if action is not None:
+            action.setChecked(bool(on))  # type: ignore[attr-defined]
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
