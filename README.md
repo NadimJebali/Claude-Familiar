@@ -57,8 +57,16 @@ baby / teen / adult) in **Settings → Appearance → Mascot Look**.
   session** and **7-day weekly** usage (for Claude subscribers), filled
   traffic-light style — calm below 70%, warning-amber from 70%, alarm-red from 90%
   — so you see a limit coming instead of meeting the gravestone. Each bar empties
-  on its own when its window resets. (API-key users, or anyone without the
-  statusline feed, simply see an empty row.)
+  on its own when its window resets. Numbers older than 15 minutes draw dimmed
+  under a small **stale** label, so aged data never masquerades as live. (API-key
+  users, or anyone without a usage feed, simply see an empty row.) Want the bars
+  live even without a terminal session? See **Live usage without a terminal**
+  below — an opt-in poller.
+- **Context ring.** A small VS Code-style ring at the card's top-right fills
+  clockwise as the session's **context window** fills (read by tailing the
+  session transcript — works in the VS Code extension too), turning amber at 70%
+  and red at 90%: compaction is coming. It appears once the session has its first
+  assistant turn.
 - **Expressive faces.** While working, the eyes match the tool — reading
   (Read/Grep), editing (Edit/Write), running commands (Bash, gritted teeth), or
   browsing the web. In **plan mode** it wears a pondering *planning…* face. When
@@ -79,15 +87,23 @@ baby / teen / adult) in **Settings → Appearance → Mascot Look**.
   card (creature, text, badges) scales uniformly.
 - **Mascot app icon.** Windows shortcuts and the running app use an icon rendered
   straight from the pixel mascot, so the taskbar matches the card on screen.
+- **Two themes, switchable live.** **Classic** is the mascot card described here.
+  **Compact** is a single small panel with one slim row per session — effort dot ·
+  state text · model · sub-agent count · context ring — with the usage bars once
+  at the bottom: a quiet "work mode" with no mascot, no shake, and the needs-you
+  message inline in its row. Switch from the tray's **Theme** submenu (applies
+  instantly) or the Settings dropdown.
 - **System tray (Windows / Linux / macOS).** A `QSystemTrayIcon` sits in the
-  notification area; its menu has *Pet…*, *Show / hide cards*, *Settings…*, and
-  *Quit*. On Windows a left-click also shows/hides all the cards.
+  notification area; its menu has *Pet…*, *Show / hide cards*, *Settings…*, a
+  checkable *Notifications* mute, a *Theme* submenu, and *Quit*. On Windows a
+  left-click also shows/hides all the cards.
 - **Permission speech bubble + native toast.** When Claude needs you (e.g. a
   permission prompt) or hits a usage limit, a comic-style speech bubble pops up
   over the mascot with the message — and a **native OS notification** (the tray's
-  `showMessage`) fires too, so you notice even with the card off-screen or while
-  you're in another app. It's edge-triggered, so a prompt toasts once, not on every
-  update.
+  `showMessage`) can fire too, so you notice even with the card off-screen.
+  Toasts are edge-triggered (a prompt toasts once, not on every update) and ship
+  **off by default** — flip the tray's *Notifications* row (applies live) or the
+  Settings checkbox to enable them.
 - **Impatient shake.** If a permission/attention prompt goes unanswered for 30s,
   the card starts to shake — and the longer you ignore it, the more frantic it
   gets, until you respond.
@@ -106,6 +122,10 @@ Hooks just write a small JSON state file; the widget polls and renders it.
 
 Beyond the live status, the familiar is a **virtual pet you raise over time** —
 one global creature shared across all your sessions, a delight rather than a chore.
+
+> **Off by default.** A fresh install is a quiet hook visualiser (the same live
+> faces, no pet layer). Turn the pet on in **Settings → Behavior → Enable the
+> Tamagotchi pet** (takes effect on restart); progress is kept across off spells.
 
 <p align="center">
   <img src="docs/images/evolution.png" width="72%"
@@ -223,6 +243,23 @@ To remove the hooks later (also removes our statusline, only if it's ours):
 ```bash
 python scripts/install_hooks.py --uninstall
 ```
+
+### Live usage without a terminal (opt-in)
+
+The statusline only runs in **terminal** sessions — the VS Code extension never
+invokes it, so the usage bars would age (and read **stale**) in an
+editor-only workflow. The widget can instead poll Anthropic's usage endpoint
+directly. It's **off by default** because of what it touches; turning it on
+(**Settings → Behavior → Poll Anthropic for live usage**) consents to exactly
+this:
+
+- it **reads** your Claude Code login token from `~/.claude/.credentials.json`;
+- it sends that token **only** to `https://api.anthropic.com/api/oauth/usage`,
+  as a Bearer header, every 5 minutes (backing off on rate limits);
+- it **never logs** the token and **never refreshes** it (it cannot mint or
+  renew credentials — an auth failure just skips the poll);
+- results merge into the same snapshot the statusline writes: the freshest
+  data wins, and neither source erases the other's fields.
 
 ## Run
 

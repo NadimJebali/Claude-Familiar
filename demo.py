@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
 """Demo the mascot widget with fake sessions — including the Tamagotchi pet.
 
-Creates a couple of test state files AND seeds a demo pet (a hatched, slightly
+Creates a few test state files AND seeds a demo pet (a hatched, slightly
 hungry teen with coins + items) so you can see the evolved creature, the idle-face
 mood, the hover tooltip, the food/zzz popups, and the Pet window (tray "Pet…", the
-on-card paw button, or Settings). The states carry an ``effort`` level and a demo
-``usage.json`` is seeded, so the effort-reactive card backgrounds and the 5h/weekly
-usage bars show too. Your real pet.json + usage.json are backed up and restored on
-exit, so the demo never touches your actual progress.
+on-card paw button, or Settings). The states carry an ``effort`` level, a demo
+``usage.json`` is seeded, and each session gets a tiny demo *transcript* so the
+context rings fill (76% amber / 96% red / 30% calm). Your real pet.json +
+usage.json + settings.json are backed up and restored on exit, so the demo never
+touches your actual progress.
 
-Run with:  python demo.py   (stop with Ctrl+C)
+Run with:  python demo.py             (stop with Ctrl+C)
+           python demo.py --compact   the Compact theme: one panel, session rows
+           python demo.py --stale     age the usage snapshot -> the "stale" label
 """
 import json
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+COMPACT = "--compact" in sys.argv
+STALE = "--stale" in sys.argv
 
 # The status output below uses check-marks; force UTF-8 so a non-UTF-8 Windows
 # console (cp1252) renders them instead of crashing with UnicodeEncodeError.
@@ -29,10 +35,26 @@ BASE = Path.home() / ".claude" / "mascot"
 STATE_DIR = BASE / "state"
 PET_PATH = BASE / "pet.json"
 USAGE_PATH = BASE / "usage.json"
+TRANSCRIPT_DIR = BASE / "demo-transcripts"
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 now = time.time()
 DAY = 86400.0
+
+
+def _write_transcript(sid: str, fill_pct: float) -> str:
+    """A tiny demo transcript whose last assistant turn holds fill_pct of the
+    200k context window — the real tailer reads it and the ring fills."""
+    TRANSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
+    path = TRANSCRIPT_DIR / f"{sid}.jsonl"
+    tokens = int(200_000 * fill_pct / 100)
+    line = {"type": "assistant", "isSidechain": False, "sessionId": sid,
+            "message": {"usage": {"input_tokens": 2,
+                                  "cache_read_input_tokens": tokens - 2,
+                                  "cache_creation_input_tokens": 0,
+                                  "output_tokens": 10}}}
+    path.write_text(json.dumps(line) + "\n", encoding="utf-8")
+    return str(path)
 
 # One busy card and one idle card — the idle one shows the pet's mood face, the
 # hover tooltip, and the food/zzz popups (busy states always win on the face).
@@ -44,6 +66,8 @@ states = [
         "tool": "Edit",
         "subagents": [{"id": "a", "type": "code-reviewer"}],
         "effort": "max",        # rainbow-animated panel (a steady working card)
+        "model": "claude-opus-4-8",
+        "transcript_path": _write_transcript("demo-frontend", 76.0),  # amber ring
         "ts": now,
     },
     {
@@ -53,6 +77,8 @@ states = [
         "tool": None,
         "subagents": [],
         "effort": "xhigh",      # purple-wave panel (a steady idle card)
+        "model": "claude-sonnet-5",
+        "transcript_path": _write_transcript("demo-backend", 96.0),   # red ring
         "ts": now,
     },
 ]
@@ -69,6 +95,8 @@ TOUR_BASE = {
     "permission_mode": "",
     "stumbled": False,
     "effort": "high",       # the tour card wears a steady periwinkle (static) tint
+    "model": "claude-haiku-4-5-20251001",
+    "transcript_path": _write_transcript("demo-tour", 30.0),          # calm ring
 }
 TOUR_PHASES = [
     {"state": "working", "tool": "Read"},        # reading eyes
@@ -103,12 +131,13 @@ demo_pet = {
 
 # A demo usage snapshot so the bottom bars show without a live statusline: the 5h
 # window warning-amber, the weekly window alarm-red. resets_at is far in the future
-# so neither decays to zero during the demo.
+# so neither decays to zero during the demo. --stale ages the write stamp so the
+# bars draw dimmed under the "stale" label (#69).
 demo_usage = {
     "five_hour": {"used_percentage": 76, "resets_at": now + 3 * 3600},
     "seven_day": {"used_percentage": 93, "resets_at": now + 5 * DAY},
     "effort": "max",
-    "ts": now,
+    "ts": now - 3600 if STALE else now,
 }
 
 print("Creating demo state files + a demo pet...")
@@ -146,20 +175,32 @@ try:
         except (OSError, json.JSONDecodeError):
             demo_settings = {}
     demo_settings["tamagotchi_enabled"] = True
+    demo_settings["theme"] = "compact" if COMPACT else "classic"
     SETTINGS_PATH.write_text(json.dumps(demo_settings, indent=2), encoding="utf-8")
 
     print()
     print("Launching the Claude Familiar widget (PySide6/Qt)...")
-    print("✓ Three cards appear bottom-right: one working, one idle, one on a face tour")
-    print("✓ The tour card cycles: reading / editing / running / browsing eyes,")
-    print("  planning (plan mode), tidying memories (compacting), and a brief 'oops…'")
-    print("✓ Each card wears its effort color: the working card rainbow-animates (max),")
-    print("  the idle card waves purple (xhigh), the tour card is a steady tint (high)")
-    print("✓ Usage bars sit at each card's bottom: 5h (amber) + weekly (red)")
-    print("✓ The idle card shows the pet's mood face + a food popup (it's hungry)")
-    print("✓ Hover a card for the status tooltip (needs / coins / level / name)")
-    print("✓ Click the paw button (or tray 'Pet…') to open the Pet window — shop, feed, play")
-    print("✓ Tap a card to pet it (+1 coin, rising hearts); faces crossfade, motion is smooth")
+    if COMPACT:
+        print("✓ COMPACT theme: one panel bottom-right, a slim row per session")
+        print("✓ Rows: effort dot · state · model · ×subagents · context ring")
+        print("  (frontend rainbow/max 76% ring, backend shimmer/xhigh 96% ring,")
+        print("   tour steady/high 30% ring; idle rows draw dimmed)")
+        print("✓ Usage bars once at the panel bottom" + (" — dimmed 'stale'" if STALE else ""))
+        print("✓ Tray → Theme → Classic switches back LIVE (no restart)")
+    else:
+        print("✓ Three cards appear bottom-right: one working, one idle, one on a face tour")
+        print("✓ The tour card cycles: reading / editing / running / browsing eyes,")
+        print("  planning (plan mode), tidying memories (compacting), and a brief 'oops…'")
+        print("✓ Each card wears its effort color: the working card rainbow-animates (max),")
+        print("  the idle card waves purple (xhigh), the tour card is a steady tint (high)")
+        print("✓ A context ring sits top-right: 76% amber, 96% red, 30% calm")
+        print("✓ Usage bars sit at each card's bottom: 5h (amber) + weekly (red)"
+              + (" — dimmed 'stale'" if STALE else ""))
+        print("✓ The idle card shows the pet's mood face + a food popup (it's hungry)")
+        print("✓ Hover a card for the status tooltip (needs / coins / level / name)")
+        print("✓ Click the paw button (or tray 'Pet…') to open the Pet window — shop, feed, play")
+        print("✓ Tap a card to pet it (+1 coin, rising hearts); faces crossfade, motion is smooth")
+        print("✓ Tray → Theme → Compact switches to the session-list panel LIVE")
     print("✓ Press Ctrl+C here to stop")
     print()
 
@@ -179,6 +220,12 @@ finally:
     for state in states:
         (STATE_DIR / f"{state['session_id']}.json").unlink(missing_ok=True)
     (STATE_DIR / "demo-tour.json").unlink(missing_ok=True)
+    for sid in ("demo-frontend", "demo-backend", "demo-tour"):
+        (TRANSCRIPT_DIR / f"{sid}.jsonl").unlink(missing_ok=True)
+    try:
+        TRANSCRIPT_DIR.rmdir()
+    except OSError:
+        pass
     # Restore your real pet + usage (or remove the demo files if you had none).
     if had_real_pet:
         PET_PATH.write_bytes(PET_BACKUP.read_bytes())
