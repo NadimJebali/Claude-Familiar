@@ -456,6 +456,44 @@ def test_emit_restamps_a_dead_owner_pid(tmp_path, monkeypatch):
     assert st["owner_pid"] == 222            # dead stamp: healed
 
 
+def test_file_field_is_sticky_per_turn():
+    # #85: the working file survives PostToolUse (individual edits finish in
+    # milliseconds — it must stay readable), is replaced by the next
+    # file-touching tool, and clears when the turn ends.
+    st = default_state("s")
+    st = compute_next_state(st, "PreToolUse",
+                            {"tool_name": "Read",
+                             "tool_input": {"file_path": "C:\\repo\\a.py"}})
+    assert st["file"] == "C:\\repo\\a.py"
+    st = compute_next_state(st, "PostToolUse", {"tool_name": "Read"})
+    assert st["file"] == "C:\\repo\\a.py"          # sticky between tools
+    st = compute_next_state(st, "PreToolUse",
+                            {"tool_name": "Bash", "tool_input": {"command": "ls"}})
+    assert st["file"] == "C:\\repo\\a.py"          # a no-file tool doesn't erase it
+    st = compute_next_state(st, "PreToolUse",
+                            {"tool_name": "NotebookEdit",
+                             "tool_input": {"notebook_path": "n.ipynb"}})
+    assert st["file"] == "n.ipynb"                 # replaced by the next file
+    st = compute_next_state(st, "Stop", {})
+    assert st["file"] == ""                        # turn end clears
+
+
+def test_file_ignores_subagent_tools_and_clears_on_failure_and_restart():
+    st = default_state("s")
+    st = compute_next_state(st, "PreToolUse",
+                            {"tool_name": "Edit", "agent_id": "a1",
+                             "tool_input": {"file_path": "inner.py"}})
+    assert st["file"] == ""                        # a sub-agent's file isn't the session's
+    st = compute_next_state(st, "PreToolUse",
+                            {"tool_name": "Edit", "tool_input": {"file_path": "top.py"}})
+    st = compute_next_state(st, "StopFailure", {"error_type": "overloaded"})
+    assert st["file"] == ""
+    st = compute_next_state(st, "PreToolUse",
+                            {"tool_name": "Edit", "tool_input": {"file_path": "top.py"}})
+    st = compute_next_state(st, "SessionStart", {})
+    assert st["file"] == ""
+
+
 def test_emit_never_rewalks_a_stamped_none_owner(tmp_path, monkeypatch):
     # The once-per-session import-cost concern survives (#17): a stamped None
     # (lookup failed / untrackable platform) is never re-detected per event.

@@ -297,6 +297,40 @@ def _paw_pixmap(px: int) -> QPixmap:
     return pixel_qt.grid_pixmap(ui_icons._ICONS["paw"], ui_icons.PALETTE, px)
 
 
+# The dim info line (#85): "file · model" under the caption while a turn has a
+# working file, the model tag alone otherwise.
+INFO_FG = "#9aa0ba"
+INFO_Y = 149                        # below the caption (132+text), above the badges (176)
+
+
+def file_basename(path: object) -> str:
+    """The display name of a stamped working file — the final path segment
+    (both separators handled; hooks write native paths)."""
+    if not isinstance(path, str) or not path:
+        return ""
+    return path.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def model_label(model: str | None) -> str:
+    """A short model tag: the ``claude-`` prefix and a trailing ``-YYYYMMDD``
+    date stamp dropped, budgeted to 14 chars. Lives here (not qt_compact) since
+    #85 puts it on the Classic card too — the import direction is compact → card."""
+    text = model or ""
+    if text.startswith("claude-"):
+        text = text[len("claude-"):]
+    parts = text.rsplit("-", 1)
+    if len(parts) == 2 and len(parts[1]) == 8 and parts[1].isdigit():
+        text = parts[0]
+    return text[:14]
+
+
+def info_line(file: object, model: str | None) -> str:
+    """The card's dim second line: ``qt_app.py · fable-5`` while a turn has a
+    working file, the model tag alone otherwise, empty when neither is known."""
+    parts = [p for p in (file_basename(file), model_label(model)) if p]
+    return " · ".join(parts)
+
+
 class _CardPanel(QWidget):
     """The rounded panel: paints the panel, the (bobbing) creature, and the caption.
 
@@ -312,6 +346,7 @@ class _CardPanel(QWidget):
         self._fade = 1.0                      # 0..1 — how much the new face is shown
         self._scale = 1.0                     # evolution scale-up (1.0 = settled)
         self._caption = ""
+        self._info = ""                       # the dim file · model line (#85)
         self._bob = 0.0                       # sub-pixel float offset
         # The sub-agent badges: one shared mini-mascot pixmap, drawn ``_badge_count``
         # times in a centered row (all badges are identical, so a count is enough).
@@ -337,13 +372,15 @@ class _CardPanel(QWidget):
                  bars: tuple[tuple[str, float, str], ...] = (),
                  usage_stale: bool = False,
                  ring: tuple[float, str] | None = None,
-                 panel_bg: tuple = ("solid",)) -> None:
+                 panel_bg: tuple = ("solid",),
+                 info: str = "") -> None:
         frame = (pixmap, caption, bob, prev, fade, scale, badge, badge_count,
-                 panel_fill, border, bars, usage_stale, ring, panel_bg)
+                 panel_fill, border, bars, usage_stale, ring, panel_bg, info)
         if frame == self._frame:          # nothing changed this tick — skip the repaint
             return
         self._frame = frame
         self._pixmap, self._caption, self._bob = pixmap, caption, bob
+        self._info = info
         self._prev, self._fade, self._scale = prev, fade, scale
         self._badge, self._badge_count = badge, badge_count
         self._panel_fill, self._border, self._bars = panel_fill, border, bars
@@ -382,6 +419,12 @@ class _CardPanel(QWidget):
             p.drawText(QRectF(0, CAPTION_Y, CARD_W, 22),
                        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
                        self._caption)
+            if self._info:
+                p.setPen(QColor(INFO_FG))
+                p.setFont(QFont("Segoe UI", 7))
+                p.drawText(QRectF(0, INFO_Y, CARD_W, 14),
+                           Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+                           self._info)
 
             self._paint_badges(p)
             self._paint_usage(p)
@@ -761,7 +804,9 @@ class QtCard(QWidget):
                              badge=badge, badge_count=count,
                              panel_fill=panel_fill, border=border, bars=bars,
                              usage_stale=usage.is_stale(self._usage, now),
-                             ring=ring, panel_bg=panel_bg)
+                             ring=ring, panel_bg=panel_bg,
+                             info=info_line(self._state.get("file"),
+                                            self._state.get("model")))
 
     def _adopt_pixmap(self, pixmap: QPixmap, stage: str, now: float) -> None:
         """Swap in a new creature pixmap with the right transition: a stage change

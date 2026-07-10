@@ -344,6 +344,15 @@ def test_settings_echo_does_not_rebuild(app, tmp_path, monkeypatch):
     mgr._quit()
 
 
+# --- the file · model info line (#85) -------------------------------------------
+def test_info_line_joins_file_basename_and_model_tag():
+    assert qt_card.info_line(r"C:\repo\mascot\qt_app.py",
+                             "claude-fable-5") == "qt_app.py · fable-5"
+    assert qt_card.info_line("", "claude-opus-4-8") == "opus-4-8"   # idle: model alone
+    assert qt_card.info_line("hooks/emit.py", None) == "emit.py"
+    assert qt_card.info_line(None, None) == ""
+
+
 # --- QtCard: constructs and swaps state without error ------------------------
 def test_card_constructs_and_swaps_state(app):
     renderer = QtPixmapRenderer()

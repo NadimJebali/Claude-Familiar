@@ -67,6 +67,7 @@ states = [
         "subagents": [{"id": "a", "type": "code-reviewer"}],
         "effort": "max",        # rainbow-animated panel (a steady working card)
         "model": "claude-opus-4-8",
+        "file": "C:/project/frontend/src/App.tsx",   # the file · model line (#85)
         "transcript_path": _write_transcript("demo-frontend", 76.0),  # amber ring
         "ts": now,
     },

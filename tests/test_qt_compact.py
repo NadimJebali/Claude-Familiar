@@ -58,6 +58,16 @@ def test_row_text_names_the_state_and_tool():
     assert qt_compact.row_text(_state(st="idle"), now) == "idle"
 
 
+def test_row_text_carries_the_working_file():
+    # #85: the sticky-per-turn file joins the row — with the tool while one runs,
+    # alone between tools (the file outlives each millisecond-fast PostToolUse).
+    now = time.time()
+    st = _state(st="working", tool="Edit", file=r"C:\repo\mascot\qt_app.py")
+    assert qt_compact.row_text(st, now) == "working · Edit · qt_app.py"
+    st["tool"] = None
+    assert qt_compact.row_text(st, now) == "working · qt_app.py"
+
+
 def test_row_text_waiting_carries_the_notify_inline_truncated():
     st = _state(st="waiting",
                 notify={"message": "Allow this Bash command to run tests?" * 3,

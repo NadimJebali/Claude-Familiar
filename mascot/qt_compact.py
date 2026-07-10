@@ -49,6 +49,8 @@ from .qt_card import (
     WORKING_STALL_S,
     _anchor_xy,
     _hex,
+    file_basename,
+    model_label,
 )
 
 # --- geometry -----------------------------------------------------------------
@@ -74,18 +76,6 @@ _EMPTY_TEXT = "no sessions"
 
 
 # --- pure row content -----------------------------------------------------------
-def model_label(model: str | None) -> str:
-    """A short model tag for the row: the ``claude-`` prefix and a trailing
-    ``-YYYYMMDD`` date stamp dropped, budgeted to 14 chars."""
-    text = model or ""
-    if text.startswith("claude-"):
-        text = text[len("claude-"):]
-    parts = text.rsplit("-", 1)
-    if len(parts) == 2 and len(parts[1]) == 8 and parts[1].isdigit():
-        text = parts[0]
-    return text[:14]
-
-
 def _draw_raw(state: dict[str, Any], now: float) -> str:
     """The raw to display, with the #52 pending-permission promotion applied —
     the same pure core the Classic card runs each frame."""
@@ -118,7 +108,10 @@ def row_text(state: dict[str, Any], now: float) -> str:
         return "thinking…"
     if raw == "working":
         tool = state.get("tool")
-        return f"working · {tool}" if tool else "working…"
+        # The sticky-per-turn file (#85) rides along — with the tool while one
+        # runs, alone between tools (it outlives each millisecond PostToolUse).
+        parts = [p for p in (tool, file_basename(state.get("file"))) if p]
+        return "working · " + " · ".join(parts) if parts else "working…"
     return str(raw)
 
 
