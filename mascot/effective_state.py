@@ -77,6 +77,47 @@ def compute(
     return raw
 
 
+def promote_pending_tool(
+    raw: str,
+    tool: str | None,
+    ts: float | None,
+    now: float,
+    *,
+    permission_wait_s: float,
+    working_stall_s: float,
+) -> str:
+    """Promote a long-pending main-thread tool call to ``waiting``.
+
+    A ``working`` state that still carries a ``tool`` name means a main-thread
+    PreToolUse fired with no closing PostToolUse yet. When that has sat past
+    ``permission_wait_s``, it is most likely blocked on a user approval prompt:
+    the VS Code extension emits **no hook** for "allow this command?" (confirmed
+    from a ``CLAUDE_MASCOT_DEBUG`` capture — no Notification, no AskUserQuestion),
+    so a tool that simply stops making progress is the only available tell.
+    Reading it as ``waiting`` lets the card shake/glare for attention through the
+    normal waiting machinery (feed the returned raw to the overlay's
+    ``note_raw``/``effective`` and the shake gate).
+
+    Bounded above by ``working_stall_s``: once the tool is stale enough that
+    ``compute``'s stall watchdog would call the turn dead, stop claiming
+    ``waiting`` so a genuinely wedged turn (a limit hit with no closing hook)
+    falls back to idle instead of shaking forever. A *tool-less* ``working``
+    (between tools — PostToolUse cleared the tool) is a reasoning stall, not a
+    pending approval, and is left to the idle watchdog; so is any non-``working``
+    state or a missing timestamp.
+
+    This is deliberately a **heuristic**: a genuinely long-running tool (a big
+    build/test run) looks identical and will briefly read as ``waiting`` too.
+    That trade-off is accepted — a VS Code permission prompt is otherwise
+    undetectable widget-side.
+    """
+    if raw != "working" or tool is None or ts is None:
+        return raw
+    if permission_wait_s <= now - ts < working_stall_s:
+        return "waiting"
+    return raw
+
+
 # --- display face (the face DRAWN for an effective state) --------------------
 # The effective state is semantic (it drives captions, emotes, animation); the
 # display face is purely visual. While working, the face reflects what KIND of

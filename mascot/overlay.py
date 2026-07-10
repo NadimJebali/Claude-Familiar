@@ -34,6 +34,7 @@ class OverlayConfig:
     blink_duration_s: float
     sleep_after_idle_s: float
     shake_after_s: float
+    permission_wait_s: float
     thinking_stall_s: float
     working_stall_s: float
 
@@ -82,6 +83,20 @@ class Overlay:
         if not active:
             return None
         return now if since is None else since
+
+    # --- raw promotion (pending permission prompt) ------------------------
+    def promote(self, raw: str, now: float, *, ts: float | None, tool: str | None) -> str:
+        """The raw the card should treat as current, with the pending-tool
+        heuristic applied: a main-thread tool left pending past ``permission_wait_s``
+        (most likely blocked on an "allow this command?" prompt, which emits no hook)
+        reads as ``waiting``. Feed the result to ``note_raw``/``effective`` and the
+        shake gate so the normal waiting machinery engages; delegates to the pure
+        core with this overlay's configured thresholds."""
+        return effective_state.promote_pending_tool(
+            raw, tool, ts, now,
+            permission_wait_s=self._cfg.permission_wait_s,
+            working_stall_s=self._cfg.working_stall_s,
+        )
 
     # --- the single read --------------------------------------------------
     def effective(self, raw: str, now: float, *, ts: float | None, mood: str = "content") -> str:
