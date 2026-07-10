@@ -120,6 +120,9 @@ def default_state(session_id: str, cwd: str = "", model: str = "") -> dict[str, 
         "permission_mode": "",  # e.g. "plan" — drives the planning face while set
         "stumbled": False,  # a turn just died on a transient API error (brief "oops")
         "effort": "",  # live reasoning effort (low/medium/high/xhigh/max); stamped by emit
+        # The session's transcript JSONL (hook payloads carry it) — lets the widget
+        # tail the transcript for the context gauge without guessing paths (#71).
+        "transcript_path": "",
     }
 
 
@@ -166,6 +169,10 @@ def compute_next_state(
         nxt["model"] = payload["model"]
     if payload.get("permission_mode"):
         nxt["permission_mode"] = payload["permission_mode"]
+    # Non-empty-only, like the identity fields above: an event that omits the
+    # transcript path (or carries it blank) never erases the recorded one.
+    if payload.get("transcript_path"):
+        nxt["transcript_path"] = payload["transcript_path"]
 
     if event == "SessionStart":
         nxt["state"] = "idle"
