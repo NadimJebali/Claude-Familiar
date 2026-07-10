@@ -1,14 +1,11 @@
 """Pixel art for the shop items (Tamagotchi #10), same blocky grid technique as
-the mascot. Each item is a 12x12 char grid; `draw_item` paints it on a canvas.
+the mascot. Each item is a 12x12 char grid; the Qt Pet window rasterizes one to a
+``QPixmap`` via :func:`mascot.pixel_qt.grid_pixmap`.
 
 Drafts meant to be iterated on visually — tweak a grid and it shows up in the Pet
 window shop/inventory immediately. Legend is the shared PALETTE below.
 """
 from __future__ import annotations
-
-import tkinter as tk
-
-from . import pixel_grid
 
 GRID = 12
 
@@ -120,12 +117,3 @@ _ITEMS: dict[str, list[str]] = {
 
 def has_art(item_id: str) -> bool:
     return item_id in _ITEMS
-
-
-def draw_item(c: tk.Canvas, item_id: str, cx: float, cy: float, px: int,
-              tag: str = "item") -> None:
-    """Draw item `item_id` centered at (cx, cy), one square per cell."""
-    grid = _ITEMS.get(item_id)
-    if grid is None:
-        return
-    pixel_grid.draw_grid(c, grid, PALETTE, cx, cy, px, tag)

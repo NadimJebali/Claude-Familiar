@@ -462,7 +462,7 @@ def test_config_clamp_handles_bounds_and_bad_values():
 
 def test_desktop_entry_contains_required_keys():
     from mascot import desktop_entry
-    text = desktop_entry.build("Claude Familiar", '"/usr/bin/python3" -m mascot.control_panel',
+    text = desktop_entry.build("Claude Familiar", '"/usr/bin/python3" -m mascot.qt_control_panel',
                                icon="/x/icon.png", path="/x", comment="hi")
     assert text.startswith("[Desktop Entry]")
     for key in ("Type=Application", "Name=Claude Familiar", "Exec=", "Icon=/x/icon.png",

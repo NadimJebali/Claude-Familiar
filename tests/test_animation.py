@@ -7,8 +7,8 @@ externally visible behaviour at each seam: a particle's position/alive-ness over
 its lifetime and the per-kind count cap; the shake offset's boundedness and its
 return to rest at ``end()``.
 
-Like the other pure-core tests, this never imports ``tkinter``: ``draw`` takes a
-tiny fake canvas, and ``offset`` is pure ``now``-in math.
+Like the other pure-core tests, this is view-free: ``advance`` returns the visible
+particles to paint, and ``offset`` is pure ``now``-in math.
 """
 from __future__ import annotations
 
@@ -16,34 +16,18 @@ import random
 
 from mascot import particles, shake
 
+
 # --- particle kinds (test doubles) ----------------------------------------
-# Real ParticleKinds, but their sprite shell is a recorder, so no Tk is touched.
-
-
-class _FakeCanvas:
-    """Records the tags deleted, so a test can assert the field clears its kinds."""
-
-    def __init__(self) -> None:
-        self.deleted: list[str] = []
-
-    def delete(self, tag: str) -> None:
-        self.deleted.append(tag)
-
-
 def _recording_kind(name: str, *, lifetime_s: float = 1.0, rise_px: float = 30.0,
                      max_count: int = 6, tag: str = "heart",
                      fade_from: tuple[int, int, int] | None = (255, 0, 0)) -> tuple:
-    """A ParticleKind whose draw shell appends each paint to ``painted``."""
-    painted: list[tuple] = []
-
-    def draw(_c, x, y, px, color) -> None:
-        painted.append((x, y, px, color))
-
+    """A real ParticleKind; the second tuple element is unused (kept for the callers'
+    ``kind, _ = ...`` unpacking)."""
     kind = particles.ParticleKind(
         name=name, lifetime_s=lifetime_s, rise_px=rise_px, pixel_px=2, tag=tag,
-        max_count=max_count, draw_sprite=draw, fade_from=fade_from,
+        max_count=max_count, fade_from=fade_from,
     )
-    return kind, painted
+    return kind, []
 
 
 def _field(**kinds) -> particles.Particles:
@@ -177,56 +161,35 @@ def test_kinds_sharing_a_tag_share_one_combined_cap():
     assert sorted(p.x for p in live) == [1.0, 2.0, 3.0]
 
 
-# --- draw -----------------------------------------------------------------
+# --- advance (the view-free paint list) -----------------------------------
 
-def test_draw_clears_tags_paints_visible_and_prunes_expired():
+def test_advance_returns_visible_and_prunes_expired():
     # Arrange: a visible heart and an already-expired one.
-    kind, painted = _recording_kind("heart", lifetime_s=1.0, tag="heart")
+    kind, _ = _recording_kind("heart", lifetime_s=1.0, tag="heart")
     field = _field(heart=kind)
     field.emit("heart", (10.0, 10.0), now=0.0)
     field.emit("heart", (99.0, 99.0), now=-5.0)   # spawned long ago -> expired
-    canvas = _FakeCanvas()
 
-    # Act.
-    field.draw(canvas, now=0.5)
+    painted = field.advance(0.5)
 
-    # Assert: the kind's tag was cleared, only the live particle painted, and the
-    # expired one is gone from the field.
-    assert "heart" in canvas.deleted
+    # Only the live particle is returned to paint, and the expired one is pruned.
     assert len(painted) == 1
     assert len(field.alive("heart", 0.5)) == 1
 
 
-def test_draw_paints_emotes_after_hearts_regardless_of_emission_order():
-    # Arrange: an emote is emitted FIRST, then a heart, while both are still live —
-    # the spatial overlap case. Tk paints later-drawn items on top, so the field
-    # must paint hearts before emotes (old _animate_hearts then _animate_emotes),
-    # not in raw emission order, to keep emotes stacked above hearts.
-    order: list[str] = []
-
-    def heart_draw(_c, x, y, px, color) -> None:
-        order.append("heart")
-
-    def emote_draw(_c, x, y, px, color) -> None:
-        order.append("emote")
-
-    heart = particles.ParticleKind(
-        name="heart", lifetime_s=1.0, rise_px=30.0, pixel_px=2, tag="heart",
-        max_count=6, draw_sprite=heart_draw, fade_from=(255, 0, 0),
-    )
-    emote = particles.ParticleKind(
-        name="food", lifetime_s=1.0, rise_px=30.0, pixel_px=2, tag="emote",
-        max_count=3, draw_sprite=emote_draw, fade_from=None,
-    )
+def test_advance_orders_emotes_after_hearts_regardless_of_emission_order():
+    # An emote is emitted FIRST, then a heart, while both are live. The panel paints
+    # in the returned order, so hearts must come before emotes (emotes stack on top)
+    # — by tag-registration order, not raw emission order.
+    heart, _ = _recording_kind("heart", tag="heart")
+    emote, _ = _recording_kind("food", tag="emote", fade_from=None)
     field = _field(heart=heart, food=emote)   # heart registered first
     field.emit("food", (0.0, 0.0), now=0.0)    # emote emitted before the heart
     field.emit("heart", (0.0, 0.0), now=0.0)
 
-    # Act.
-    field.draw(_FakeCanvas(), now=0.5)
+    painted = field.advance(0.5)
 
-    # Assert: the heart painted first, the emote last (so the emote sits on top).
-    assert order == ["heart", "emote"]
+    assert [kind.tag for kind, *_ in painted] == ["heart", "emote"]
 
 
 # --- shake ----------------------------------------------------------------

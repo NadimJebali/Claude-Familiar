@@ -21,8 +21,8 @@ driven entirely by Claude Code's [hooks](https://docs.anthropic.com/en/docs/clau
 One mascot per Claude session. Sub-agents show up as little badges underneath.
 
 The mascot is a **pixel-art creature** styled after Claude's blocky terminal
-mascot — drawn cell-by-cell on a Tkinter canvas (no image files, no GPU at
-runtime). Each state has its own face with a sparkle that glows in the state's
+mascot — 16×16 character grids rasterized to crisp pixmaps by the PySide6 (Qt)
+renderer (no image files). Each state has its own face with a sparkle that glows in the state's
 accent color. While working, the eyes match the tool (reading / editing /
 running / browsing); plan mode gets a pondering `planning` face; compaction a
 squeezed-shut `compacting` one. There's a `dizzy` shake easter egg, a teary
@@ -79,16 +79,15 @@ baby / teen / adult) in **Settings → Appearance → Mascot Look**.
   card (creature, text, badges) scales uniformly.
 - **Mascot app icon.** Windows shortcuts and the running app use an icon rendered
   straight from the pixel mascot, so the taskbar matches the card on screen.
-- **System tray (Windows / Linux / macOS).** A tray icon (via
-  [pystray](https://github.com/moses-palmer/pystray)) sits in the notification
-  area; its menu has *Pet…*, *Show / hide cards*, *Settings…*, and *Quit*. On
-  Windows a left-click also shows/hides all the cards.
+- **System tray (Windows / Linux / macOS).** A `QSystemTrayIcon` sits in the
+  notification area; its menu has *Pet…*, *Show / hide cards*, *Settings…*, and
+  *Quit*. On Windows a left-click also shows/hides all the cards.
 - **Permission speech bubble + native toast.** When Claude needs you (e.g. a
   permission prompt) or hits a usage limit, a comic-style speech bubble pops up
-  over the mascot with the message — and a **native OS notification** (via
-  [plyer](https://github.com/kivy/plyer)) fires too, so you notice even with the
-  card off-screen or while you're in another app. It's edge-triggered, so a prompt
-  toasts once, not on every poll.
+  over the mascot with the message — and a **native OS notification** (the tray's
+  `showMessage`) fires too, so you notice even with the card off-screen or while
+  you're in another app. It's edge-triggered, so a prompt toasts once, not on every
+  update.
 - **Impatient shake.** If a permission/attention prompt goes unanswered for 30s,
   the card starts to shake — and the longer you ignore it, the more frantic it
   gets, until you respond.
@@ -167,17 +166,15 @@ curves) are easy to tune in `mascot/pet_logic.py`, and item prices/effects in
 
 ## Requirements
 
-- **Windows** (tested on Windows 11 Pro) or **Linux** (X11; freedesktop `.desktop`
-  launchers). On Linux the floating card is opaque — X11 Tk has no chroma-key
-  transparency — so leave the "transparent card" option off there.
-- **Python 3.11+** with Tkinter (bundled with the standard python.org installer;
-  on Debian/Ubuntu install `python3-tk`)
+- **Windows** (tested on Windows 11 Pro) or **Linux** (a compositing desktop;
+  freedesktop `.desktop` launchers). The floating card uses real per-pixel
+  transparency via Qt, so it composites on Linux too — no chroma-key caveat.
+- **Python 3.11+** and **PySide6** (Qt for Python), installed from
+  `requirements.txt`. No system Tk needed.
 - **Runtime dependencies** are permitted as of
-  [ADR-0001](docs/adr/0001-runtime-dependencies.md) — the project no longer commits
-  to pure standard library. Any runtime deps live in `requirements.txt`
-  (`pip install -r requirements.txt`), with OS-specific ones gated by environment
-  markers. (The core today still runs on the standard library alone; third-party
-  packages land as issues #17–#20 are implemented.)
+  [ADR-0001](docs/adr/0001-runtime-dependencies.md) / [ADR-0002](docs/adr/0002-pyside6-migration.md).
+  They live in `requirements.txt` (`pip install -r requirements.txt`), with
+  OS-specific ones gated by environment markers.
 - The dev/test tools (`pytest`, `hypothesis`, `ruff`) live in `requirements-dev.txt`:
   `pip install -r requirements-dev.txt`.
 
@@ -196,7 +193,7 @@ mascot icon, just like any other app), and opens the **settings panel**. There y
 **widget size** (small / medium / large), toggle the transparent floating card,
 enable or disable the Tamagotchi pet (off = a simple hook visualiser),
 add/remove the app shortcuts, enable run-at-login, and launch the widget.
-Reopen it any time with `settings.bat` or `python -m mascot.control_panel`.
+Reopen it any time with `settings.bat` or `python -m mascot.qt_control_panel`.
 Settings live in `~/.claude/mascot/settings.json`.
 
 **Manual (hooks only):**
@@ -291,26 +288,25 @@ Claude Code session ──hooks──▶ emit.py ──atomic write──▶ ~/.
 - **`hooks/state_logic.py`** holds `compute_next_state(current, event, payload)`,
   a pure function (the unit-tested core) that maps each hook event to the next
   state.
+- **`mascot/qt_app.py`** (`QtMascotApp`) ingests the state directory event-driven
+  (a `QFileSystemWatcher` + a slow backstop timer, reads off the UI thread) and
+  creates/destroys one translucent Qt card (`mascot/qt_card.py`) per active session.
+  The mascot is rasterized from the 16×16 grids in **`mascot/sprite_pixel.py`** by
+  the `SpriteRenderer` seam (`mascot/sprite_qt.py`). It is also the single writer
+  of the pet (`pet.json`), applying decay and awarding coins/XP from the state
+  transitions each cycle.
 - **`hooks/status_emit.py`** is installed as Claude Code's **statusline** command.
   Claude hands it the statusline JSON on stdin; it writes the account-global
-  **usage** snapshot (5-hour + weekly limits) to `~/.claude/mascot/usage.json` for
-  the card's bars, and prints a compact `model · effort · 5h% · wk% · dir` line to
-  the terminal footer (effort-colored). Like `emit.py` it always exits 0 and never
-  clobbers a good snapshot on malformed input. This is a **second, independent
-  writer** (one global file, last-writer-wins — the limits are account-wide), so it
-  never races the per-session state files. The two pure cores behind it are
-  `mascot/statusline.py` (JSON → snapshot + footer) and `mascot/usage.py`
-  (snapshot → decayed bars + colors). *Note: the terminal footer + usage feed run
-  wherever Claude executes the statusline command; in editor sessions that don't,
-  the bars show the last-known numbers from your terminal sessions (limits are
-  account-global), decayed by each window's reset time.*
-- **`mascot/manager.py`** (`MascotManager`) polls the state directory every second
-  and creates/destroys one native Tkinter window (`mascot/tkinter_app.py`) per
-  active session. Each card is a single Canvas; the mascot is drawn by
-  **`mascot/sprite_pixel.py`**. The
-  manager is also the single writer of the pet (`pet.json`), applying decay and
-  awarding coins/XP from the polled state transitions, and it pushes the latest
-  usage snapshot to every card each poll.
+  **usage** snapshot (5-hour + weekly limits) to `~/.claude/mascot/usage.json` and
+  prints a compact `model · effort · 5h% · wk% · dir` line to the terminal footer
+  (effort-colored). Like `emit.py` it always exits 0 and never clobbers a good
+  snapshot on malformed input. This is a **second, independent writer** (one global
+  file, last-writer-wins — the limits are account-wide), so it never races the
+  per-session state files. The two pure cores behind it are `mascot/statusline.py`
+  (JSON → snapshot + footer) and `mascot/usage.py` (snapshot → decayed bars +
+  colors). *The terminal footer and the `usage.json` feed work today; surfacing them
+  on the Qt card (usage bars + an effort-reactive background) is a pending port of
+  the effort/usage visuals main shipped on the now-retired Tk card.*
 
 State files live in `~/.claude/mascot/state/`. Each carries a heartbeat (`ts`)
 and the owning `claude.exe` PID; a card is pruned the moment that process exits.
@@ -320,26 +316,37 @@ and the owning `claude.exe` PID; a card is pruned the moment that process exits.
 ```
 claude-mascot/
   mascot/
-    manager.py        # MascotManager: one Tk root, polls sessions, single writer of the pet
-    tkinter_app.py    # MascotWindow: one card per session (canvas, drag, pet, tooltip, paw btn)
+    qt_app.py         # QtMascotApp: owns the QApplication + cards + tray; single writer of the pet
+    qt_ingest.py      # event-driven state ingestion (QFileSystemWatcher, off-thread reads)
+    qt_card.py        # the session card: sprite, drag, pet, badges, shake, crossfade motion
+    qt_popups.py      # speech bubble + pet status tooltip (frameless Qt Tool windows)
+    qt_pet_window.py  # the Pet window: dashboard + shop + items + wardrobe (in-process or standalone)
+    qt_control_panel.py # settings panel: art, size, display, install, autostart, hooks, reset pet
+    qt_tray.py        # system-tray icon + menu + native toasts (QSystemTrayIcon)
+    qt_screens.py     # monitor work areas via Qt (the home-monitor index space)
+    sprite_qt.py      # SpriteRenderer: rasterize the grids to cached QPixmaps
+    pixel_qt.py       # rasterize a char-grid + palette to a QPixmap (icons)
     effective_state.py# pure overlay: dizzy/happy/sleeping/blink + stall watchdog + idle mood
-    popups.py         # speech bubble + pet status tooltip (frameless Toplevels)
+    overlay.py        # per-card effective-state timers over the pure core
+    roster.py         # pure card lifecycle: reconcile(shown, live) -> create/update/destroy
     popup_place.py    # pure multi-monitor popup placement (tested)
+    shake.py / particles.py  # pure attention-shake + rising-particle math
     scale.py          # widget-size scaling primitives
-    sprite_pixel.py   # Claude-style pixel creature: faces + evolution stages + hearts/emotes
+    sprite_pixel.py   # Claude-style pixel grids: faces + evolution stages + hats/hearts/emotes
     effort.py         # PURE effort core: normalize + palette + wave/rainbow color math (tested)
     usage.py          # PURE usage core: snapshot -> 5h/weekly bars w/ reset decay + colors (tested)
     statusline.py     # PURE: statusline JSON -> usage snapshot + terminal footer line (tested)
     pet_logic.py      # PURE pet core: decay, item effects, coins/XP, mood, level, stage (tested)
     pet_store.py      # pet.json wrapper: load/save + decay-on-load (single source of truth)
-    shop.py           # data-driven shop catalog + buy/feed/play (pure, tested)
-    pet_window.py     # the Pet window: dashboard + shop + feed/play (in-process or standalone)
+    pet_service.py    # per-cycle pet choreography (decay -> award -> milestone -> persist)
+    pet_view.py       # pure pet -> look projection (stage/hat/flourish/mood)
+    pet_host.py / pet_actions.py  # the PetHost seam + buy/feed/play/wear over it
+    shop.py / cosmetics.py  # data-driven shop + wardrobe catalogs (pure, tested)
+    schema.py         # versioned state-file contract validator (the public JSON contract)
     item_art.py       # pixel art for the shop items
-    icon.py           # app icon (.ico/.png + iconphoto) rendered from the pixel mascot
-    tray.py           # cross-platform system-tray icon + menu (pystray)
-    notifier.py       # native OS toast notifications (plyer; pure core + thin shell)
+    icon.py           # app-icon .ico/.png files rendered from the pixel mascot
+    notifier.py       # native-toast core (edge-detect + formatting; Qt tray is the sink)
     single_instance.py# one-widget-at-a-time guard (named mutex / flock)
-    control_panel.py  # settings panel: art, size, display, install, autostart, hooks, reset pet
     settings.py       # load/save ~/.claude/mascot/settings.json
     osplatform.py     # IS_WINDOWS / IS_LINUX / IS_MACOS + monitor work areas
     desktop_entry.py  # write freedesktop .desktop launchers (Linux)
@@ -356,8 +363,8 @@ claude-mascot/
     proc.py           # find owning Claude PID via process ancestry (psutil)
   scripts/
     install_hooks.py  # install/uninstall hooks in ~/.claude/settings.json
-    gen_readme_art.py # bake the README showcase PNGs from the sprite (Pillow)
-  tests/              # pytest suite for state_logic + emit
+    gen_readme_art.py # bake the README showcase PNGs from the sprite grids
+  tests/              # pytest suite (pure cores + offscreen Qt)
   install.py          # one-click installer (install.bat wraps it)
   settings.bat        # open the settings / control panel
   run_mascot.py       # entry point
@@ -392,14 +399,14 @@ length 99); `ruff check` is the gate. `ruff format` is intentionally not run as 
 bulk pass — the source is hand-formatted, so the lint config leaves layout alone.
 Static typing is [mypy](https://mypy.readthedocs.io/) (config in `mypy.ini`);
 `python -m mypy mascot hooks` passes clean. Third-party deps without bundled stubs
-(pystray, plyer, psutil, pywin32) are `ignore_missing_imports` per-module.
+(psutil, pywin32) are `ignore_missing_imports` per-module.
 
 ## Troubleshooting
 
 - **No card appears when Claude runs.** Make sure the widget is running
   (`python -m mascot`) and that hooks installed cleanly — re-run
   `python scripts/install_hooks.py` and check `~/.claude/settings.json`. The
-  interpreter in the hook command must be a Python that can import `tkinter`.
+  widget needs a Python with `PySide6` installed (`pip install -r requirements.txt`).
 - **Card lingers after closing a terminal.** It should vanish the moment the
   Claude process exits. If a session crashed in a way that hides its process from
   the widget, an owner-less card is pruned by the staleness backstop (~5 min).
@@ -410,15 +417,10 @@ Static typing is [mypy](https://mypy.readthedocs.io/) (config in `mypy.ini`);
   **Allow Launching**, or mark it trusted from a terminal:
   `gio set ~/Desktop/claude-familiar.desktop metadata::trusted true`
   (the application-menu entry doesn't need this).
-- **"Transparent card" does nothing on Linux.** Chroma-key transparency
-  (`-transparentcolor`) is a Windows-only Tk feature; on X11/Wayland the card is
-  always opaque regardless of the setting. Leave the toggle off on Linux.
-- **No system-tray icon.** The tray needs `pystray` + `Pillow`
-  (`pip install -r requirements.txt`) and a notification area to host it. If
-  they're missing — or the desktop has no tray host — the widget runs exactly the
-  same, just without an icon. (On Linux, pystray's AppIndicator backend may need
-  `gir1.2-appindicator3`.) Open settings with `python -m mascot.control_panel` and
-  quit the widget from its launcher/process.
+- **No system-tray icon.** The tray needs a notification area to host it. If the
+  desktop has no tray host, the widget runs exactly the same, just without an icon.
+  Open settings with `python -m mascot.qt_control_panel` and quit the widget from
+  its launcher/process.
 - **Only one widget runs at a time.** Launching the widget again (e.g. autostart
   plus a manual launch) is a no-op — a single-instance guard makes the second one
   exit cleanly, so cards never appear doubled.

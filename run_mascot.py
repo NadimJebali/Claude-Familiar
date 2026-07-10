@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Run the mascot widget with tkinter."""
-from mascot.manager import main
+"""Run the Claude Familiar widget (PySide6/Qt)."""
+from mascot.qt_app import main
 
 if __name__ == "__main__":
     main()

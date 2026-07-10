@@ -15,7 +15,7 @@ import copy
 from hypothesis import given
 from hypothesis import strategies as st
 
-from mascot import pet_logic, shop
+from mascot import pet_logic, roster, shop
 
 # --- shared strategies ----------------------------------------------------
 # Stats live on a 0..MAX_STAT bar; that's their valid input domain.
@@ -185,3 +185,42 @@ def test_play_keeps_toy_clamps_needs_sets_cooldown_and_never_mutates(
     assert out["cooldowns"][item["id"]] == played_at          # cooldown stamped at now
     assert out["xp"] == xp + shop.CARE_XP
     assert pet == before
+
+
+# --- roster: reconcile (issue #54) ---------------------------------------
+# A small id alphabet so `shown` and `live` overlap often (the interesting cases).
+_session_ids = st.text(alphabet="abcde", min_size=1, max_size=3)
+
+
+def _live(ids):
+    return {sid: {"session_id": sid, "state": "idle", "ts": 1.0, "subagents": []}
+            for sid in ids}
+
+
+@given(shown=st.sets(_session_ids, max_size=6), live_ids=st.sets(_session_ids, max_size=6))
+def test_reconcile_partitions_every_session_and_bounds_the_roster(shown, live_ids):
+    cmds = roster.reconcile(shown, _live(live_ids))
+    create_ids = {sid for sid, _s, _i in cmds.create}
+    update_ids = {sid for sid, _s in cmds.update}
+    destroy_ids = set(cmds.destroy)
+
+    # No session is ever in two buckets — in particular never both created and
+    # destroyed (the ticket's key invariant).
+    assert create_ids.isdisjoint(destroy_ids)
+    assert create_ids.isdisjoint(update_ids)
+    assert update_ids.isdisjoint(destroy_ids)
+    # Every live session is shown exactly once; destroy is exactly shown-not-live.
+    assert create_ids | update_ids == set(live_ids)
+    assert destroy_ids == set(shown) - set(live_ids)
+    # Applying the commands leaves a roster that IS the live set — bounded by it.
+    resulting = (set(shown) - destroy_ids) | create_ids
+    assert resulting == set(live_ids)
+
+
+@given(live_ids=st.sets(_session_ids, min_size=1, max_size=6))
+def test_reconcile_create_indices_are_the_sorted_positions(live_ids):
+    # From an empty roster every session is created, each carrying its rank in the
+    # sorted order — so the shell can place cards with no ordering logic of its own.
+    cmds = roster.reconcile([], _live(live_ids))
+    assert [(sid, i) for sid, _s, i in cmds.create] == \
+        [(sid, i) for i, sid in enumerate(sorted(live_ids))]

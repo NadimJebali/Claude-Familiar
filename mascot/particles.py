@@ -10,25 +10,15 @@ drifts ``drift * prog``, and fades by lerping its color toward the panel fill as
 it climbs, expiring at ``prog >= 1``. A per-kind lifetime/rise/pixel-size and the
 count cap come from a frozen ``ParticleKind``.
 
-The only Tk in this module is ``draw``: it deletes the kind's canvas tag and asks
-``sprite_pixel`` to paint each live particle. The lifetime/position/alive-ness is
-Tk-free and clock-free (``now`` is passed in), so it is unit-testable exactly
-like the pure cores the rest of the card wraps.
+The whole module is view-free and clock-free (``now`` is passed in): ``advance``
+prunes the expired and returns the visible particles as ``(kind, x, y, color)`` for
+the Qt panel to paint, so the lifetime/position/fade is unit-testable exactly like
+the pure cores the rest of the card wraps.
 """
 from __future__ import annotations
 
 import random
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    import tkinter as tk
-
-
-def _hex(rgb: tuple[int, int, int]) -> str:
-    r, g, b = (max(0, min(255, round(c))) for c in rgb)
-    return f"#{r:02x}{g:02x}{b:02x}"
 
 
 def _lerp(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[int, int, int]:
@@ -38,16 +28,15 @@ def _lerp(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[i
 @dataclass(frozen=True)
 class ParticleKind:
     """The fixed per-kind recipe: how long a particle lives, how far it climbs, its
-    pixel size and canvas tag, the count cap for its burst, and the thin sprite
-    shell that paints one. ``fade_from`` is the color a fading particle lerps from
-    toward the panel fill (``None`` for kinds — like food — that don't fade)."""
+    pixel size, its group ``tag`` (which shares a count cap), and ``max_count``.
+    ``fade_from`` is the color a fading particle lerps from toward the panel fill
+    (``None`` for kinds — like food — that don't fade)."""
     name: str
     lifetime_s: float
     rise_px: float
     pixel_px: int
     tag: str
     max_count: int
-    draw_sprite: Callable[[tk.Canvas, float, float, int, tuple[int, int, int] | None], None]
     fade_from: tuple[int, int, int] | None = None
 
 
@@ -146,27 +135,22 @@ class Particles:
 
     def alive(self, kind: str, now: float) -> list[_Particle]:
         """The still-living particles of one kind at ``now`` — for tests and the
-        prune in ``draw``."""
+        prune in ``advance``."""
         spec = self._kinds[kind]
         return [p for p in self._particles if p.kind is spec and p.alive(now)]
 
-    def draw(self, canvas: tk.Canvas, now: float) -> None:
-        """Repaint every kind at ``now`` and drop expired particles. Each canvas tag
-        is cleared first, then visible particles are painted via their kind's thin
-        sprite shell — the lone per-kind branch.
-
-        Painting walks the tags in registration order (hearts before emotes), and
-        within a tag keeps emission order, so the on-screen stacking matches the old
-        two-pass ``_animate_hearts`` then ``_animate_emotes`` — emotes always over
-        hearts — rather than a raw shared-list emission order."""
-        for tag in self._tag_order:
-            canvas.delete(tag)
+    def advance(self, now: float) -> list[tuple[ParticleKind, float, float,
+                                                 tuple[int, int, int] | None]]:
+        """Drop expired particles and return the visible ones to paint this frame as
+        ``(kind, x, y, color)``, walking the tags in registration order (hearts before
+        emotes) and keeping emission order within a tag — so emotes always stack over
+        hearts. View-free: the Qt panel paints the returned cells."""
         live = [p for p in self._particles if p.alive(now)]
+        painted: list[tuple[ParticleKind, float, float, tuple[int, int, int] | None]] = []
         for tag in self._tag_order:
             for p in live:
-                if p.kind.tag != tag:
-                    continue
-                if p.visible(now):
+                if p.kind.tag == tag and p.visible(now):
                     x, y = p.position(now)
-                    p.kind.draw_sprite(canvas, x, y, p.kind.pixel_px, p.color(now))
+                    painted.append((p.kind, x, y, p.color(now)))
         self._particles = live
+        return painted

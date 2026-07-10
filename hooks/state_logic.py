@@ -16,6 +16,18 @@ from typing import Any
 
 AGENT_TOOL = "Agent"
 
+# The tool Claude calls to ask the user a question. In the VS Code extension a
+# "needs you" moment surfaces as this tool call (a PreToolUse) rather than a
+# Notification hook, so the mascot treats it as the attention-grabbing "waiting"
+# state — see the PreToolUse branch.
+ASK_USER_TOOL = "AskUserQuestion"
+
+# Version of the state-file format this writer produces. emit.py stamps it onto
+# every file it writes; the widget's reader declares the version it understands
+# in mascot/schema.SCHEMA_VERSION, and a test asserts the two agree. Bump this
+# only on a breaking change to the file shape (a new optional field is not one).
+SCHEMA_VERSION = 1
+
 # Claude Code fires a Notification both for real permission/attention prompts
 # ("Claude needs your permission to use Bash") AND as a plain idle reminder
 # ("Claude is waiting for your input") after ~60s of inactivity. The idle nudge
@@ -117,6 +129,20 @@ def _is_top_level_agent_spawn(payload: dict[str, Any]) -> bool:
     return payload.get("tool_name") == AGENT_TOOL and not payload.get("agent_id")
 
 
+def _ask_user_message(tool_input: dict[str, Any]) -> str:
+    """A short prompt for the waiting bubble from an AskUserQuestion payload.
+
+    Prefers the first question's text (then its short header); falls back to a
+    generic line so the bubble/toast is never blank even if the shape shifts.
+    """
+    questions = tool_input.get("questions")
+    if isinstance(questions, list) and questions and isinstance(questions[0], dict):
+        text = questions[0].get("question") or questions[0].get("header")
+        if isinstance(text, str) and text:
+            return text
+    return "Claude has a question for you"
+
+
 def compute_next_state(
     current: dict[str, Any], event: str, payload: dict[str, Any]
 ) -> dict[str, Any]:
@@ -151,9 +177,9 @@ def compute_next_state(
         nxt["tool"] = None
 
     elif event == "PreToolUse":
-        nxt["state"] = "working"
         tool_input = payload.get("tool_input") or {}
         if _is_top_level_agent_spawn(payload):
+            nxt["state"] = "working"
             nxt["tool"] = None  # the sub-agent shows as its own badge, not the caption
             nxt["subagents"].append(
                 {
@@ -162,11 +188,22 @@ def compute_next_state(
                     "description": tool_input.get("description", ""),
                 }
             )
-        elif not payload.get("agent_id"):
-            # A main-thread tool: surface it in the caption. A tool running INSIDE a
-            # sub-agent carries a top-level agent_id and isn't part of the visible
-            # session, so it doesn't touch the caption.
-            nxt["tool"] = payload.get("tool_name")
+        elif payload.get("tool_name") == ASK_USER_TOOL and not payload.get("agent_id"):
+            # Claude called the ask-the-user tool: the turn is now blocked on the
+            # user, so shake for attention. This is how a "needs you" arrives from
+            # the VS Code extension (in place of a Notification hook). A nested
+            # call (carries agent_id) isn't the visible session and is left to the
+            # working branch below.
+            nxt["state"] = "waiting"
+            nxt["tool"] = None
+            nxt["notify"] = {"message": _ask_user_message(tool_input), "type": "question"}
+        else:
+            nxt["state"] = "working"
+            if not payload.get("agent_id"):
+                # A main-thread tool: surface it in the caption. A tool running
+                # INSIDE a sub-agent carries a top-level agent_id and isn't part of
+                # the visible session, so it doesn't touch the caption.
+                nxt["tool"] = payload.get("tool_name")
 
     elif event == "PostToolUse":
         if payload.get("tool_name") == AGENT_TOOL:

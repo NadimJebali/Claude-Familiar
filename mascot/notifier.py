@@ -1,21 +1,18 @@
 """Native OS toast notifications (#19), complementing the in-app speech bubble.
 
 When a session's ``notify`` (a permission/attention prompt, or a usage/session
-limit) first appears, the widget also raises a **native OS toast** via ``plyer`` —
-so you notice even when the card is off-screen or you're in another app. The bubble
-is unchanged; this is an addition, not a replacement.
+limit) first appears, the widget also raises a **native OS toast** — so you notice
+even when the card is off-screen or you're in another app. The bubble is unchanged;
+this is an addition, not a replacement. The Qt widget's sink is the system tray
+(:meth:`mascot.qt_tray.QtSystemTray.show_toast`); this module stays the pure core.
 
-The toast is **edge-triggered**: the state files are polled every 500ms and a
-``notify`` persists across polls, so a pure ``fresh_notifications`` step fires each
-notify exactly once (a notify that clears and returns, or whose message changes,
-fires again). The pure core (edge-detection + title/message formatting) is
-unit-tested; the plyer call is a thin, lazy, best-effort shell run on a daemon
-thread so it never blocks Tk and never crashes the widget.
+The toast is **edge-triggered**: a ``notify`` persists across ingest cycles, so a
+pure ``fresh_notifications`` step fires each notify exactly once (a notify that clears
+and returns, or whose message changes, fires again). ``toast_for`` formats the
+title/message. Both are view-free and unit-tested.
 """
 from __future__ import annotations
 
-import threading
-from collections.abc import Callable
 from typing import Any
 
 APP_NAME = "Claude Familiar"
@@ -67,27 +64,3 @@ def toast_for(notify: dict[str, Any] | None) -> tuple[str, str] | None:
     else:
         title = f"{APP_NAME} — needs you"
     return title, message
-
-
-def _show_blocking(title: str, message: str, timeout: int) -> None:
-    """Call plyer to show the toast (lazy import; best-effort)."""
-    try:
-        from plyer import notification
-        notification.notify(title=title, message=message,
-                            app_name=APP_NAME, timeout=timeout)
-    except Exception as exc:  # noqa: BLE001 — a toast must never crash the widget
-        print("[mascot] native notification unavailable:", exc)
-
-
-def notify_native(title: str, message: str, *, timeout: int = NOTIFY_TIMEOUT_S) -> None:
-    """Show a native OS toast on a daemon thread, so it never blocks the Tk loop."""
-    threading.Thread(target=_show_blocking, args=(title, message, timeout),
-                     daemon=True).start()
-
-
-def emit(notify: dict[str, Any] | None, *,
-         show: Callable[[str, str], None] = notify_native) -> None:
-    """Raise a toast for ``notify`` if it warrants one. ``show`` is injectable for tests."""
-    toast = toast_for(notify)
-    if toast is not None:
-        show(*toast)

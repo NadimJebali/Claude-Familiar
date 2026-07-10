@@ -103,7 +103,7 @@ def test_linux_enable_autostart_launches_the_widget(monkeypatch, tmp_path):
 # --- the .desktop text the adapter emits -----------------------------------
 def test_desktop_entry_build_has_required_fields():
     text = desktop_entry.build(
-        "Claude Familiar", '"py" -m mascot.control_panel',
+        "Claude Familiar", '"py" -m mascot.qt_control_panel',
         comment="Settings", icon="/i.png", path="/root")
     for needle in ("[Desktop Entry]", "Type=Application", "Name=Claude Familiar",
                    "Exec=", "Terminal=false", "Categories="):
