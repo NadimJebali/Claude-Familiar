@@ -5,7 +5,7 @@ emitter's I/O wrapper (``hooks/emit.py``): all the logic lives in the pure core
 (:mod:`mascot.pet_logic`); this module only does file I/O, stamps ``last_seen``,
 and applies **decay-on-load** so real elapsed time across restarts is honored.
 
-The widget process (:mod:`mascot.manager`) is the *single writer* — the Pet
+The widget process (:mod:`mascot.qt_app`) is the *single writer* — the Pet
 window (a later phase) reads/writes through it, so there are no cross-process
 races on the file.
 """

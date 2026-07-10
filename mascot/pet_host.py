@@ -1,10 +1,10 @@
 """The manager↔window contract, named (Deepen 5/6, #41).
 
-The windows (:class:`~mascot.tkinter_app.MascotWindow`, :class:`~mascot.pet_window.PetWindow`)
+The windows (:class:`~mascot.qt_card.QtCard`, :class:`~mascot.qt_pet_window.QtPetWindow`)
 used to depend on a loose bag of callback closures. ``PetHost`` names that contract:
 what a window needs from whatever hosts it — read/persist the one global pet, celebrate
 care on the cards, open the Pet window, and one ``pet_enabled`` flag that expresses
-simple (hook-visualiser) mode. :class:`~mascot.manager.MascotManager` is the production
+simple (hook-visualiser) mode. :class:`~mascot.qt_app.QtMascotApp` is the production
 adapter (persisting through :class:`~mascot.pet_service.PetService`, the single writer);
 the standalone Pet window and the tests supply their own.
 """

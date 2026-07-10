@@ -22,7 +22,7 @@ def test_create_shortcut_writes_a_lnk_with_round_tripping_fields(tmp_path):
     target = Path(sys.executable)  # a real exe, so TargetPath round-trips exactly
 
     ok = shortcuts.create_shortcut(lnk, target=target,
-                                   arguments="-m mascot.control_panel", description="Test")
+                                   arguments="-m mascot.qt_control_panel", description="Test")
     assert ok and lnk.exists()
 
     from win32com.client import Dispatch

@@ -47,7 +47,7 @@ def main() -> None:
 
     print(f"\nClaude Familiar is installed. Look for it in the {_MENU} / on your desktop.")
     print("Opening the settings panel...")
-    subprocess.run([sys.executable, "-m", "mascot.control_panel"], cwd=str(ROOT), check=False)
+    subprocess.run([sys.executable, "-m", "mascot.qt_control_panel"], cwd=str(ROOT), check=False)
 
 
 if __name__ == "__main__":
