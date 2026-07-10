@@ -4,7 +4,9 @@
 Creates a couple of test state files AND seeds a demo pet (a hatched, slightly
 hungry teen with coins + items) so you can see the evolved creature, the idle-face
 mood, the hover tooltip, the food/zzz popups, and the Pet window (tray "Pet…", the
-on-card paw button, or Settings). Your real pet.json is backed up and restored on
+on-card paw button, or Settings). The states carry an ``effort`` level and a demo
+``usage.json`` is seeded, so the effort-reactive card backgrounds and the 5h/weekly
+usage bars show too. Your real pet.json + usage.json are backed up and restored on
 exit, so the demo never touches your actual progress.
 
 Run with:  python demo.py   (stop with Ctrl+C)
@@ -26,6 +28,7 @@ for _stream in (sys.stdout, sys.stderr):
 BASE = Path.home() / ".claude" / "mascot"
 STATE_DIR = BASE / "state"
 PET_PATH = BASE / "pet.json"
+USAGE_PATH = BASE / "usage.json"
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 now = time.time()
@@ -40,6 +43,7 @@ states = [
         "state": "working",
         "tool": "Edit",
         "subagents": [{"id": "a", "type": "code-reviewer"}],
+        "effort": "max",        # rainbow-animated panel (a steady working card)
         "ts": now,
     },
     {
@@ -48,6 +52,7 @@ states = [
         "state": "idle",
         "tool": None,
         "subagents": [],
+        "effort": "xhigh",      # purple-wave panel (a steady idle card)
         "ts": now,
     },
 ]
@@ -63,6 +68,7 @@ TOUR_BASE = {
     "tool": None,
     "permission_mode": "",
     "stumbled": False,
+    "effort": "high",       # the tour card wears a steady periwinkle (static) tint
 }
 TOUR_PHASES = [
     {"state": "working", "tool": "Read"},        # reading eyes
@@ -95,27 +101,45 @@ demo_pet = {
     "equipped": {"head": "party_hat"},  # worn on the card + in the Pet window
 }
 
+# A demo usage snapshot so the bottom bars show without a live statusline: the 5h
+# window warning-amber, the weekly window alarm-red. resets_at is far in the future
+# so neither decays to zero during the demo.
+demo_usage = {
+    "five_hour": {"used_percentage": 76, "resets_at": now + 3 * 3600},
+    "seven_day": {"used_percentage": 93, "resets_at": now + 5 * DAY},
+    "effort": "max",
+    "ts": now,
+}
+
 print("Creating demo state files + a demo pet...")
 for state in states:
     (STATE_DIR / f"{state['session_id']}.json").write_text(json.dumps(state, indent=2))
 
-# Back up any real pet to a FILE before overwriting, so the demo never clobbers
-# your progress even if it dies before cleanup — the finally restores from this
-# backup no matter how the run ends (a plain in-memory copy is lost on a crash).
+# Back up any real pet + usage to FILES before overwriting, so the demo never clobbers
+# your progress even if it dies before cleanup — the finally restores from these
+# backups no matter how the run ends (a plain in-memory copy is lost on a crash).
 PET_BACKUP = BASE / "pet.json.demo-backup"
+USAGE_BACKUP = BASE / "usage.json.demo-backup"
 had_real_pet = PET_PATH.exists()
+had_real_usage = USAGE_PATH.exists()
 if had_real_pet:
     PET_BACKUP.write_bytes(PET_PATH.read_bytes())
+if had_real_usage:
+    USAGE_BACKUP.write_bytes(USAGE_PATH.read_bytes())
 
 proc = None
 try:
     PET_PATH.write_text(json.dumps(demo_pet, indent=2), encoding="utf-8")
+    USAGE_PATH.write_text(json.dumps(demo_usage, indent=2), encoding="utf-8")
 
     print()
     print("Launching the Claude Familiar widget (PySide6/Qt)...")
     print("✓ Three cards appear bottom-right: one working, one idle, one on a face tour")
     print("✓ The tour card cycles: reading / editing / running / browsing eyes,")
     print("  planning (plan mode), tidying memories (compacting), and a brief 'oops…'")
+    print("✓ Each card wears its effort color: the working card rainbow-animates (max),")
+    print("  the idle card waves purple (xhigh), the tour card is a steady tint (high)")
+    print("✓ Usage bars sit at each card's bottom: 5h (amber) + weekly (red)")
     print("✓ The idle card shows the pet's mood face + a food popup (it's hungry)")
     print("✓ Hover a card for the status tooltip (needs / coins / level / name)")
     print("✓ Click the paw button (or tray 'Pet…') to open the Pet window — shop, feed, play")
@@ -139,7 +163,7 @@ finally:
     for state in states:
         (STATE_DIR / f"{state['session_id']}.json").unlink(missing_ok=True)
     (STATE_DIR / "demo-tour.json").unlink(missing_ok=True)
-    # Restore your real pet (or remove the demo pet if you had none).
+    # Restore your real pet + usage (or remove the demo files if you had none).
     if had_real_pet:
         PET_PATH.write_bytes(PET_BACKUP.read_bytes())
         PET_BACKUP.unlink(missing_ok=True)
@@ -147,4 +171,9 @@ finally:
     else:
         PET_PATH.unlink(missing_ok=True)
         print("Removed the demo pet.json.")
+    if had_real_usage:
+        USAGE_PATH.write_bytes(USAGE_BACKUP.read_bytes())
+        USAGE_BACKUP.unlink(missing_ok=True)
+    else:
+        USAGE_PATH.unlink(missing_ok=True)
     print("Done.")

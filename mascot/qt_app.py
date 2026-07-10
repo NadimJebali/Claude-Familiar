@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QApplication
 
-from . import config, notifier, pet_actions, pet_service, roster, single_instance
+from . import config, notifier, pet_actions, pet_service, roster, single_instance, usage
 from .qt_card import QtCard
 from .qt_ingest import SessionIngest
 from .sprite_qt import QtPixmapRenderer
@@ -115,6 +115,7 @@ class QtMascotApp(QObject):
             self._cards[sid].set_state(state)
         self._notify(live)
         self._update_pet(live, now)
+        self._push_usage()
 
     def _notify(self, live: dict) -> None:
         """Edge-triggered native toast when a session's ``notify`` first appears.
@@ -158,6 +159,18 @@ class QtMascotApp(QObject):
                 card.set_pet(result.pet)
         except Exception as exc:  # noqa: BLE001 — the pet must never crash the widget
             print("[mascot] pet update failed:", exc)
+
+    def _push_usage(self) -> None:
+        """Push the account-global usage snapshot (5h + weekly) to every card each poll,
+        so their bottom bars reflect the latest numbers. The read is mtime-cached and
+        best-effort — a usage failure never disrupts the widget. Independent of the pet
+        toggle (usage is Claude status, not a pet), so simple-mode cards show it too."""
+        try:
+            snapshot = usage.load_usage()
+            for card in self._cards.values():
+                card.set_usage(snapshot)
+        except Exception as exc:  # noqa: BLE001 — usage must never crash the widget
+            print("[mascot] usage update failed:", exc)
 
     # --- PetHost: what the cards + Pet window need from their host ---------
     @property

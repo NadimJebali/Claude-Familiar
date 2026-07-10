@@ -22,7 +22,7 @@ from PySide6.QtCore import QEvent, QPointF, Qt, QThreadPool
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
 
-from mascot import config, pet_service, qt_app, qt_card, qt_ingest, qt_popups
+from mascot import config, effort, pet_service, qt_app, qt_card, qt_ingest, qt_popups, usage
 from mascot.sprite_qt import QtPixmapRenderer, SpriteSpec
 
 
@@ -554,3 +554,103 @@ def test_pet_enabled_card_before_first_push_is_a_bare_baby(app):
     rec = _RecordingRenderer()
     qt_card.QtCard("s", _state("s", "idle"), 0, rec, pet_enabled=True)
     assert rec.specs[-1].stage == "baby"
+
+
+# --- QtCard: effort-reactive panel + usage bars (main's effort/usage feature, ported) ---
+def _usage_snapshot(five=76.0, week=93.0, *, future=True):
+    """A usage snapshot with both windows; resets far in the future so neither
+    window decays to 0 during the test (or already past, to test reset decay)."""
+    reset = time.time() + 10_000 if future else time.time() - 1
+    return {"five_hour": {"used_percentage": five, "resets_at": reset},
+            "seven_day": {"used_percentage": week, "resets_at": reset}}
+
+
+def test_card_draws_usage_bars_from_the_snapshot(app):
+    card = qt_card.QtCard("s", _state("s", "working"), 0, QtPixmapRenderer())
+    card.set_usage(_usage_snapshot(76.0, 93.0))
+    bars = card._panel._bars
+    assert [(label, round(pct)) for label, pct, _ in bars] == [("5h", 76), ("7d", 93)]
+    # traffic-light colors: 76% -> warning amber, 93% -> alarm red.
+    assert bars[0][2] == qt_card._hex(usage.WARN)
+    assert bars[1][2] == qt_card._hex(usage.ALARM)
+    card.close()
+
+
+def test_card_without_usage_draws_no_bars(app):
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer())
+    assert card._panel._bars == ()               # nothing pushed -> an empty row
+    card.close()
+
+
+def test_usage_window_past_its_reset_reads_zero(app):
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer())
+    card.set_usage(_usage_snapshot(80.0, 90.0, future=False))   # both already reset
+    assert [round(pct) for _, pct, _ in card._panel._bars] == [0, 0]
+    card.close()
+
+
+def test_effort_tints_the_panel(app, monkeypatch):
+    monkeypatch.setattr(qt_card.effort, "settings_effort", lambda *a, **k: "")
+    st = {**_state("s", "working"), "effort": "high"}
+    card = qt_card.QtCard("s", st, 0, QtPixmapRenderer())
+    expected = qt_card._hex(effort.panel_fill("high", qt_card._PANEL_FILL_RGB, 0.0))
+    assert card._panel._panel_fill == expected
+    assert card._panel._panel_fill != qt_card.PANEL_FILL     # actually tinted
+    card.close()
+
+
+def test_no_effort_keeps_the_default_panel(app, monkeypatch):
+    monkeypatch.setattr(qt_card.effort, "settings_effort", lambda *a, **k: "")
+    card = qt_card.QtCard("s", _state("s", "working"), 0, QtPixmapRenderer())
+    assert card._panel._panel_fill == qt_card.PANEL_FILL     # unknown effort -> default
+    card.close()
+
+
+def test_max_effort_animates_the_panel_over_time(app, monkeypatch):
+    monkeypatch.setattr(qt_card.effort, "settings_effort", lambda *a, **k: "")
+    st = {**_state("s", "working"), "effort": "max"}
+    card = qt_card.QtCard("s", st, 0, QtPixmapRenderer())
+    first = card._panel._panel_fill
+    card._render(card._anim_t0 + effort.RAINBOW_PERIOD_S / 3)   # a third around the ring
+    assert card._panel._panel_fill != first                  # the rainbow moved
+    card.close()
+
+
+def test_dead_suppresses_the_effort_tint(app, monkeypatch):
+    monkeypatch.setattr(qt_card.effort, "settings_effort", lambda *a, **k: "")
+    st = {**_state("s", "dead"), "effort": "max"}
+    card = qt_card.QtCard("s", st, 0, QtPixmapRenderer())
+    assert card._panel._panel_fill == qt_card.PANEL_FILL     # a finished session stays sombre
+    card.close()
+
+
+def test_resolve_effort_prefers_state_over_settings(app, monkeypatch):
+    monkeypatch.setattr(qt_card.effort, "settings_effort", lambda *a, **k: "low")
+    st = {**_state("s", "working"), "effort": "max"}
+    card = qt_card.QtCard("s", st, 0, QtPixmapRenderer())
+    assert card._effort_display == "max"          # the per-turn state level wins the fallback
+    card.close()
+
+
+def test_animated_effort_accents_the_border_but_waiting_keeps_default(app, monkeypatch):
+    monkeypatch.setattr(qt_card.effort, "settings_effort", lambda *a, **k: "")
+    working = qt_card.QtCard("s", {**_state("s", "working"), "effort": "xhigh"}, 0,
+                             QtPixmapRenderer())
+    assert working._panel._border != qt_card.PANEL_EDGE      # xhigh accents the border
+    working.close()
+    # A waiting card keeps the default edge — the attention state wins over the accent.
+    waiting = qt_card.QtCard("s", {**_state("s", "waiting"), "effort": "xhigh"}, 0,
+                             QtPixmapRenderer())
+    assert waiting._panel._border == qt_card.PANEL_EDGE
+    waiting.close()
+
+
+def test_app_pushes_usage_to_every_card_each_poll(app, tmp_path, monkeypatch):
+    snap = {"five_hour": {"used_percentage": 55.0, "resets_at": time.time() + 9999}}
+    monkeypatch.setattr(qt_app.usage, "load_usage", lambda *a, **k: snap)
+    mgr = qt_app.QtMascotApp(tmp_path, service=_svc(tmp_path))
+    mgr._on_sessions({"s1": _state("s1", "working")})
+    card = mgr.cards["s1"]
+    assert card._usage == snap                                    # pushed to the card
+    assert [label for label, *_ in card._panel._bars] == ["5h"]   # rendered as one bar
+    mgr._on_sessions({})                                          # tidy up the card

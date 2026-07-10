@@ -65,12 +65,14 @@ from PySide6.QtWidgets import (
 from . import (
     config,
     effective_state,
+    effort,
     osplatform,
     particles,
     pixel_qt,
     qt_screens,
     shake,
     sprite_pixel,
+    usage,
 )
 from .overlay import Overlay, OverlayConfig
 from .pet_view import PetView, pet_view
@@ -80,11 +82,27 @@ from .sprite_qt import SpriteRenderer, SpriteSpec
 
 # --- card geometry (mirrors the Tk card's authored "small" size) ------------
 CARD_W = 158
-CARD_H = 211
+# The extra USAGE_ROW_H at the bottom holds the 5h/weekly usage bars below the
+# badges — a pure addition (mirrors the Tk card), so nothing above it moves.
+USAGE_ROW_H = 24
+CARD_H = 211 + USAGE_ROW_H
 CREATURE_PX = 5
 CREATURE_CY = 68        # vertical center of the creature zone
 CAPTION_Y = 132
 SHADOW_PAD = 18         # room around the panel so the drop shadow isn't clipped
+
+# Usage bars (5h / weekly) — two thin labeled bars at the very bottom, in the same
+# visual language as the tooltip's need bars (the layout mirrors the Tk card).
+USAGE_BAR_H = 6
+USAGE_BAR_GAP = 5                   # vertical gap between the two bars
+USAGE_ROW_TOP = 205                 # first bar's top edge (below the badge row)
+USAGE_LABEL_X = 17                  # "5h" / "7d" label, right-anchored here
+USAGE_BAR_X0 = 33                   # track left
+USAGE_BAR_X1 = 117                  # track right
+USAGE_PCT_X = 145                   # "NN%" text, right-anchored here
+USAGE_TRACK = "#2a2d3b"             # bar track (matches PANEL_EDGE)
+USAGE_LABEL_FG = "#8b8fa3"
+USAGE_PCT_FG = "#6b6f82"
 
 # Sub-agent badges: each live sub-agent shows as a small "working" mini-mascot in
 # the sub-agent accent, in a centered row below the caption (capped so a swarm can't
@@ -274,17 +292,25 @@ class _CardPanel(QWidget):
         self._frame: tuple = ()               # last-shown art tuple (repaint guard)
         # Rising particles to paint this frame: (grid, char->color, cx, cy, px).
         self._particles: list[tuple[list[str], dict[str, str], float, float, int]] = []
+        # Effort-reactive chrome + the usage bars, pushed by the card each render.
+        self._panel_fill = PANEL_FILL         # effort tint (xhigh/max animate)
+        self._border = PANEL_EDGE             # accent border for the animated levels
+        self._bars: tuple[tuple[str, float, str], ...] = ()   # (label, pct, color)
 
     def show_art(self, pixmap: QPixmap | None, caption: str, bob: float, *,
                  prev: QPixmap | None = None, fade: float = 1.0, scale: float = 1.0,
-                 badge: QPixmap | None = None, badge_count: int = 0) -> None:
-        frame = (pixmap, caption, bob, prev, fade, scale, badge, badge_count)
+                 badge: QPixmap | None = None, badge_count: int = 0,
+                 panel_fill: str = PANEL_FILL, border: str = PANEL_EDGE,
+                 bars: tuple[tuple[str, float, str], ...] = ()) -> None:
+        frame = (pixmap, caption, bob, prev, fade, scale, badge, badge_count,
+                 panel_fill, border, bars)
         if frame == self._frame:          # nothing changed this tick — skip the repaint
             return
         self._frame = frame
         self._pixmap, self._caption, self._bob = pixmap, caption, bob
         self._prev, self._fade, self._scale = prev, fade, scale
         self._badge, self._badge_count = badge, badge_count
+        self._panel_fill, self._border, self._bars = panel_fill, border, bars
         self.update()
 
     def set_particles(self, cells: list[tuple[list[str], dict[str, str],
@@ -301,8 +327,8 @@ class _CardPanel(QWidget):
             panel = QRectF(0.5, 0.5, CARD_W - 1, CARD_H - 1)
             path = QPainterPath()
             path.addRoundedRect(panel, PANEL_RADIUS, PANEL_RADIUS)
-            p.fillPath(path, QColor(PANEL_FILL))
-            p.setPen(QColor(PANEL_EDGE))
+            p.fillPath(path, QColor(self._panel_fill))
+            p.setPen(QColor(self._border))
             p.drawPath(path)
 
             self._paint_creature(p)
@@ -314,6 +340,7 @@ class _CardPanel(QWidget):
                        self._caption)
 
             self._paint_badges(p)
+            self._paint_usage(p)
             self._paint_particles(p)
         finally:
             p.end()
@@ -349,6 +376,28 @@ class _CardPanel(QWidget):
         for i in range(self._badge_count):
             cx = center0 + i * BADGE_GAP
             p.drawPixmap(round(cx - bw / 2), BADGE_CY - bh // 2, self._badge)
+
+    def _paint_usage(self, p: QPainter) -> None:
+        """Draw the 5h / weekly usage bars at the card bottom (nothing when there's no
+        usage data — API-key users, or before the first snapshot). Each bar: a short
+        label, a track, a traffic-light fill, and a NN% readout."""
+        p.setFont(QFont("Segoe UI", 6))
+        for i, (label, pct, color) in enumerate(self._bars):
+            top = USAGE_ROW_TOP + i * (USAGE_BAR_H + USAGE_BAR_GAP)
+            row = QRectF(0, top - 4, CARD_W, USAGE_BAR_H + 8)   # vertically centers the text
+            p.setPen(QColor(USAGE_LABEL_FG))
+            p.drawText(QRectF(0, row.y(), USAGE_LABEL_X, row.height()),
+                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, label)
+            p.fillRect(QRectF(USAGE_BAR_X0, top, USAGE_BAR_X1 - USAGE_BAR_X0, USAGE_BAR_H),
+                       QColor(USAGE_TRACK))
+            frac = max(0.0, min(1.0, pct / 100.0))
+            if frac > 0:
+                p.fillRect(QRectF(USAGE_BAR_X0, top, (USAGE_BAR_X1 - USAGE_BAR_X0) * frac,
+                                  USAGE_BAR_H), QColor(color))
+            p.setPen(QColor(USAGE_PCT_FG))
+            p.drawText(QRectF(USAGE_PCT_X - 40, row.y(), 40, row.height()),
+                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                       f"{round(pct)}%")
 
     def _paint_particles(self, p: QPainter) -> None:
         """Paint each rising particle's pixel grid, centered at its (cx, cy), at
@@ -427,6 +476,12 @@ class QtCard(QWidget):
         self._next_emote = 0.0
         self._had_particles = False
         self._eff = self._raw
+        # Effort-reactive background: the resolved level (per-session state -> global
+        # settings fallback) drives the panel tint each render (xhigh/max animate).
+        # The account-global usage snapshot (pushed by the manager, like the pet)
+        # drives the two bottom bars; None until the first push -> an empty row.
+        self._effort_display = self._resolve_effort()
+        self._usage: dict | None = None
         # Satellite popups: the speech bubble (while notify present) and the pet hover
         # tooltip (pet-enabled only). Both follow the card and are dismissed on hide.
         self._bubble: QtBubble | None = None
@@ -468,6 +523,7 @@ class QtCard(QWidget):
         if effective_state.should_celebrate(prev_raw, raw, bool(state.get("stumbled"))):
             self._overlay.note_celebrate(now)
         self._raw = raw
+        self._effort_display = self._resolve_effort()
         self._overlay.note_raw(raw, now)
         self._render(now)
         self._sync_bubble(state.get("notify"))
@@ -480,6 +536,19 @@ class QtCard(QWidget):
         if self._tooltip is not None:
             self._tooltip.set_pet(pet)
         self._render(time.time())
+
+    def set_usage(self, snapshot: dict | None) -> None:
+        """Adopt the latest account-global usage snapshot (the manager pushes it every
+        poll, like the pet): the next render recomputes the bars (with reset decay) and
+        repaints if they changed. Independent of the pet toggle — usage is Claude status,
+        so simple-mode cards show it too. Cheap; only stores the data."""
+        self._usage = snapshot
+        self._render(time.time())
+
+    def _resolve_effort(self) -> str:
+        """The effort level to display: the session's per-turn level (from the state
+        file) wins, falling back to Claude's global ``effortLevel`` setting."""
+        return effort.resolve(self._state.get("effort", ""), effort.settings_effort())
 
     def _effective_pet_view(self) -> PetView:
         """The look to draw, mirroring the Tk card's two edge cases: simple mode (pet
@@ -541,9 +610,26 @@ class QtCard(QWidget):
             self._prev_pixmap = None
         count = min(len(self._state.get("subagents") or []), MAX_BADGES)
         badge = self._badge_pixmap() if count else None
+
+        # Effort-reactive chrome: the panel tint (a gravestone stays sombre) and, for the
+        # two animated levels (xhigh/max), a live accent border — except while waiting,
+        # where the default edge leaves the attention shake/glare uncontested.
+        t = now - self._anim_t0
+        dead = self._raw == "dead"
+        fill_rgb = None if dead else effort.panel_fill(self._effort_display, _PANEL_FILL_RGB, t)
+        panel_fill = _hex(fill_rgb) if fill_rgb is not None else PANEL_FILL
+        border = PANEL_EDGE
+        if not dead and self._raw != "waiting":
+            accent = effort.border_accent(self._effort_display, t)
+            if accent is not None:
+                border = _hex(accent)
+        bars = tuple((b.label, b.pct, _hex(usage.bar_color(b.pct)))
+                     for b in usage.usage_view(self._usage, now))
+
         self._panel.show_art(self._pixmap, _CAPTIONS.get(face, self._raw), bob,
                              prev=self._prev_pixmap, fade=fade, scale=self._scale_now(now),
-                             badge=badge, badge_count=count)
+                             badge=badge, badge_count=count,
+                             panel_fill=panel_fill, border=border, bars=bars)
 
     def _adopt_pixmap(self, pixmap: QPixmap, stage: str, now: float) -> None:
         """Swap in a new creature pixmap with the right transition: a stage change
