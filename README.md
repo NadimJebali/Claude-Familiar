@@ -80,7 +80,10 @@ baby / teen / adult) in **Settings → Appearance → Mascot Look**.
   and red at 90%: compaction is coming. It appears once the session has its first
   assistant turn. The window size is inferred from the evidence: 200k until a
   session's tokens prove a **1M** window, then the gauge snaps (and sticks) to 1M
-  for that session.
+  for that session. Inference has a blind spot — a `[1m]` session *below* 200k
+  reads against 200k (nothing Claude Code writes exposes the real window) — so
+  **Settings → Context gauge** can pin the window to **200k** or **1M** outright;
+  a Save corrects the ring live.
 - **Expressive faces.** While working, the eyes match the tool — reading
   (Read/Grep), editing (Edit/Write), running commands (Bash, gritted teeth), or
   browsing the web. In **plan mode** it wears a pondering *planning…* face. When

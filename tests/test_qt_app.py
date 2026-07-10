@@ -420,6 +420,35 @@ def test_panel_mascot_look_save_applies_live_without_a_rebuild(app, tmp_path,
     mgr._quit()
 
 
+def test_panel_context_window_save_applies_live(app, tmp_path, monkeypatch):
+    # #95: the tailer reads the mode per poll, so adopting the config attribute
+    # is the whole live apply — the ring corrects on the next poll, no rebuild.
+    from mascot import settings as settings_mod
+    sp = tmp_path / "settings.json"
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", sp)
+    _write_settings(sp)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+
+    mgr = qt_app.QtMascotApp(state_dir)
+    assert config.CONTEXT_WINDOW_MODE == "auto"
+    _write_settings(sp, context_window="1m")          # the panel hits Save
+    mgr._apply_settings_change()
+    assert config.CONTEXT_WINDOW_MODE == "1m"
+    _write_settings(sp, context_window="2m")          # hand-edited garbage clamps
+    mgr._apply_settings_change()
+    assert config.CONTEXT_WINDOW_MODE == "auto"
+    mgr._quit()
+
+
+def test_valid_window_clamps_garbage():
+    from mascot import settings as settings_mod
+    assert settings_mod.valid_window("1m") == "1m"
+    assert settings_mod.valid_window("200k") == "200k"
+    assert settings_mod.valid_window("2m") == "auto"
+    assert settings_mod.valid_window(None) == "auto"
+
+
 def test_garbage_size_and_stage_apply_nothing(app, tmp_path, monkeypatch):
     from mascot import settings as settings_mod
     sp = tmp_path / "settings.json"

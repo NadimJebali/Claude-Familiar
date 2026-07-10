@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .settings import load_settings, valid_size, valid_stage, valid_theme
+from .settings import load_settings, valid_size, valid_stage, valid_theme, valid_window
 
 _S = load_settings()
 
@@ -86,6 +86,12 @@ USAGE_API_ENABLED = bool(_S["usage_api_enabled"])
 # one panel listing sessions as rows (#75). Validated so a hand-edited file can't
 # strand the widget. Startup value; the tray's live switch (#76) re-reads it.
 THEME = valid_theme(_S["theme"])
+
+# Which context window the ring gauge divides by (#95): "auto" infers it per
+# session (200k until the tokens prove 1M), "200k"/"1m" pin it. The transcript
+# tailer reads this attribute every poll, so a panel Save applies it live (#94's
+# watcher updates it here) and the gauge corrects within a second.
+CONTEXT_WINDOW_MODE = valid_window(_S["context_window"])
 
 # Per-state accent colors (R, G, B).
 STATE_COLORS = {

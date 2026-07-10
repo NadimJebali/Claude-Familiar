@@ -25,3 +25,4 @@ def _default_config(monkeypatch):
     monkeypatch.setattr(config, "WIDGET_SIZE", "small")
     monkeypatch.setattr(config, "UI_SCALE", 1.0)
     monkeypatch.setattr(config, "SIMPLE_STAGE", "baby")
+    monkeypatch.setattr(config, "CONTEXT_WINDOW_MODE", "auto")
