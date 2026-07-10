@@ -137,6 +137,27 @@ def test_manager_creates_updates_and_destroys_cards(app, tmp_path):
     assert mgr.cards == {}
 
 
+# --- the theme seam (#74): classic = cards, compact = the one-panel window ----
+def test_classic_theme_builds_cards_and_no_compact_window(app, tmp_path):
+    mgr = qt_app.QtMascotApp(tmp_path)                # default theme: classic
+    assert mgr._compact is None
+    mgr._on_sessions({"s1": _state("s1", "working")})
+    assert set(mgr.cards) == {"s1"}
+    mgr._on_sessions({})
+
+
+def test_compact_theme_routes_sessions_to_the_window_not_cards(app, tmp_path,
+                                                               monkeypatch):
+    monkeypatch.setattr(qt_app.config, "THEME", "compact")
+    mgr = qt_app.QtMascotApp(tmp_path)
+    assert mgr._compact is not None
+    mgr._on_sessions({"s1": _state("s1", "working"), "s2": _state("s2", "idle")})
+    assert mgr.cards == {}                            # no per-session cards at all
+    assert set(mgr._compact.sessions) == {"s1", "s2"}
+    mgr._quit()
+    assert mgr._compact is None                       # closed + dropped on quit
+
+
 # --- QtCard: constructs and swaps state without error ------------------------
 def test_card_constructs_and_swaps_state(app):
     renderer = QtPixmapRenderer()

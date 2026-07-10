@@ -140,6 +140,20 @@ class QtMascotApp(QObject):
         except Exception as exc:  # noqa: BLE001 — never let the tray stop startup
             print("[mascot] system tray unavailable:", exc)
 
+        # The presentation seam (#74): classic = one QtCard per session (below,
+        # unchanged); compact = the one-panel session list, which consumes the
+        # same pushes (sessions / usage / context) instead of the cards.
+        self._theme = config.THEME
+        self._compact = None
+        if self._theme == "compact":
+            try:
+                from .qt_compact import CompactWindow
+                self._compact = CompactWindow()
+                self._compact.show()
+            except Exception as exc:  # noqa: BLE001 — fall back to the classic cards
+                print("[mascot] compact window unavailable:", exc)
+                self._compact = None
+
         # Opt-in usage poller (#70): live 5h/weekly numbers without a CLI session.
         # Consent-first — built only when the setting is on; best-effort like the
         # tray (a poller failure never stops the widget).
@@ -160,6 +174,16 @@ class QtMascotApp(QObject):
         raise a native toast for any session that just started needing you, then
         advance the pet from this poll and push its look to every card."""
         now = time.time()
+        if self._compact is not None:
+            # Compact theme (#74): the one panel consumes the same pushes the
+            # cards would. The pet keeps earning (its card loop is just empty)
+            # and toasts stay edge-triggered; there are no per-session cards.
+            self._compact.set_sessions(live)
+            self._notify(live)
+            self._update_pet(live, now)
+            self._compact.set_usage(usage.load_usage())
+            self._poll_context(live)
+            return
         cmds = roster.reconcile(self._cards, live)
         for sid in cmds.destroy:
             self._cards.pop(sid).close()
@@ -246,9 +270,13 @@ class QtMascotApp(QObject):
             _ContextTask(self._tailer, paths, self._context_signals))
 
     def _on_context(self, results: dict) -> None:
-        """Adopt a finished context poll and push each session's % to its card."""
+        """Adopt a finished context poll and push each session's % to its card
+        (or to the compact panel's row rings)."""
         self._context_inflight = False
         self._context = dict(results)
+        if self._compact is not None:
+            self._compact.set_context(self._context)
+            return
         for sid, card in self._cards.items():
             card.set_context(self._context.get(sid))
 
@@ -316,6 +344,8 @@ class QtMascotApp(QObject):
     # --- tray callbacks (run on the UI thread) ---------------------------
     def _toggle_cards(self) -> None:
         self._cards_hidden = not self._cards_hidden
+        if self._compact is not None:
+            self._compact.hide() if self._cards_hidden else self._compact.show()
         for card in self._cards.values():
             card.hide() if self._cards_hidden else card.show()
 
@@ -330,6 +360,9 @@ class QtMascotApp(QObject):
         if self._usage_poller is not None:
             self._usage_poller.dispose()
             self._usage_poller = None
+        if self._compact is not None:
+            self._compact.close()
+            self._compact = None
         if self._pet_window is not None:
             self._pet_window.close()
             self._pet_window = None

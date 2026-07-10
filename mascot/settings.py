@@ -29,7 +29,18 @@ DEFAULTS: dict[str, Any] = {
     # and poll Anthropic's usage endpoint for live 5h/weekly numbers. The token is
     # never logged and never refreshed; see mascot/usage_api.py.
     "usage_api_enabled": False,
+    # Presentation theme (#74): "classic" = one mascot card per session (today's
+    # look); "compact" = one small panel listing every session as a row.
+    "theme": "classic",
 }
+
+THEMES = ("classic", "compact")
+
+
+def valid_theme(value: Any) -> str:
+    """``value`` if it names a known theme, else the classic default — so a
+    hand-edited settings file can never leave the widget without a presentation."""
+    return value if value in THEMES else "classic"
 
 
 def load_settings() -> dict[str, Any]:

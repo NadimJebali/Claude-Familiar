@@ -24,7 +24,7 @@ _SETTINGS = {
     "widget_size": "medium", "simple_stage": "teen", "transparent_bg": True,
     "shake_after_s": 30, "shake_max_amp_px": 16, "home_monitor": -1,
     "tamagotchi_enabled": True, "native_notifications": False,
-    "usage_api_enabled": False,
+    "usage_api_enabled": False, "theme": "classic",
 }
 
 
@@ -66,15 +66,17 @@ def test_save_persists_every_current_value(app, monkeypatch):
 
     panel._notify.setChecked(True)
     panel._usage_api.setChecked(True)      # opt in to the live-usage poller (#70)
+    panel._theme.setCurrentIndex(panel._theme.findData("compact"))   # switch theme (#74)
     panel._save()
 
     assert captured["widget_size"] == "medium"
     assert captured["native_notifications"] is True
     assert captured["usage_api_enabled"] is True
+    assert captured["theme"] == "compact"
     assert set(captured) == {
         "widget_size", "simple_stage", "transparent_bg", "shake_after_s",
         "shake_max_amp_px", "home_monitor", "tamagotchi_enabled", "native_notifications",
-        "usage_api_enabled"}
+        "usage_api_enabled", "theme"}
     panel.close()
 
 

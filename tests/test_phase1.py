@@ -485,6 +485,17 @@ def test_settings_default_to_quiet():
     assert settings_mod.DEFAULTS["native_notifications"] is False
 
 
+def test_theme_defaults_to_classic_and_validates():
+    # PRD #67 (#74): "classic" = today's mascot cards; "compact" = the one-panel
+    # session list. Unknown values (a hand-edited file) fall back to classic.
+    from mascot import settings as settings_mod
+    assert settings_mod.DEFAULTS["theme"] == "classic"
+    assert settings_mod.valid_theme("classic") == "classic"
+    assert settings_mod.valid_theme("compact") == "compact"
+    assert settings_mod.valid_theme("neon") == "classic"
+    assert settings_mod.valid_theme(None) == "classic"
+
+
 def test_config_clamp_handles_bounds_and_bad_values():
     from mascot import config
     assert config._clamp("nope", 5, 120, 30) == 30   # unparseable -> default
