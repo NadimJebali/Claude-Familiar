@@ -202,8 +202,13 @@ def test_usage_api_ships_opt_in():
     assert settings_mod.DEFAULTS["usage_api_enabled"] is False
 
 
-def test_manager_builds_no_poller_by_default(app, tmp_path):
-    from mascot import qt_app
+def test_manager_builds_no_poller_when_disabled(app, tmp_path, monkeypatch):
+    from mascot import config, qt_app
+    # Patch the flag rather than trusting DEFAULTS: on a machine whose real
+    # settings.json has consented (usage_api_enabled: true) the manager would
+    # otherwise build a live poller mid-suite. DEFAULTS=False is asserted by
+    # test_usage_api_ships_opt_in above.
+    monkeypatch.setattr(config, "USAGE_API_ENABLED", False)
     mgr = qt_app.QtMascotApp(tmp_path)
     assert mgr._usage_poller is None        # consent-first: off unless enabled
 
