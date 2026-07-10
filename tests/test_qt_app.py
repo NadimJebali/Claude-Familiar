@@ -606,13 +606,34 @@ def test_no_effort_keeps_the_default_panel(app, monkeypatch):
     card.close()
 
 
-def test_max_effort_animates_the_panel_over_time(app, monkeypatch):
+def test_max_effort_shows_a_moving_rainbow_gradient(app, monkeypatch):
     monkeypatch.setattr(qt_card.effort, "settings_effort", lambda *a, **k: "")
     st = {**_state("s", "working"), "effort": "max"}
     card = qt_card.QtCard("s", st, 0, QtPixmapRenderer())
+    first = card._panel._panel_gradient
+    assert first                                             # max paints a spatial wash
+    assert len({color for _, color in first}) >= 5           # many hues -> a rainbow
+    card._render(card._anim_t0 + effort.RAINBOW_PERIOD_S / 3)  # a third around the ring
+    assert card._panel._panel_gradient != first              # the wash scrolled
+    card.close()
+
+
+def test_only_max_uses_a_gradient(app, monkeypatch):
+    monkeypatch.setattr(qt_card.effort, "settings_effort", lambda *a, **k: "")
+    for level in ("high", "xhigh", "low"):
+        card = qt_card.QtCard("s", {**_state("s", "working"), "effort": level}, 0,
+                              QtPixmapRenderer())
+        assert card._panel._panel_gradient == ()             # solid tint, no wash
+        card.close()
+
+
+def test_xhigh_animates_its_flat_panel_tint_over_time(app, monkeypatch):
+    monkeypatch.setattr(qt_card.effort, "settings_effort", lambda *a, **k: "")
+    st = {**_state("s", "working"), "effort": "xhigh"}
+    card = qt_card.QtCard("s", st, 0, QtPixmapRenderer())
     first = card._panel._panel_fill
-    card._render(card._anim_t0 + effort.RAINBOW_PERIOD_S / 3)   # a third around the ring
-    assert card._panel._panel_fill != first                  # the rainbow moved
+    card._render(card._anim_t0 + effort.WAVE_PERIOD_S / 3)    # mid purple sweep
+    assert card._panel._panel_fill != first                  # the purple wave moved
     card.close()
 
 

@@ -157,6 +157,31 @@ def panel_fill(effort: str | None, base: RGB, t: float = 0.0) -> RGB | None:
     return blend(base, color, _BLEND_STRENGTH[level])
 
 
+# `max`'s background is a moving rainbow *wash* — a spatial gradient rather than the
+# single tint the other levels get, so the whole spectrum shows and flows across the
+# card (matching Claude Code's own rainbow "max" shimmer). More stops read as a
+# smoother spectrum; the wash is a touch stronger than the flat tint so the rainbow
+# actually reads over the dark panel without drowning the creature.
+GRADIENT_STOPS = 8
+_GRADIENT_STRENGTH = 0.42
+
+
+def panel_gradient(effort: str | None, base: RGB, t: float) -> list[tuple[float, RGB]] | None:
+    """The ``max`` background as a moving rainbow wash: gradient ``(fraction, color)``
+    stops over the dark ``base`` at time ``t``. One full rainbow ring spans the axis
+    (so the first and last stop match, wrapping seamlessly) and the whole pattern
+    scrolls as ``t`` advances — the wave moves. ``None`` for every other level, which
+    use the single-color :func:`panel_fill`.
+    """
+    if normalize(effort) != "max":
+        return None
+    stops: list[tuple[float, RGB]] = []
+    for i in range(GRADIENT_STOPS):
+        f = i / (GRADIENT_STOPS - 1)
+        stops.append((f, blend(base, rainbow_color(t + f * RAINBOW_PERIOD_S), _GRADIENT_STRENGTH)))
+    return stops
+
+
 # The two "special" levels whose background animates; the quiet levels stay static.
 _ANIMATED = frozenset({"xhigh", "max"})
 

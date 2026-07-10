@@ -306,7 +306,8 @@ Claude Code session ──hooks──▶ emit.py ──atomic write──▶ ~/.
   (JSON → snapshot + footer) and `mascot/usage.py` (snapshot → decayed bars +
   colors). The Qt card surfaces the snapshot as two bottom **usage bars** (5h +
   weekly, traffic-light colored) and an **effort-reactive panel background** (xhigh
-  waves purple, max cycles the rainbow), pushed by `QtMascotApp` each poll. *Note:
+  waves purple; max flows a moving rainbow wash across the card, like Claude Code's
+  own max shimmer), pushed by `QtMascotApp` each poll. *Note:
   the terminal footer + usage feed run wherever Claude executes the statusline
   command; in editor sessions that don't, the bars show the last-known numbers from
   your terminal sessions (limits are account-global), decayed by each window's reset
