@@ -202,6 +202,37 @@ def test_live_theme_switch_honors_hidden_state_and_same_theme_is_a_noop(
     mgr._quit()
 
 
+# --- the tray is part of startup (#80) -----------------------------------------
+def test_tray_is_constructed_with_the_startup_theme(app, tmp_path, monkeypatch):
+    """#76 regression: the tray build read self._theme before the seam assigned
+    it; the best-effort except swallowed the AttributeError, so every real run
+    silently lost the whole tray (menu, mute, theme switch, quit, toasts)."""
+    from mascot import qt_tray
+    built: list[dict] = []
+
+    class _FakeTray:
+        def __init__(self, **kwargs):
+            built.append(kwargs)
+
+        def set_theme(self, theme):
+            pass
+
+        def set_notifications(self, on):
+            pass
+
+        def show_toast(self, *args):
+            pass
+
+        def dispose(self):
+            pass
+
+    monkeypatch.setattr(qt_tray, "QtSystemTray", _FakeTray)
+    mgr = qt_app.QtMascotApp(tmp_path)
+    assert mgr._tray is not None                   # the build must not silently die
+    assert built[0]["current_theme"] == "classic"  # the (conftest-pinned) startup theme
+    mgr._quit()
+
+
 # --- QtCard: constructs and swaps state without error ------------------------
 def test_card_constructs_and_swaps_state(app):
     renderer = QtPixmapRenderer()

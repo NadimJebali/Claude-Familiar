@@ -124,6 +124,16 @@ class QtMascotApp(QObject):
                 self._pet_service = None
         self._pet_window: QtPetWindow | None = None   # the Pet window, when open
 
+        # The presentation seam (#74): classic = one QtCard per session (below,
+        # unchanged); compact = the one-panel session list, which consumes the
+        # same pushes (sessions / usage / context) instead of the cards. Assigned
+        # before the tray: its ctor consumes self._theme, and its best-effort
+        # except would silently eat the AttributeError (#80).
+        self._theme: str = config.THEME
+        self._compact: CompactWindow | None = None
+        if self._theme == "compact":
+            self._build_compact()
+
         # Best-effort tray: no host just means no icon, widget still runs. "Pet…"
         # appears only when the pet is live (its callback opens the in-process Pet
         # window); simple mode omits the callback, so the pure menu drops the row.
@@ -142,14 +152,6 @@ class QtMascotApp(QObject):
             )
         except Exception as exc:  # noqa: BLE001 — never let the tray stop startup
             print("[mascot] system tray unavailable:", exc)
-
-        # The presentation seam (#74): classic = one QtCard per session (below,
-        # unchanged); compact = the one-panel session list, which consumes the
-        # same pushes (sessions / usage / context) instead of the cards.
-        self._theme: str = config.THEME
-        self._compact: CompactWindow | None = None
-        if self._theme == "compact":
-            self._build_compact()
 
         # Opt-in usage poller (#70): live 5h/weekly numbers without a CLI session.
         # Consent-first — built only when the setting is on; best-effort like the
