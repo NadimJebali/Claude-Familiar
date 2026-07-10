@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .settings import load_settings, valid_theme
+from .settings import load_settings, valid_size, valid_stage, valid_theme
 
 _S = load_settings()
 
@@ -43,7 +43,7 @@ TRANSPARENT_BG = _S["transparent_bg"]
 # one painter transform (#93). The factors keep the creature's 5px sprite cells
 # integral under that transform (5 -> 7 / 9 device px) so the pixel art stays
 # crisp — which is why they aren't the Tk card's old 1.3/1.6.
-WIDGET_SIZE = _S["widget_size"]
+WIDGET_SIZE = valid_size(_S["widget_size"])
 UI_SCALE_BY_SIZE = {"small": 1.0, "medium": 1.4, "large": 1.8}
 UI_SCALE = UI_SCALE_BY_SIZE.get(WIDGET_SIZE, 1.0)
 
@@ -65,10 +65,10 @@ HOME_MONITOR = _S["home_monitor"]
 TAMAGOTCHI_ENABLED = bool(_S["tamagotchi_enabled"])
 
 # Simple-mode look. With the pet disabled the mascot never evolves, so it shows a
-# fixed life-stage look chosen in Settings ("egg"/"baby"/"teen"/"adult"). An unknown
-# value falls back to the baby look (sprite_pixel tolerates it; we clamp for cleanliness).
-SIMPLE_STAGE = _S["simple_stage"] if _S["simple_stage"] in (
-    "egg", "baby", "teen", "adult") else "baby"
+# fixed life-stage look chosen in Settings ("egg"/"baby"/"teen"/"adult"); an unknown
+# value falls back to the baby look. The card reads this attribute at render time,
+# so a panel Save applies it live (#94 — the settings watcher updates it here).
+SIMPLE_STAGE = valid_stage(_S["simple_stage"])
 
 # Native OS toast notifications (#19). When False the manager never raises a system
 # toast for a session's notify — the in-app speech bubble (and any shake) is unchanged;

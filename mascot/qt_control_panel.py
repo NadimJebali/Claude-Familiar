@@ -324,7 +324,9 @@ class QtControlPanel(QWidget):
             "theme": self._theme.currentData(),
         })
         self._autostart.setChecked(setup.set_autostart(self._autostart.isChecked()))
-        self._status.setText("Saved. Restart the widget for these changes to take effect.")
+        self._status.setText(
+            "Saved. Theme, size, mascot look and notifications apply right away; "
+            "the rest lands on the widget's next start.")
 
     def _toggle_install(self) -> None:
         _installed, msg = setup.toggle_shortcuts()

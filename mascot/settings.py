@@ -35,12 +35,24 @@ DEFAULTS: dict[str, Any] = {
 }
 
 THEMES = ("classic", "compact")
+SIZES = ("small", "medium", "large")
+STAGES = ("egg", "baby", "teen", "adult")
 
 
 def valid_theme(value: Any) -> str:
     """``value`` if it names a known theme, else the classic default — so a
     hand-edited settings file can never leave the widget without a presentation."""
     return value if value in THEMES else "classic"
+
+
+def valid_size(value: Any) -> str:
+    """``value`` if it names a known widget size, else the small default."""
+    return value if value in SIZES else "small"
+
+
+def valid_stage(value: Any) -> str:
+    """``value`` if it names a simple-mode life stage, else the baby default."""
+    return value if value in STAGES else "baby"
 
 
 def load_settings() -> dict[str, Any]:
