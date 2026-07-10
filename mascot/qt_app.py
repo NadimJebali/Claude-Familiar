@@ -107,6 +107,18 @@ class QtMascotApp(QObject):
         except Exception as exc:  # noqa: BLE001 — never let the tray stop startup
             print("[mascot] system tray unavailable:", exc)
 
+        # Opt-in usage poller (#70): live 5h/weekly numbers without a CLI session.
+        # Consent-first — built only when the setting is on; best-effort like the
+        # tray (a poller failure never stops the widget).
+        self._usage_poller = None
+        if config.USAGE_API_ENABLED:
+            try:
+                from .usage_api import UsagePoller
+                self._usage_poller = UsagePoller(self)
+                self._usage_poller.start()
+            except Exception as exc:  # noqa: BLE001 — never let the poller stop startup
+                print("[mascot] usage poller unavailable:", exc)
+
     def start(self) -> None:
         self._ingest.start()
 
@@ -262,6 +274,9 @@ class QtMascotApp(QObject):
             print("[mascot] could not open settings:", exc)
 
     def _quit(self) -> None:
+        if self._usage_poller is not None:
+            self._usage_poller.dispose()
+            self._usage_poller = None
         if self._pet_window is not None:
             self._pet_window.close()
             self._pet_window = None

@@ -171,6 +171,14 @@ class QtControlPanel(QWidget):
         self._notify.setChecked(bool(s["native_notifications"]))
         box.addWidget(self._notify)
 
+        box.addWidget(_section("LIVE USAGE"))
+        self._usage_api = QCheckBox("Poll Anthropic for live usage")
+        self._usage_api.setChecked(bool(s["usage_api_enabled"]))
+        box.addWidget(self._usage_api)
+        box.addWidget(_muted("Reads your Claude Code login token to fetch the 5h/weekly "
+                             "numbers every 5 minutes — the only fresh source without a "
+                             "terminal session. The token is never logged or refreshed."))
+
         box.addWidget(_section("TAMAGOTCHI PET"))
         self._pet_enabled = QCheckBox("Enable the Tamagotchi pet")
         self._pet_enabled.setChecked(bool(s["tamagotchi_enabled"]))
@@ -307,6 +315,7 @@ class QtControlPanel(QWidget):
             "home_monitor": int(self._monitor.currentData()),
             "tamagotchi_enabled": self._pet_enabled.isChecked(),
             "native_notifications": self._notify.isChecked(),
+            "usage_api_enabled": self._usage_api.isChecked(),
         })
         self._autostart.setChecked(setup.set_autostart(self._autostart.isChecked()))
         self._status.setText("Saved. Restart the widget for these changes to take effect.")

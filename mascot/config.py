@@ -71,6 +71,12 @@ SIMPLE_STAGE = _S["simple_stage"] if _S["simple_stage"] in (
 # the other settings here.
 NATIVE_NOTIFICATIONS_ENABLED = bool(_S["native_notifications"])
 
+# Opt-in OAuth usage poller (#70). When True the widget reads Claude Code's stored
+# login token and polls Anthropic's usage endpoint for live 5h/weekly numbers (the
+# only fresh source in statusline-less workflows like the VS Code extension). The
+# token is never logged and never refreshed. Read once at startup (restart-gated).
+USAGE_API_ENABLED = bool(_S["usage_api_enabled"])
+
 # Per-state accent colors (R, G, B).
 STATE_COLORS = {
     "idle":     (120, 144, 168),

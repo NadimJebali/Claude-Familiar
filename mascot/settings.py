@@ -25,6 +25,10 @@ DEFAULTS: dict[str, Any] = {
     # (Settings panel; the tray's checkable Notifications row applies live).
     "tamagotchi_enabled": False,   # True -> the Tamagotchi pet layer
     "native_notifications": False,  # True -> native OS toasts (in-app bubble always on)
+    # Consent-first (#70): True lets the widget read your Claude Code login token
+    # and poll Anthropic's usage endpoint for live 5h/weekly numbers. The token is
+    # never logged and never refreshed; see mascot/usage_api.py.
+    "usage_api_enabled": False,
 }
 
 
