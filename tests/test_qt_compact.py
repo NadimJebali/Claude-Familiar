@@ -58,6 +58,35 @@ def test_row_text_names_the_state_and_tool():
     assert qt_compact.row_text(_state(st="idle"), now) == "idle"
 
 
+def test_row_text_carries_the_working_file():
+    # #85: the sticky-per-turn file joins the row — with the tool while one runs,
+    # alone between tools (the file outlives each millisecond-fast PostToolUse).
+    now = time.time()
+    st = _state(st="working", tool="Edit", file=r"C:\repo\mascot\qt_app.py")
+    assert qt_compact.row_text(st, now) == "working · Edit · qt_app.py"
+    st["tool"] = None
+    assert qt_compact.row_text(st, now) == "working · qt_app.py"
+
+
+def test_row_bg_markers_follow_the_effort_level():
+    # #86: the card's panel_bg split at row scale — the animated levels get a
+    # marker for the pixel wash/ripple; everything else stays a solid panel.
+    now = time.time()
+    assert qt_compact.row_bg(_state(st="working", effort="max"), now, 1.234) == ("rainbow", 1.234)
+    assert qt_compact.row_bg(_state(st="working", effort="xhigh"), now, 2.0) == ("ripple", 2.0)
+    assert qt_compact.row_bg(_state(st="working", effort="high"), now, 2.0) == ("solid",)
+    assert qt_compact.row_bg(_state(st="waiting", effort="max"), now, 2.0) == ("solid",)
+
+
+def test_row_backdrop_cedes_animated_levels_to_row_bg():
+    # #86: xhigh/max rows keep the plain base (the overlay owns them); the
+    # static levels keep their flat tint.
+    now = time.time()
+    assert qt_compact.row_backdrop(_state(st="working", effort="max"), now, 1.0) is None
+    assert qt_compact.row_backdrop(_state(st="working", effort="xhigh"), now, 1.0) is None
+    assert qt_compact.row_backdrop(_state(st="working", effort="high"), now, 1.0) is not None
+
+
 def test_row_text_waiting_carries_the_notify_inline_truncated():
     st = _state(st="waiting",
                 notify={"message": "Allow this Bash command to run tests?" * 3,

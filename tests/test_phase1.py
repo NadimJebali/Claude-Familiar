@@ -417,6 +417,93 @@ def test_ownerless_session_falls_back_to_staleness_backstop():
     assert state_store.is_session_live(stale, now=10_000.0, timeout=300.0) is False
 
 
+def test_dead_owner_with_fresh_heartbeat_stays_visible(monkeypatch):
+    # #83: the stamp can outlive the real host — a VS Code reload / compaction
+    # relaunch restarts the CLI mid-session, and the stamped PID dies while hooks
+    # keep writing. A file that is still being written is alive by definition, so
+    # a positively-dead PID must not bury it while the heartbeat is fresh.
+    from mascot import state_store
+    monkeypatch.setattr(state_store, "pid_alive", lambda pid: False)
+    fresh = {"session_id": SID, "owner_pid": 12345, "ts": 9_980.0}   # 20s old
+    aged = {"session_id": SID, "owner_pid": 12345, "ts": 9_940.0}    # 60s old
+    assert state_store.is_session_live(fresh, now=10_000.0, timeout=300.0) is True
+    # 60s is within the 300s backstop but past the dead-owner grace: pruned —
+    # proving the tighter grace window applies, not the ownerless timeout.
+    assert state_store.is_session_live(aged, now=10_000.0, timeout=300.0) is False
+
+
+def test_dead_owner_grace_is_tighter_than_the_ownerless_backstop():
+    from mascot import config
+    assert 0 < config.DEAD_OWNER_GRACE_S < config.STALE_TIMEOUT_S
+
+
+def test_emit_restamps_a_dead_owner_pid(tmp_path, monkeypatch):
+    # #83 (hook side): a stamped-but-dead PID is re-detected on the next event so
+    # the widget's instant dead-owner prune tracks the real host process.
+    monkeypatch.setattr(emit, "find_owner_pid", lambda: 111)
+    st = emit.update_state(tmp_path, "SessionStart", {"session_id": "s-restamp"}, now=1.0)
+    assert st["owner_pid"] == 111
+
+    monkeypatch.setattr(emit, "find_owner_pid", lambda: 222)
+    monkeypatch.setattr(emit, "pid_alive", lambda pid: True)
+    st = emit.update_state(tmp_path, "PreToolUse",
+                           {"session_id": "s-restamp", "tool_name": "Read"}, now=2.0)
+    assert st["owner_pid"] == 111            # alive stamp: left alone
+
+    monkeypatch.setattr(emit, "pid_alive", lambda pid: False)
+    st = emit.update_state(tmp_path, "PostToolUse",
+                           {"session_id": "s-restamp", "tool_name": "Read"}, now=3.0)
+    assert st["owner_pid"] == 222            # dead stamp: healed
+
+
+def test_file_field_is_sticky_per_turn():
+    # #85: the working file survives PostToolUse (individual edits finish in
+    # milliseconds — it must stay readable), is replaced by the next
+    # file-touching tool, and clears when the turn ends.
+    st = default_state("s")
+    st = compute_next_state(st, "PreToolUse",
+                            {"tool_name": "Read",
+                             "tool_input": {"file_path": "C:\\repo\\a.py"}})
+    assert st["file"] == "C:\\repo\\a.py"
+    st = compute_next_state(st, "PostToolUse", {"tool_name": "Read"})
+    assert st["file"] == "C:\\repo\\a.py"          # sticky between tools
+    st = compute_next_state(st, "PreToolUse",
+                            {"tool_name": "Bash", "tool_input": {"command": "ls"}})
+    assert st["file"] == "C:\\repo\\a.py"          # a no-file tool doesn't erase it
+    st = compute_next_state(st, "PreToolUse",
+                            {"tool_name": "NotebookEdit",
+                             "tool_input": {"notebook_path": "n.ipynb"}})
+    assert st["file"] == "n.ipynb"                 # replaced by the next file
+    st = compute_next_state(st, "Stop", {})
+    assert st["file"] == ""                        # turn end clears
+
+
+def test_file_ignores_subagent_tools_and_clears_on_failure_and_restart():
+    st = default_state("s")
+    st = compute_next_state(st, "PreToolUse",
+                            {"tool_name": "Edit", "agent_id": "a1",
+                             "tool_input": {"file_path": "inner.py"}})
+    assert st["file"] == ""                        # a sub-agent's file isn't the session's
+    st = compute_next_state(st, "PreToolUse",
+                            {"tool_name": "Edit", "tool_input": {"file_path": "top.py"}})
+    st = compute_next_state(st, "StopFailure", {"error_type": "overloaded"})
+    assert st["file"] == ""
+    st = compute_next_state(st, "PreToolUse",
+                            {"tool_name": "Edit", "tool_input": {"file_path": "top.py"}})
+    st = compute_next_state(st, "SessionStart", {})
+    assert st["file"] == ""
+
+
+def test_emit_never_rewalks_a_stamped_none_owner(tmp_path, monkeypatch):
+    # The once-per-session import-cost concern survives (#17): a stamped None
+    # (lookup failed / untrackable platform) is never re-detected per event.
+    calls: list[int] = []
+    monkeypatch.setattr(emit, "find_owner_pid", lambda: calls.append(1) or None)
+    emit.update_state(tmp_path, "SessionStart", {"session_id": "s-none"}, now=1.0)
+    emit.update_state(tmp_path, "Stop", {"session_id": "s-none"}, now=2.0)
+    assert len(calls) == 1
+
+
 def test_png_icon_has_valid_signature_and_chunks():
     from mascot import icon
     data = icon._png_bytes()

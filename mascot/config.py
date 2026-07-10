@@ -21,6 +21,7 @@ STATE_DIR = Path.home() / ".claude" / "mascot" / "state"
 # Timing
 POLL_INTERVAL_MS = 1000        # how often the manager re-reads the state dir
 STALE_TIMEOUT_S = 300          # backstop: prune an owner-less session this stale
+DEAD_OWNER_GRACE_S = 45        # dead-stamped session survives while written this recently (#83)
 SLEEP_AFTER_IDLE_S = _S["sleep_after_idle_s"]  # idle this long -> sleeping sprite
 ANIM_INTERVAL_MS = 40          # ~25 fps bob animation
 

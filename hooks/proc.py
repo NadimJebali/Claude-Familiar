@@ -25,6 +25,23 @@ def _is_owner_name(name: str) -> bool:
     return (name or "").lower().startswith(_OWNER_PREFIX)
 
 
+def pid_alive(pid: object) -> bool:
+    """Whether a previously-stamped owner PID still names a running process.
+
+    True on ANY doubt (no psutil, bad value, lookup failure): emit re-walks the
+    ancestor chain only on a *positively dead* stamp (#83), so uncertainty must
+    never trigger a per-event re-detect — the once-per-session import-cost
+    concern stands.
+    """
+    if not isinstance(pid, (int, str)):
+        return True
+    try:
+        import psutil
+        return psutil.pid_exists(int(pid))
+    except Exception:  # noqa: BLE001 — uncertain -> keep the stamp
+        return True
+
+
 def find_owner_pid() -> int | None:
     """PID of the nearest Claude ancestor of this process, or None if not found."""
     try:

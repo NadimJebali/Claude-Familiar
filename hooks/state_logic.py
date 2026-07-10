@@ -120,6 +120,7 @@ def default_state(session_id: str, cwd: str = "", model: str = "") -> dict[str, 
         "permission_mode": "",  # e.g. "plan" — drives the planning face while set
         "stumbled": False,  # a turn just died on a transient API error (brief "oops")
         "effort": "",  # live reasoning effort (low/medium/high/xhigh/max); stamped by emit
+        "file": "",  # the file this turn is working on — sticky per turn (#85)
         # The session's transcript JSONL (hook payloads carry it) — lets the widget
         # tail the transcript for the context gauge without guessing paths (#71).
         "transcript_path": "",
@@ -178,6 +179,7 @@ def compute_next_state(
         nxt["state"] = "idle"
         nxt["tool"] = None
         nxt["subagents"] = []
+        nxt["file"] = ""
 
     elif event == "UserPromptSubmit":
         nxt["state"] = "thinking"
@@ -211,6 +213,14 @@ def compute_next_state(
                 # INSIDE a sub-agent carries a top-level agent_id and isn't part of
                 # the visible session, so it doesn't touch the caption.
                 nxt["tool"] = payload.get("tool_name")
+                target = (tool_input.get("file_path")
+                          or tool_input.get("notebook_path"))
+                if isinstance(target, str) and target:
+                    # The working file, sticky per turn (#85): deliberately NOT
+                    # cleared on PostToolUse — a millisecond-fast edit must stay
+                    # readable. The next file-touching tool replaces it; the
+                    # turn's end (Stop/StopFailure) clears it.
+                    nxt["file"] = target
 
     elif event == "PostToolUse":
         if payload.get("tool_name") == AGENT_TOOL:
@@ -258,6 +268,7 @@ def compute_next_state(
     elif event == "Stop":
         nxt["tool"] = None
         nxt["subagents"] = []
+        nxt["file"] = ""
         # A turn can end on a usage/session limit. If the limit text rides on the
         # Stop payload, tombstone instead of going calmly idle.
         if _is_usage_limit(_payload_text(payload)):
@@ -276,6 +287,7 @@ def compute_next_state(
         # clear the active tool + sub-agent badges (mirrors Stop).
         nxt["tool"] = None
         nxt["subagents"] = []
+        nxt["file"] = ""
         error_type = payload.get("error_type", "")
         if error_type in _DEATH_ERROR_TYPES:
             nxt["state"] = "dead"

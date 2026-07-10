@@ -89,9 +89,10 @@ baby / teen / adult) in **Settings → Appearance → Mascot Look**.
   straight from the pixel mascot, so the taskbar matches the card on screen.
 - **Two themes, switchable live.** **Classic** is the mascot card described here.
   **Compact** is a single small panel with one slim row per session — effort dot ·
-  state text · model · sub-agent count · context ring — with the usage bars once
-  at the bottom: a quiet "work mode" with no mascot, no shake, and the needs-you
-  message inline in its row. Switch from the tray's **Theme** submenu or the
+  state text (tool · working file) · model · sub-agent count · context ring — with
+  the usage bars once at the bottom: a quiet "work mode" with no mascot, no shake,
+  and the needs-you message inline in its row. The Classic card shows the same
+  facts as a dim `file · model` line under its caption. Switch from the tray's **Theme** submenu or the
   Settings dropdown — both apply instantly, no restart (the widget watches
   `settings.json`, so a panel **Save** lands live; same for the Notifications
   checkbox).

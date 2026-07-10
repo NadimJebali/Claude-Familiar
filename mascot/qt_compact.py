@@ -29,6 +29,7 @@ the card-side pet expressions have no home here.
 """
 from __future__ import annotations
 
+import math
 import time
 from typing import Any
 
@@ -41,14 +42,19 @@ from .qt_card import (
     PANEL_EDGE,
     PANEL_FILL,
     PERMISSION_WAIT_S,
+    RAINBOW_WAVELENGTH_PX,
     RING_STROKE,
     RING_TRACK,
+    RIPPLE_PERIOD_S,
+    RIPPLE_WAVELENGTH_PX,
     USAGE_LABEL_FG,
     USAGE_PCT_FG,
     USAGE_TRACK,
     WORKING_STALL_S,
     _anchor_xy,
     _hex,
+    file_basename,
+    model_label,
 )
 
 # --- geometry -----------------------------------------------------------------
@@ -60,6 +66,7 @@ SHADOW_PAD = 18          # room for the drop shadow around the panel
 ROW_RADIUS = 8
 DOT_D = 10               # the activity dot's diameter
 RING_D = 14              # the per-row context ring
+ROW_EFFORT_PIXEL = 5     # the animated-effort cell at row scale (the card uses 10)
 USAGE_BLOCK_H = 40       # the bottom bars block (two thin bars + labels)
 BAR_H = 5
 
@@ -74,18 +81,6 @@ _EMPTY_TEXT = "no sessions"
 
 
 # --- pure row content -----------------------------------------------------------
-def model_label(model: str | None) -> str:
-    """A short model tag for the row: the ``claude-`` prefix and a trailing
-    ``-YYYYMMDD`` date stamp dropped, budgeted to 14 chars."""
-    text = model or ""
-    if text.startswith("claude-"):
-        text = text[len("claude-"):]
-    parts = text.rsplit("-", 1)
-    if len(parts) == 2 and len(parts[1]) == 8 and parts[1].isdigit():
-        text = parts[0]
-    return text[:14]
-
-
 def _draw_raw(state: dict[str, Any], now: float) -> str:
     """The raw to display, with the #52 pending-permission promotion applied —
     the same pure core the Classic card runs each frame."""
@@ -118,7 +113,10 @@ def row_text(state: dict[str, Any], now: float) -> str:
         return "thinking…"
     if raw == "working":
         tool = state.get("tool")
-        return f"working · {tool}" if tool else "working…"
+        # The sticky-per-turn file (#85) rides along — with the tool while one
+        # runs, alone between tools (it outlives each millisecond PostToolUse).
+        parts = [p for p in (tool, file_basename(state.get("file"))) if p]
+        return "working · " + " · ".join(parts) if parts else "working…"
     return str(raw)
 
 
@@ -141,15 +139,31 @@ def dot_color(state: dict[str, Any], now: float) -> str:
 
 
 def row_backdrop(state: dict[str, Any], now: float, t: float) -> str | None:
-    """The row's effort backdrop, or ``None`` for the plain panel: the pure
-    ``effort.panel_fill`` — a static 18% tint for low/medium/high, the purple
-    shimmer for xhigh, the rainbow cycle for max — suppressed for waiting/dead
-    (attention and the gravestone stay uncontested)."""
+    """The row's flat effort tint, or ``None`` for the plain panel: the pure
+    ``effort.panel_fill`` static 18% tint for low/medium/high. The two animated
+    levels (xhigh/max) return ``None`` here — :func:`row_bg` owns them with the
+    card's pixel animations (#86). Waiting/dead stay uncontested."""
     if _draw_raw(state, now) in ("waiting", "dead"):
         return None
     level = effort.resolve(state.get("effort", ""), effort.settings_effort())
+    if level in ("xhigh", "max"):
+        return None
     rgb = effort.panel_fill(level, _PANEL_FILL_RGB, t)
     return None if rgb is None else _hex(rgb)
+
+
+def row_bg(state: dict[str, Any], now: float, t: float) -> tuple:
+    """The row's animated-background marker — the card's ``panel_bg`` split at
+    row scale (#86): ``("rainbow", t)`` for max, ``("ripple", t)`` for xhigh,
+    ``("solid",)`` otherwise (waiting/dead stay uncontested, like the tint)."""
+    if _draw_raw(state, now) in ("waiting", "dead"):
+        return ("solid",)
+    level = effort.resolve(state.get("effort", ""), effort.settings_effort())
+    if level == "max":
+        return ("rainbow", round(t, 3))
+    if level == "xhigh":
+        return ("ripple", round(t, 3))
+    return ("solid",)
 
 
 def _has_animated(sessions: dict[str, dict[str, Any]]) -> bool:
@@ -238,6 +252,7 @@ class CompactWindow(QWidget):
         rows = tuple(
             (sid, row_text(st, now), dot_color(st, now), row_dim(st, now),
              row_backdrop(st, now, now - self._anim_t0),
+             row_bg(st, now, now - self._anim_t0),
              model_label(st.get("model")),
              len(st.get("subagents") or []),
              self._context.get(sid))
@@ -274,8 +289,8 @@ class CompactWindow(QWidget):
                 p.drawText(QRectF(panel.x(), top, PANEL_W, ROW_H),
                            Qt.AlignmentFlag.AlignCenter, _EMPTY_TEXT)
                 top += ROW_H
-            for _sid, text, dot, dim, backdrop, model, subs, ctx in rows:
-                self._paint_row(p, panel.x(), top, text, dot, dim, backdrop,
+            for _sid, text, dot, dim, backdrop, bg, model, subs, ctx in rows:
+                self._paint_row(p, panel.x(), top, text, dot, dim, backdrop, bg,
                                 model, subs, ctx)
                 top += ROW_H
             self._paint_usage(p, panel.x(), top, bars, stale)
@@ -283,13 +298,20 @@ class CompactWindow(QWidget):
             p.end()
 
     def _paint_row(self, p: QPainter, px: float, top: float, text: str, dot: str,
-                   dim: bool, backdrop: str | None, model: str, subs: int,
+                   dim: bool, backdrop: str | None, bg: tuple, model: str, subs: int,
                    ctx: float | None) -> None:
         row = QRectF(px + 6, top + 2, PANEL_W - 12, ROW_H - 4)
         if backdrop is not None:
             bpath = QPainterPath()
             bpath.addRoundedRect(row, ROW_RADIUS, ROW_RADIUS)
             p.fillPath(bpath, QColor(backdrop))
+        if bg[0] != "solid":                 # max wash / xhigh rings, clipped to the row (#86)
+            bpath = QPainterPath()
+            bpath.addRoundedRect(row, ROW_RADIUS, ROW_RADIUS)
+            p.save()
+            p.setClipPath(bpath)
+            self._paint_row_bg(p, row, bg)
+            p.restore()
         if dim:
             p.setOpacity(0.5)
 
@@ -335,6 +357,32 @@ class CompactWindow(QWidget):
                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
         if dim:
             p.setOpacity(1.0)
+
+    def _paint_row_bg(self, p: QPainter, row: QRectF, bg: tuple) -> None:
+        """The animated effort backdrop at row scale (#86) — the card's pixel
+        rainbow wash / ripple rings, in ROW_EFFORT_PIXEL cells; xhigh's rings
+        radiate from the effort dot (the row's stand-in for the mascot)."""
+        kind, t = bg[0], bg[1]
+        x0, y0 = int(row.x()), int(row.y())
+        if kind == "rainbow":
+            for y in range(y0, int(row.bottom()) + 1, ROW_EFFORT_PIXEL):
+                for x in range(x0, int(row.right()) + 1, ROW_EFFORT_PIXEL):
+                    f = (x - x0 + y - y0) / RAINBOW_WAVELENGTH_PX
+                    r, g, b = effort.rainbow_wash_color(_PANEL_FILL_RGB, t, f)
+                    p.fillRect(x, y, ROW_EFFORT_PIXEL, ROW_EFFORT_PIXEL,
+                               QColor(r, g, b))
+        elif kind == "ripple":
+            half = ROW_EFFORT_PIXEL / 2
+            dot_cx = row.x() + 8 + DOT_D / 2
+            dot_cy = row.y() + row.height() / 2
+            for y in range(y0, int(row.bottom()) + 1, ROW_EFFORT_PIXEL):
+                for x in range(x0, int(row.right()) + 1, ROW_EFFORT_PIXEL):
+                    d = math.hypot(x + half - dot_cx, y + half - dot_cy)
+                    phase = d / RIPPLE_WAVELENGTH_PX - t / RIPPLE_PERIOD_S
+                    rgb = effort.ripple_color(_PANEL_FILL_RGB, phase)
+                    if rgb != _PANEL_FILL_RGB:   # gap cells stay bare -> base shows
+                        p.fillRect(x, y, ROW_EFFORT_PIXEL, ROW_EFFORT_PIXEL,
+                                   QColor(*rgb))
 
     def _paint_usage(self, p: QPainter, px: float, top: float,
                      bars: tuple, stale: bool) -> None:

@@ -160,6 +160,14 @@ def test_transcript_path_is_an_optional_string_field():
     assert problems and "transcript_path" in problems[0]
 
 
+def test_file_is_an_optional_string_field():
+    # #85: the sticky-per-turn working file (non-breaking, like transcript_path).
+    assert schema.is_valid_session_state(_valid_state(file="C:/repo/a.py"))
+    assert schema.is_valid_session_state(_valid_state())          # absent is fine
+    problems = schema.validate_session_state(_valid_state(file=7))
+    assert problems and "file" in problems[0]
+
+
 # --- the writer and reader agree --------------------------------------------
 def test_writer_and_reader_schema_versions_match():
     assert schema.SCHEMA_VERSION == state_logic.SCHEMA_VERSION

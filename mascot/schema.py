@@ -48,6 +48,7 @@ _OPTIONAL: dict[str, tuple[type, ...]] = {
     "cwd": (str,),
     "model": (str,),
     "effort": (str,),
+    "file": (str,),
     "transcript_path": (str,),
     "tool": (str, type(None)),
     "notify": (dict, type(None)),
