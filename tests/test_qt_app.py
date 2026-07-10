@@ -22,7 +22,7 @@ from PySide6.QtCore import QEvent, QPointF, Qt, QThreadPool
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
 
-from mascot import config, pet_service, qt_app, qt_card, qt_ingest
+from mascot import config, pet_service, qt_app, qt_card, qt_ingest, qt_popups
 from mascot.sprite_qt import QtPixmapRenderer, SpriteSpec
 
 
@@ -254,6 +254,60 @@ def test_no_mood_emote_when_content(app):
     assert not card._particles.alive("food", now + 10)   # a content pet emits nothing
     assert not card._particles.alive("zzz", now + 10)
     card.close()
+
+
+# --- popups: the speech bubble + hover tooltip (#58) -------------------------
+def test_bubble_places_above_the_card_via_the_pure_core(app):
+    bubble = qt_popups.QtBubble("resets at 3pm")
+    bounds = (0, 0, 1920, 1080)
+    bubble.place_above(500, 500, 158, bounds)
+    expect = qt_popups.popup_place.above(500, 500, 158, bubble.width(), bubble.height(),
+                                         bounds, qt_popups.BUBBLE_GAP)
+    assert (bubble.x(), bubble.y()) == expect
+    bubble.close()
+
+
+def test_tooltip_shows_name_level_and_coins(app):
+    tip = qt_popups.QtStatsTooltip(_pet(name="Rex", coins=42, xp=250))
+    assert "Rex" in tip._name.text()
+    assert "Lv 3" in tip._sub.text() and "42 coins" in tip._sub.text()   # 250 xp -> lv 3
+    tip.close()
+
+
+def test_notify_shows_a_bubble_and_clearing_it_removes_it(app):
+    st = _state("s", "waiting")
+    st["notify"] = {"message": "needs you!", "type": "question"}
+    card = qt_card.QtCard("s", st, 0, QtPixmapRenderer())
+    assert card._bubble is not None and "needs you!" in card._bubble._message
+    card.set_state(_state("s", "idle"))          # the notify cleared
+    assert card._bubble is None
+    card.close()
+
+
+def test_hover_shows_the_pet_tooltip_and_leave_dismisses_it(app):
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer(), pet_enabled=True)
+    card.set_pet(_pet(name="Pixel"))
+    card.enterEvent(None)
+    assert card._tooltip is not None and "Pixel" in card._tooltip._name.text()
+    card.leaveEvent(None)
+    assert card._tooltip is None
+    card.close()
+
+
+def test_no_tooltip_in_simple_mode(app):
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer(), pet_enabled=False)
+    card.enterEvent(None)
+    assert card._tooltip is None                 # a read-only indicator shows no status
+    card.close()
+
+
+def test_closing_the_card_cleans_up_its_bubble(app):
+    st = _state("s", "waiting")
+    st["notify"] = {"message": "x"}
+    card = qt_card.QtCard("s", st, 0, QtPixmapRenderer())
+    assert card._bubble is not None
+    card.close()
+    assert card._bubble is None
 
 
 # --- QtCard: the pushed pet look (mood tint + stage/hat) ---------------------

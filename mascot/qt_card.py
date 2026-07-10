@@ -29,7 +29,11 @@ Each live sub-agent shows as a small mini-mascot badge in a centered row below t
 caption (capped so a swarm can't crowd the card). The card anchors to the *home*
 monitor's work area (the one picked in Settings, via the same ``osplatform`` lookup
 the Tk card uses), and in simple hook-visualiser mode (pet off) it shows the fixed
-life stage from Settings with no paw button — a read-only indicator.
+life stage from Settings with no paw button and no hover tooltip — a read-only
+indicator.
+
+Two satellite popups (``mascot.qt_popups``) follow the card: a speech bubble while
+Claude needs the user, and a pet-status tooltip on hover (pet-enabled only).
 """
 from __future__ import annotations
 
@@ -61,6 +65,7 @@ from . import config, effective_state, osplatform, particles, shake, sprite_pixe
 from .overlay import Overlay, OverlayConfig
 from .pet_view import PetView, pet_view
 from .pixel_grid import grid_cells
+from .qt_popups import QtBubble, QtStatsTooltip
 from .sprite_qt import SpriteRenderer, SpriteSpec
 
 # --- card geometry (mirrors the Tk card's authored "small" size) ------------
@@ -340,6 +345,9 @@ class QtCard(QWidget):
         self.setFixedSize(CARD_W + 2 * SHADOW_PAD, CARD_H + 2 * SHADOW_PAD)
 
         self._panel = _CardPanel()
+        # The panel fills the card body; make it click-through so drag / tap / hover
+        # all reach this QtCard (the paw button, a mouse-opaque sibling, still clicks).
+        self._panel.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(24)
         shadow.setOffset(0, 6)
@@ -376,6 +384,10 @@ class QtCard(QWidget):
         self._next_emote = 0.0
         self._had_particles = False
         self._eff = self._raw
+        # Satellite popups: the speech bubble (while notify present) and the pet hover
+        # tooltip (pet-enabled only). Both follow the card and are dismissed on hide.
+        self._bubble: QtBubble | None = None
+        self._tooltip: QtStatsTooltip | None = None
         # Attention shake: the pure Shake seam owns the intensity ramp, the amplitude/
         # frequency derivation and the absolute-from-rest offset (it captures rest once
         # when a shake begins, then every frame moves to rest+offset — see shake.py for
@@ -396,6 +408,7 @@ class QtCard(QWidget):
 
         self._place(index, screen)
         self._render(now)
+        self._sync_bubble(self._state.get("notify"))
 
         self._timer = QTimer(self)
         self._timer.setInterval(ANIM_MS)
@@ -414,12 +427,15 @@ class QtCard(QWidget):
         self._raw = raw
         self._overlay.note_raw(raw, now)
         self._render(now)
+        self._sync_bubble(state.get("notify"))
 
     def set_pet(self, pet: dict) -> None:
         """Adopt the latest global pet (the manager pushes it every poll): it drives
         the idle-face mood + the sprite's stage/hat/flourish (via pet_view) and the
         hover tooltip. Cheap — an unchanged look re-renders no pixmap."""
         self._pet_data = pet
+        if self._tooltip is not None:
+            self._tooltip.set_pet(pet)
         self._render(time.time())
 
     def _effective_pet_view(self) -> PetView:
@@ -450,6 +466,11 @@ class QtCard(QWidget):
         self._apply_attention_shake(now)
         self._schedule_emote(now)
         self._update_particles(now)
+        # Follow the card (including during the attention shake).
+        if self._bubble is not None:
+            self._reposition_bubble()
+        if self._tooltip is not None:
+            self._reposition_tooltip()
 
     def _render(self, now: float) -> None:
         view = self._effective_pet_view()
@@ -519,6 +540,7 @@ class QtCard(QWidget):
             # Undo any active attention-shake first so the grab maps to the card's
             # true resting position (no jump as the shake is removed).
             self._reset_shake_offset()
+            self._dismiss_tooltip()          # no hover tooltip while dragging
             self._press_pos = event.globalPosition().toPoint()
             self._drag_offset = self._press_pos - self.frameGeometry().topLeft()
             self._last_shake_pos = None      # fresh shake-to-dizzy tracking per drag
@@ -575,6 +597,90 @@ class QtCard(QWidget):
     def _trigger_dizzy(self, now: float) -> None:
         self._overlay.note_dizzy(now)
         self._render(now)
+
+    # --- satellite popups (speech bubble + hover tooltip) -----------------
+    def _panel_global(self) -> tuple[int, int, int, int]:
+        """The visible panel's global rect — the card window is padded by SHADOW_PAD,
+        so popups anchor to the panel, not the padded window."""
+        return (self.x() + SHADOW_PAD, self.y() + SHADOW_PAD, CARD_W, CARD_H)
+
+    def _card_bounds(self) -> tuple[int, int, int, int]:
+        """The work area of the monitor the card sits on, so popups clamp to the same
+        screen after the card is dragged across monitors (Windows); falls back to the
+        card's Qt screen otherwise."""
+        px, py, _pw, _ph = self._panel_global()
+        area = osplatform.monitor_work_area_at(px, py)
+        if area is not None:
+            return area
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is not None:
+            g = screen.availableGeometry()
+            return (g.x(), g.y(), g.width(), g.height())
+        return (0, 0, 1920, 1080)
+
+    def _sync_bubble(self, notify: dict | None) -> None:
+        """Show / update / hide the speech bubble to match the session's notify."""
+        if notify:
+            message = notify.get("message") or "Claude needs your attention"
+            if self._bubble is None:
+                self._bubble = QtBubble(message)
+                self._reposition_bubble()
+                if self.isVisible():
+                    self._bubble.show()
+            else:
+                self._bubble.set_message(message)
+                self._reposition_bubble()
+        elif self._bubble is not None:
+            self._bubble.close()
+            self._bubble = None
+
+    def _reposition_bubble(self) -> None:
+        if self._bubble is not None:
+            px, py, pw, _ph = self._panel_global()
+            self._bubble.place_above(px, py, pw, self._card_bounds())
+
+    def _reposition_tooltip(self) -> None:
+        if self._tooltip is not None:
+            px, py, pw, ph = self._panel_global()
+            self._tooltip.place_beside(px, py, pw, ph, self._card_bounds())
+
+    def _dismiss_tooltip(self) -> None:
+        if self._tooltip is not None:
+            self._tooltip.close()
+            self._tooltip = None
+
+    def enterEvent(self, event) -> None:
+        """Hover shows the pet-status tooltip. Suppressed in simple mode (it's pet
+        status) and while dragging."""
+        if (not self._pet_enabled or self._drag_offset is not None
+                or self._tooltip is not None):
+            return
+        self._tooltip = QtStatsTooltip(self._pet_data)
+        self._reposition_tooltip()
+        self._tooltip.show()
+
+    def leaveEvent(self, event) -> None:
+        self._dismiss_tooltip()
+
+    def hideEvent(self, event) -> None:
+        """The tray hid the card: hide the bubble too and drop the tooltip."""
+        if self._bubble is not None:
+            self._bubble.hide()
+        self._dismiss_tooltip()
+        super().hideEvent(event)
+
+    def showEvent(self, event) -> None:
+        if self._bubble is not None:
+            self._bubble.show()
+        super().showEvent(event)
+
+    def closeEvent(self, event) -> None:
+        self._timer.stop()
+        if self._bubble is not None:
+            self._bubble.close()
+            self._bubble = None
+        self._dismiss_tooltip()
+        super().closeEvent(event)
 
     # --- rising particles (pet hearts + mood emotes) ----------------------
     def _emit_hearts(self, now: float) -> None:
