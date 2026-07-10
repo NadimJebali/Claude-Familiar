@@ -160,6 +160,12 @@ CELEBRATE_DURATION_S = 1.5
 STUMBLE_FACE_S = 8.0
 THINKING_STALL_S = 180.0
 WORKING_STALL_S = 270.0
+# A main-thread tool left pending this long with no closing PostToolUse is most
+# likely blocked on a permission prompt ("allow this command?"), which the VS Code
+# extension emits no hook for — so the card reads it as "needs you". A heuristic:
+# a genuinely long tool (a big build) trips it too. First-pass magnitude, tunable;
+# kept well under WORKING_STALL_S so a truly wedged turn still falls to idle.
+PERMISSION_WAIT_S = 45.0
 PET_TAP_MAX_DIST = 5    # a press+release moving <= this (px) is a pet tap, not a drag
 
 # Shake-to-dizzy easter egg: enough rapid drag reversals within the window make the
@@ -174,6 +180,7 @@ _OVERLAY_CONFIG = OverlayConfig(
     blink_duration_s=BLINK_DURATION_S,
     sleep_after_idle_s=config.SLEEP_AFTER_IDLE_S,
     shake_after_s=config.SHAKE_AFTER_S,
+    permission_wait_s=PERMISSION_WAIT_S,
     thinking_stall_s=THINKING_STALL_S,
     working_stall_s=WORKING_STALL_S,
 )
@@ -566,6 +573,10 @@ class QtCard(QWidget):
         self._next_emote = 0.0
         self._had_particles = False
         self._eff = self._raw
+        # The raw with the pending-tool -> waiting heuristic applied (recomputed each
+        # frame in _render, since a pending permission prompt sends no new state). The
+        # shake gate and tap gate read this so a heuristic "needs you" shakes/glares.
+        self._draw_raw = self._raw
         # Effort-reactive background: the resolved level (per-session state -> global
         # settings fallback) drives the panel tint each render (xhigh/max animate).
         # The account-global usage snapshot (pushed by the manager, like the pet)
@@ -617,7 +628,8 @@ class QtCard(QWidget):
             self._overlay.note_celebrate(now)
         self._raw = raw
         self._effort_display = self._resolve_effort()
-        self._overlay.note_raw(raw, now)
+        # note_raw runs inside _render off the *promoted* raw (below), so the pending
+        # permission heuristic starts the waiting clock even between hook states.
         self._render(now)
         self._sync_bubble(state.get("notify"))
 
@@ -685,8 +697,15 @@ class QtCard(QWidget):
             self._reposition_tooltip()
 
     def _render(self, now: float) -> None:
+        ts = self._state.get("ts")
+        # Apply the pending-tool -> waiting heuristic, then drive the waiting clock,
+        # face and shake off this promoted raw. Recomputed every frame because a
+        # pending permission prompt sends no new hook state to cross the threshold on.
+        draw_raw = self._overlay.promote(self._raw, now, ts=ts, tool=self._state.get("tool"))
+        self._draw_raw = draw_raw
+        self._overlay.note_raw(draw_raw, now)
         view = self._effective_pet_view()
-        eff = self._overlay.effective(self._raw, now, ts=self._state.get("ts"), mood=view.mood)
+        eff = self._overlay.effective(draw_raw, now, ts=ts, mood=view.mood)
         self._eff = eff
         face = self._display_face(eff, now)
         self._face = face
@@ -727,7 +746,7 @@ class QtCard(QWidget):
             panel_fill = _hex(fill_rgb) if fill_rgb is not None else PANEL_FILL
             panel_bg = ("solid",)
         border = PANEL_EDGE
-        if not dead and self._raw != "waiting":
+        if not dead and draw_raw != "waiting":
             accent = effort.border_accent(self._effort_display, t)
             if accent is not None:
                 border = _hex(accent)
@@ -840,7 +859,7 @@ class QtCard(QWidget):
             # waiting/dead (don't cheer over a "needs you" or a gravestone).
             if (self._pet_enabled and moved <= PET_TAP_MAX_DIST
                     and not self._overlay.is_dizzy(now)
-                    and self._raw not in ("waiting", "dead")):
+                    and self._draw_raw not in ("waiting", "dead")):
                 self._overlay.note_celebrate(now)   # a happy hop
                 self._emit_hearts(now)              # rising pixel hearts
                 self.petted.emit(self.session_id)
@@ -1016,7 +1035,7 @@ class QtCard(QWidget):
         if self._drag_offset is not None:
             return  # the user is holding it; don't fight the drag
         elapsed = self._overlay.waiting_elapsed(now)
-        if self._raw != "waiting" or elapsed is None or elapsed < config.SHAKE_AFTER_S:
+        if self._draw_raw != "waiting" or elapsed is None or elapsed < config.SHAKE_AFTER_S:
             self._reset_shake_offset()   # not waiting, or still within the grace window
             return
         ox, oy = self._shake.offset(now, elapsed)

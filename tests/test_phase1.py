@@ -686,6 +686,59 @@ def test_effective_stalled_busy_never_sleeps_with_idle_since():
                 idle_since=800.0, sleep_after_idle_s=60.0) == "idle"
 
 
+# --- pending-tool -> waiting heuristic (permission prompts, pure) ----------
+# A VS Code "allow this command?" permission prompt emits NO hook (confirmed from a
+# CLAUDE_MASCOT_DEBUG capture: no Notification, no AskUserQuestion), so the only tell
+# is a main-thread tool (working + a tool name) that stops making progress. After a
+# grace it reads as "needs you"; the card then shakes/glares via the normal waiting
+# machinery. Bounded above by the stall watchdog so a truly wedged turn still idles.
+
+def _promote(raw, *, tool="Bash", ts=100.0, now=145.0,
+             permission_wait_s=45.0, working_stall_s=270.0):
+    return effective_state.promote_pending_tool(
+        raw, tool, ts, now,
+        permission_wait_s=permission_wait_s, working_stall_s=working_stall_s)
+
+
+def test_promote_pending_tool_promotes_a_long_pending_tool():
+    # At and past the permission wait (but under the stall bound) -> waiting.
+    assert _promote("working", ts=100.0, now=145.0, permission_wait_s=45.0) == "waiting"
+    assert _promote("working", ts=100.0, now=300.0,
+                    permission_wait_s=45.0, working_stall_s=270.0) == "waiting"
+
+
+def test_promote_pending_tool_leaves_a_fresh_tool_alone():
+    # Under the threshold it's just a normal running tool, no attention grab.
+    assert _promote("working", ts=100.0, now=144.9, permission_wait_s=45.0) == "working"
+
+
+def test_promote_pending_tool_yields_to_the_stall_watchdog():
+    # At/above the stall bound stop claiming waiting, so compute's watchdog can fall
+    # the wedged turn back to idle instead of the card shaking forever.
+    assert _promote("working", ts=100.0, now=370.0,
+                    permission_wait_s=45.0, working_stall_s=270.0) == "working"
+    assert _promote("working", ts=100.0, now=500.0,
+                    permission_wait_s=45.0, working_stall_s=270.0) == "working"
+
+
+def test_promote_pending_tool_ignores_toolless_working():
+    # Between tools (PostToolUse cleared the tool) a stale working is a reasoning
+    # stall, not a pending approval — leave it to the idle watchdog.
+    assert _promote("working", tool=None, ts=100.0, now=300.0,
+                    permission_wait_s=45.0) == "working"
+
+
+def test_promote_pending_tool_only_touches_working():
+    # Every other raw passes straight through, even with a tool + long stale.
+    for raw in ("idle", "thinking", "waiting", "dead", "compacting"):
+        assert _promote(raw, ts=100.0, now=300.0, permission_wait_s=45.0) == raw
+
+
+def test_promote_pending_tool_needs_a_timestamp():
+    # No ts -> can't age the tool -> never promote (defensive; ts is always stamped).
+    assert _promote("working", ts=None, now=999.0, permission_wait_s=45.0) == "working"
+
+
 # --- home-monitor work-area selection (pure) ------------------------------
 # monitors = list of (x, y, w, h) work areas in enumeration order.
 _MON = [(0, 0, 1920, 1040), (1920, 0, 2560, 1400)]   # primary + a second display
@@ -1472,7 +1525,7 @@ def test_play_does_not_mutate_input():
 # writes and the two narrow timer reads the card relies on (tap gate, shake).
 
 _OVER_CFG = {"dizzy_duration_s": 2.0, "celebrate_duration_s": 1.5, "blink_duration_s": 0.12,
-             "sleep_after_idle_s": 60.0, "shake_after_s": 30.0,
+             "sleep_after_idle_s": 60.0, "shake_after_s": 30.0, "permission_wait_s": 45.0,
              "thinking_stall_s": 180.0, "working_stall_s": 240.0}
 
 
@@ -1532,6 +1585,53 @@ def test_overlay_effective_equals_compute_for_identical_timers():
         waiting_since=10.0, idle_since=None, blink_until=0.0, sleep_after_idle_s=60.0,
         shake_after_s=30.0, thinking_stall_s=180.0, working_stall_s=240.0, mood="content")
     assert o.effective("waiting", 100.0, ts=100.0) == bare
+
+
+def test_overlay_promote_matches_the_pure_core():
+    # The overlay's promote() is a thin pass-through to the pure heuristic, using its
+    # own configured thresholds — a long-pending main-thread tool reads as waiting.
+    from mascot import effective_state
+    o = _overlay()
+    ts, pw = 100.0, _OVER_CFG["permission_wait_s"]
+    assert o.promote("working", ts + pw, ts=ts, tool="Bash") == "waiting"
+    assert o.promote("working", ts + pw, ts=ts, tool="Bash") == \
+        effective_state.promote_pending_tool(
+            "working", "Bash", ts, ts + pw,
+            permission_wait_s=pw, working_stall_s=_OVER_CFG["working_stall_s"])
+    # a fresh tool is left alone
+    assert o.promote("working", ts + 1.0, ts=ts, tool="Bash") == "working"
+
+
+def test_overlay_pending_tool_glares_and_shakes_like_a_real_waiting():
+    # The full heuristic path, frame by frame: once a tool has been pending past the
+    # permission wait we promote + start the waiting clock; shake_after_s later the
+    # glare (waiting_angry) and the shake ramp engage — the exact machinery a real
+    # AskUserQuestion waiting uses, reached with no change to compute or the shake.
+    o = _overlay()
+    ts, pw, grace = 100.0, _OVER_CFG["permission_wait_s"], _OVER_CFG["shake_after_s"]
+    t_promote = ts + pw
+    dr1 = o.promote("working", t_promote, ts=ts, tool="Bash")
+    assert dr1 == "waiting"
+    o.note_raw(dr1, t_promote)
+    assert o.effective(dr1, t_promote, ts=ts) == "waiting"     # still within shake grace
+    t_glare = t_promote + grace
+    dr2 = o.promote("working", t_glare, ts=ts, tool="Bash")
+    o.note_raw(dr2, t_glare)
+    assert o.effective(dr2, t_glare, ts=ts) == "waiting_angry"  # glare (drives the face)
+    assert o.waiting_elapsed(t_glare) == grace                  # >= shake_after_s -> shakes
+
+
+def test_overlay_pending_tool_promotion_ends_at_the_stall_bound():
+    # Past the working-stall bound the promotion stops and note_raw(draw_raw) clears
+    # the waiting clock, so the card settles (compute idles it) instead of shaking on.
+    o = _overlay()
+    ts = 100.0
+    now = ts + _OVER_CFG["working_stall_s"] + 5.0
+    draw_raw = o.promote("working", now, ts=ts, tool="Bash")
+    assert draw_raw == "working"
+    o.note_raw(draw_raw, now)
+    assert o.waiting_elapsed(now) is None
+    assert o.effective(draw_raw, now, ts=ts) == "idle"          # stall watchdog wins
 
 
 def test_overlay_note_raw_clears_idle_clock_on_leaving_idle():

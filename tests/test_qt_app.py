@@ -503,6 +503,71 @@ def test_dragging_suppresses_the_jostle(app):
     card.close()
 
 
+# --- QtCard: the pending-tool -> waiting heuristic (VS Code permission prompts) ---
+# A main-thread tool left pending (no PostToolUse) past PERMISSION_WAIT_S is most
+# likely blocked on an "allow this command?" prompt, which VS Code emits no hook for
+# (see effective_state.promote_pending_tool). The card promotes it to "waiting" each
+# frame in _render, so the normal glare + jostle engage. These drive the real card
+# wiring (per-frame promote, note_raw, the shake gate reading _draw_raw).
+def _pending_tool_state(sid="s"):
+    st = _state(sid, "working")
+    st["tool"] = "Bash"
+    st["ts"] = time.time()          # a fresh tool call, aged via the frame clock below
+    return st
+
+
+def test_a_pending_tool_promotes_to_a_shaking_waiting(app):
+    card = qt_card.QtCard("s", _pending_tool_state(), 0, QtPixmapRenderer())
+    ts = card._state["ts"]
+    t0 = ts + qt_card.PERMISSION_WAIT_S + 0.5    # the promotion frame: starts the clock
+    card._render(t0)
+    assert card._draw_raw == "waiting"
+    assert card._eff == "waiting"                # still within the shake grace
+    t1 = t0 + config.SHAKE_AFTER_S + 1           # a later frame, past the grace
+    card._render(t1)
+    assert card._eff == "waiting_angry"          # the glare (drives the "needs you" face)
+    card._apply_attention_shake(t1)
+    assert card._shake.is_shaking                # and the card jostles for attention
+    card.close()
+
+
+def test_a_fresh_pending_tool_does_not_shake(app):
+    card = qt_card.QtCard("s", _pending_tool_state(), 0, QtPixmapRenderer())
+    t = card._state["ts"] + qt_card.PERMISSION_WAIT_S - 1     # under the wait
+    card._render(t)
+    assert card._draw_raw == "working"
+    card._apply_attention_shake(t)
+    assert not card._shake.is_shaking
+    card.close()
+
+
+def test_a_toolless_working_is_never_promoted(app):
+    # Between tools (PostToolUse cleared the tool) a stale working is a reasoning
+    # stall, not a pending approval — it must not shake.
+    st = _state("s", "working")                  # _state sets no "tool"
+    st["ts"] = time.time()
+    card = qt_card.QtCard("s", st, 0, QtPixmapRenderer())
+    t = st["ts"] + qt_card.PERMISSION_WAIT_S + 5
+    card._render(t)
+    assert card._draw_raw == "working"
+    card._apply_attention_shake(t)
+    assert not card._shake.is_shaking
+    card.close()
+
+
+def test_a_wedged_pending_tool_settles_instead_of_shaking_forever(app):
+    # Past WORKING_STALL_S the promotion yields so compute's stall watchdog can fall
+    # the wedged turn to idle — the card settles rather than shaking on forever.
+    card = qt_card.QtCard("s", _pending_tool_state(), 0, QtPixmapRenderer())
+    t = card._state["ts"] + qt_card.WORKING_STALL_S + 5
+    card._render(t)
+    assert card._draw_raw == "working"
+    assert card._eff == "idle"
+    card._apply_attention_shake(t)
+    assert not card._shake.is_shaking
+    card.close()
+
+
 # --- QtCard: sub-agent badges ------------------------------------------------
 def _with_subs(sid, n):
     st = _state(sid, "working")
