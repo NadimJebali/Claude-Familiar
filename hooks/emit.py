@@ -93,6 +93,14 @@ def update_state(
     # rewrites) always reports the writer's version — upgrading a legacy file
     # that predates versioning the moment its session next fires a hook.
     nxt["schema_version"] = SCHEMA_VERSION
+    # Stamp the live reasoning effort. Claude Code exposes the per-turn effort
+    # (after any silent model downgrade) to hook commands as CLAUDE_EFFORT, so
+    # this is accurate every event and identical for CLI + VSCode-extension
+    # sessions. Only overwrite when the var is present and non-empty, so a missing
+    # var never erases the last known level.
+    effort = os.environ.get("CLAUDE_EFFORT", "").strip()
+    if effort:
+        nxt["effort"] = effort
     # Record the owning claude.exe PID once per session so the widget can prune
     # this mascot the instant that process dies (closed terminal, no SessionEnd).
     # Key-presence (not truthiness) so a None result isn't re-detected every hook.

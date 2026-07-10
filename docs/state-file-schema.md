@@ -42,6 +42,7 @@ writer produced. The current version is **1**.
 | `stumbled` | boolean | – | A turn just ended on a transient API error (brief embarrassed face). |
 | `cwd` | string | – | Working directory the session was launched from. |
 | `model` | string | – | Model id reported by the hook payload. |
+| `effort` | string | – | Per-turn reasoning effort from `CLAUDE_EFFORT` (`low`/`medium`/`high`/`xhigh`/`max`); drives the effort-reactive card background + statusline footer. Only written when the env var is present. |
 | `owner_pid` | integer \| null | – | PID of the owning `claude` process, stamped once. Null when it could not be determined; a reader then falls back to the `ts` staleness timeout instead of liveness. |
 | `started` | number | – | Unix epoch seconds when the session's file was first written. |
 

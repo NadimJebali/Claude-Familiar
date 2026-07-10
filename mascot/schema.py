@@ -47,6 +47,7 @@ _OPTIONAL: dict[str, tuple[type, ...]] = {
     "schema_version": (int,),
     "cwd": (str,),
     "model": (str,),
+    "effort": (str,),
     "tool": (str, type(None)),
     "notify": (dict, type(None)),
     "permission_mode": (str,),

@@ -38,6 +38,7 @@ BACKUP_PATH = Path.home() / ".claude" / "settings.json.mascot-backup"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EMIT_PY = PROJECT_ROOT / "hooks" / "emit.py"
+STATUS_EMIT_PY = PROJECT_ROOT / "hooks" / "status_emit.py"
 PYTHON_EXE = sys.executable
 
 # Events the mascot listens to. PreToolUse/PostToolUse need a "*" matcher so the
@@ -80,6 +81,50 @@ def _matcher_block(event: str) -> dict[str, Any]:
         # Tool events match on the tool name; "*" = every tool.
         return {"matcher": "*", **block}
     return block
+
+
+# --- statusLine (usage feed + terminal footer) -----------------------------
+# Claude Code runs one `statusLine` command per update, handing it the statusline
+# JSON on stdin. We install status_emit.py there so the widget gets the 5h/weekly
+# usage numbers (its only official source) and the terminal gains a compact footer.
+# The slot is user-visible and singular, so we never clobber a foreign statusline —
+# we install only into a free slot, refresh our own, and remove only our own.
+def _status_command() -> str:
+    """The shell command Claude runs for the statusline (JSON arrives on stdin)."""
+    return f'"{PYTHON_EXE}" "{STATUS_EMIT_PY}"'
+
+
+def _status_line_entry() -> dict[str, Any]:
+    return {"type": "command", "command": _status_command()}
+
+
+def _is_mascot_statusline(status_line: Any) -> bool:
+    """True if a statusLine entry was installed by us (calls our status_emit.py)."""
+    return (isinstance(status_line, dict)
+            and "status_emit.py" in str(status_line.get("command", "")))
+
+
+def install_statusline(settings: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """Install/refresh our statusLine, honoring a foreign one. Pure transform:
+    returns ``(new_settings, action)`` with action in
+    ``{"installed", "refreshed", "skipped"}``.
+    """
+    existing = settings.get("statusLine")
+    if existing is None:
+        settings["statusLine"] = _status_line_entry()
+        return settings, "installed"
+    if _is_mascot_statusline(existing):
+        settings["statusLine"] = _status_line_entry()  # refresh interpreter/path
+        return settings, "refreshed"
+    return settings, "skipped"  # someone else owns the slot — leave it untouched
+
+
+def uninstall_statusline(settings: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Remove our statusLine (only ours). Returns ``(settings, removed?)``."""
+    if _is_mascot_statusline(settings.get("statusLine")):
+        del settings["statusLine"]
+        return settings, True
+    return settings, False
 
 
 def _load_settings() -> dict[str, Any]:
@@ -131,6 +176,17 @@ def install() -> None:
         hooks[event] = kept
         print(f"{'Updated' if was_present else 'Added'} hook: {event}")
 
+    settings, sl_action = install_statusline(settings)
+    if sl_action == "skipped":
+        print()
+        print("A custom statusLine is already configured — leaving it untouched.")
+        print("The card's 5h/weekly usage bars need our statusline feed; to enable")
+        print("them, switch your statusLine command to (or tee stdin into) ours:")
+        print(f"  {_status_command()}")
+    else:
+        print(f"{'Refreshed' if sl_action == 'refreshed' else 'Added'} statusLine "
+              "(usage feed + terminal footer)")
+
     _save_settings(settings)
     print()
     print(f"Hooks installed in {SETTINGS_PATH}")
@@ -163,8 +219,11 @@ def uninstall() -> None:
     if not hooks:
         settings.pop("hooks", None)
 
+    settings, sl_removed = uninstall_statusline(settings)
+
     _save_settings(settings)
-    print(f"Removed {removed} mascot hook block(s) from {SETTINGS_PATH}")
+    print(f"Removed {removed} mascot hook block(s)"
+          f"{' + the statusLine' if sl_removed else ''} from {SETTINGS_PATH}")
     if BACKUP_PATH.exists():
         print(f"(Original backup still available at {BACKUP_PATH})")
 

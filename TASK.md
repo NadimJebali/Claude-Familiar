@@ -389,6 +389,86 @@ per-feature kill switch:
 
 ---
 
+## Live Claude status on the card — effort background + usage bars (PRD #44) — 🔄 2026-07-09
+Two live Claude signals the card didn't carry: the **reasoning effort** and the
+**5h/weekly usage limits**. Both use Claude Code's own colors (extracted from the
+2.1.205 binary, so the card matches the CLI). Filed as PRD #44 with five slices
+(#45, #48, #46, #47 AFK + #49 HITL). Design locked in a `/grill-me` session (8
+decisions + 6 derived).
+
+### #45 — effort capture end-to-end + static tints (done, TDD)
+- **`hooks/emit.py`** stamps an `effort` field from the **`CLAUDE_EFFORT`** env var
+  Claude Code exposes to hook commands (per-turn accurate, after any silent model
+  downgrade; identical on CLI + VSCode extension). Non-empty-only, so a missing var
+  never erases the last level. `state_logic.default_state` documents `effort: ""`;
+  the dict-copy carries it across transitions untouched. **No new hooks** — existing
+  installs pick it up on the next event.
+- **`mascot/effort.py`** (PURE, tested): `normalize` (case/space, `ultracode→xhigh`,
+  `auto`/unknown→`""`), `resolve` precedence (state effort → global `effortLevel`
+  fallback via an mtime-cached reader), the CLI palette (`TINTS`), `blend`, and
+  `panel_fill` (unknown → `None` = today's exact look).
+- **Card:** panel tinted per level; the gravestone suppresses the tint; the paw
+  button follows the panel; `effort` joins the render signature (a level change
+  repaints once). Verified live: this VSCode session's state file gained
+  `effort: "xhigh"` on the next hook event.
+
+### #48 — animated backgrounds: xhigh wave + max rainbow (done, TDD)
+- **`effort.py`** animation math (clock passed in): `wave_color(t)` sweeps the
+  shimmer purple gradient (`WAVE_LO↔WAVE_HI`, ~2.4s); `rainbow_color(t)` cycles the
+  7-color rainbow ring (~6s, wrapping); `effort_color` routes xhigh→wave / max→
+  rainbow / quiet→static; `border_accent` gives the two animated levels a moving
+  border.
+- **Card:** panel fill (+ border) restyled **in place on the existing 25fps clock**
+  — never a full redraw, no new timers. Precedence: the waiting attention pulse
+  always wins the border; the gravestone shows no effort background.
+
+### #46 — statusline emitter + installer + footer (done, TDD)
+- **`mascot/statusline.py`** (PURE): `snapshot_from_status` distills the `five_hour`
+  + `seven_day` windows and effort from Claude's statusline JSON (tolerant of
+  absent/malformed blocks); `footer_line` formats `model · effort · 5h% · wk% · dir`
+  with the effort ANSI-tinted in its palette color.
+- **`hooks/status_emit.py`** — thin always-exit-0 shell (mirrors `emit.py`): reads
+  the statusline JSON on stdin, atomically writes the account-global
+  `~/.claude/mascot/usage.json` (reusing emit's hardened writer), prints the footer.
+  **Never clobbers a good snapshot** on malformed/empty input. This is a **second,
+  independent writer** — one global file, last-writer-wins (limits are account-wide)
+  — so it never races the per-session state files.
+- **`scripts/install_hooks.py`** — `install_statusline`/`uninstall_statusline` pure
+  transforms + wiring: install into a **free** slot, refresh our own, and **skip +
+  warn** on a foreign `statusLine` (never clobber the user's); uninstall removes only
+  ours. Verified live against a temp HOME (install/refresh/skip/uninstall).
+
+### #47 — 5h/weekly usage bars on the card (done, TDD)
+- **`mascot/usage.py`** (PURE): `usage_view(snapshot, now)` → ordered 5h/7d bars
+  with **reset decay** (a window past its `resets_at` reads 0 — no staleness timers);
+  `bar_color` = traffic-light thresholds (calm <70, warning amber ≥70, error red ≥90
+  — the CLI's own 0.9 alarm); `load_usage` mtime-cached reader.
+- **Card + manager:** the card grows `USAGE_ROW_H` for one bottom row of two labeled
+  bars (**nothing above it moves**); shown in simple mode + on the gravestone; empty
+  when there's no data. The manager pushes the snapshot to every card each poll
+  (like the pet push), independent of the pet toggle.
+
+### #49 — HITL: verification gates, tuning, docs (🔄 in progress)
+- **Gate 1 (effort stamp):** ✅ confirmed on the **VSCode-extension** path (live state
+  file carries `effort`). ⏳ CLI path is by the identical mechanism (same emit.py,
+  same `CLAUDE_EFFORT`) — wants a real CLI-session confirmation.
+- **Gate 2 (statusline in VSCode):** ⏳ needs the statusline installed into the real
+  `~/.claude/settings.json` + one VSCode session to observe whether the extension
+  runs the command. Accepted fallback (grill decision): last-known usage from CLI
+  sessions with reset decay. **Outcome to be recorded in the README.**
+- **Visual tuning pass:** ⏳ tint strengths (`_BLEND_STRENGTH` 0.18/0.32), wave/rainbow
+  periods, and bar legibility at small/medium/large are first-pass magnitudes — tests
+  assert shape/invariants, not values (like the pet-balance numbers). Wants a live
+  `demo.py` review.
+- **Docs:** README (feature bullets, statusline install/skip/uninstall, freshness
+  note) + this entry — done.
+- **Tests:** +60 across `test_effort.py` / `test_statusline.py` / `test_usage.py`
+  (normalize/resolve/blend, wave/rainbow invariants, snapshot extraction + footer +
+  installer transforms + subprocess round-trip, decay + thresholds + loader cache).
+  Suite 378 → 440 green; ruff + mypy clean (new code). No new runtime deps (ADR-0001).
+
+---
+
 ## Considered & rejected
 
 ### Real-.exe packaging for a Task Manager identity — 2026-06-17
