@@ -18,6 +18,16 @@ driven entirely by Claude Code's [hooks](https://docs.anthropic.com/en/docs/clau
   <em>…and it wears the work on its face:&nbsp; reading · editing · running · browsing · planning · compacting · oops · out of usage</em>
 </p>
 
+<p align="center">
+  <img src="docs/images/theme-classic.png" width="46%"
+       alt="Two Classic cards: a max-effort rainbow card editing App.tsx with a sub-agent badge and context ring, and an xhigh idle card with a purple ripple">
+  &nbsp;&nbsp;
+  <img src="docs/images/theme-compact.png" width="46%"
+       alt="The Compact panel: three session rows with effort animations, the working file, model tags, context rings, and the usage bars">
+  <br>
+  <em>Two themes, switchable live:&nbsp; the <b>Classic</b> mascot cards · the <b>Compact</b> session panel</em>
+</p>
+
 One mascot per Claude session. Sub-agents show up as little badges underneath.
 
 The mascot is a **pixel-art creature** styled after Claude's blocky terminal
@@ -27,8 +37,10 @@ accent color. While working, the eyes match the tool (reading / editing /
 running / browsing); plan mode gets a pondering `planning` face; compaction a
 squeezed-shut `compacting` one. There's a `dizzy` shake easter egg, a teary
 `stumble` when a turn dies on an API error, and a pixel-art gravestone when
-usage runs out. _(The images in this README are baked from that same sprite by
-[`scripts/gen_readme_art.py`](scripts/gen_readme_art.py), so they can't drift.)_
+usage runs out. _(The sprite filmstrips in this README are baked from that same
+sprite by [`scripts/gen_readme_art.py`](scripts/gen_readme_art.py), and the theme
+screenshots by the real widgets via
+[`scripts/gen_readme_shots.py`](scripts/gen_readme_shots.py), so they can't drift.)_
 
 When idle, the face also reflects the **pet's mood** (see below) — droopy when
 hungry, sad, sleepy, or sparkly when well cared-for — but Claude-activity states
@@ -66,7 +78,9 @@ baby / teen / adult) in **Settings → Appearance → Mascot Look**.
   clockwise as the session's **context window** fills (read by tailing the
   session transcript — works in the VS Code extension too), turning amber at 70%
   and red at 90%: compaction is coming. It appears once the session has its first
-  assistant turn.
+  assistant turn. The window size is inferred from the evidence: 200k until a
+  session's tokens prove a **1M** window, then the gauge snaps (and sticks) to 1M
+  for that session.
 - **Expressive faces.** While working, the eyes match the tool — reading
   (Read/Grep), editing (Edit/Write), running commands (Bash, gritted teeth), or
   browsing the web. In **plan mode** it wears a pondering *planning…* face. When
@@ -91,8 +105,10 @@ baby / teen / adult) in **Settings → Appearance → Mascot Look**.
   **Compact** is a single small panel with one slim row per session — effort dot ·
   state text (tool · working file) · model · sub-agent count · context ring — with
   the usage bars once at the bottom: a quiet "work mode" with no mascot, no shake,
-  and the needs-you message inline in its row. The Classic card shows the same
-  facts as a dim `file · model` line under its caption. Switch from the tray's **Theme** submenu or the
+  and the needs-you message inline in its row — but rows still wear the effort
+  colors, including the animated rainbow (max) and ripple (xhigh) at row scale.
+  The Classic card shows the same facts as a dim `file · model` line under its
+  caption. Switch from the tray's **Theme** submenu or the
   Settings dropdown — both apply instantly, no restart (the widget watches
   `settings.json`, so a panel **Save** lands live; same for the Notifications
   checkbox).
@@ -115,8 +131,10 @@ baby / teen / adult) in **Settings → Appearance → Mascot Look**.
   reset time. It revives on your next prompt.
 - **Shake-to-dizzy.** Grab a card and shake it — the mascot gets dizzy (😵‍💫).
 - **Self-cleaning.** A card stays as long as its Claude process is alive — even
-  idle or asleep — and vanishes the moment that process exits. (A heartbeat
-  timeout is a backstop only for sessions whose owner can't be tracked.)
+  idle or asleep — and vanishes the moment that process exits. A session whose
+  host *restarted* mid-flight (a VS Code reload) is never buried: while its state
+  file is still being written it stays, and the hooks re-stamp the new owner. (A
+  heartbeat timeout backstops sessions whose owner can't be tracked.)
 
 It is **display only** — it never approves anything or interferes with Claude.
 Hooks just write a small JSON state file; the widget polls and renders it.
