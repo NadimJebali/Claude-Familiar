@@ -94,9 +94,14 @@ class QtPetWindow(QWidget):
         self._level = QLabel()
         self._coins = QLabel()
         self._coins.setStyleSheet("font-weight:bold")
+        coins_row = QHBoxLayout()
+        coins_row.setContentsMargins(0, 0, 0, 0)
+        coins_row.addWidget(self._coin_icon())    # pixel-art coin, like the Tk header
+        coins_row.addWidget(self._coins)
+        coins_row.addStretch()
         info.addWidget(self._name)
         info.addWidget(self._level)
-        info.addWidget(self._coins)
+        info.addLayout(coins_row)
         info.addStretch()
         header.addLayout(info)
         root.addLayout(header)
@@ -296,6 +301,10 @@ class QtPetWindow(QWidget):
             button.setText("Play" if ok else reason)
 
     # --- pixel-art icons -------------------------------------------------
+    def _coin_icon(self) -> QLabel:
+        from . import ui_icons
+        return self._icon_label(grid_pixmap(ui_icons._ICONS["coin"], ui_icons.PALETTE, ICON_PX))
+
     def _item_icon(self, item_id: str) -> QLabel | None:
         if not item_art.has_art(item_id):
             return None
