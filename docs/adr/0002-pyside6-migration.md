@@ -1,6 +1,6 @@
 # ADR-0002: Migrate the widget view layer to PySide6 (Qt), hard cutover
 
-- **Status:** Accepted
+- **Status:** Accepted — **delivered** (cutover [#63](https://github.com/NadimJebali/Claude-Familiar/issues/63), 2026-07-10)
 - **Date:** 2026-07-09
 - **Resolves:** [#51](https://github.com/NadimJebali/Claude-Familiar/issues/51) (PRD)
 - **Builds on:** [ADR-0001](0001-runtime-dependencies.md) (runtime dependencies permitted)
@@ -92,3 +92,11 @@ This reverses the Tk view-layer choice, not ADR-0001's dependency policy — it
 *applies* it. The PyInstaller rejection (TASK.md) still stands on its own merits
 and is not reopened. macOS support beyond what the tray already offers remains
 out of scope.
+
+**Delivered (2026-07-10, #63).** The whole view layer is PySide6: card, popups, pet
+window, control panel, tray + native toasts. The Tk view modules are deleted and
+pystray/Pillow/plyer are dropped from `requirements.txt`; no module imports tkinter,
+and the running widget pulls in none of the retired deps. Every entry point
+(`run_mascot.py`, `python -m mascot`, `demo.py`, the shortcut Settings) launches Qt.
+One renderer remains — the `SpriteRenderer` seam over the same 16×16 grids. The pure
+cores and their tests were untouched by the swap.
