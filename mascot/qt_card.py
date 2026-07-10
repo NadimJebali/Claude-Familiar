@@ -120,9 +120,10 @@ USAGE_PCT_FG = "#6b6f82"
 # top-left) that fills clockwise from 12 o'clock as the session's context window
 # fills, in the usage traffic-light colors. Absent until the first tailer result.
 RING_DIAMETER = 22
-RING_STROKE = 3
+RING_STROKE = 4                     # bold enough to read at a glance (#84)
 RING_MARGIN = 8                     # inset from the panel's top-right corner
-RING_TRACK = "#2a2d3b"              # faint full-circle track (matches the bar tracks)
+RING_TRACK = "#3a3f55"              # the full-circle track — bright enough to see
+                                    # where the gauge runs even at low fill (#84)
 
 # Sub-agent badges: each live sub-agent shows as a small "working" mini-mascot in
 # the sub-agent accent, in a centered row below the caption (capped so a swarm can't

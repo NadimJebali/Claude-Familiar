@@ -189,3 +189,37 @@ def test_manager_polls_context_off_thread_and_pushes_to_cards(app, tmp_path):
     assert mgr._context.get("s1") == 50.0
     assert mgr.cards["s1"]._context_pct == 50.0
     mgr._on_sessions({})                              # tidy up
+
+
+# --- the adaptive window (#84) --------------------------------------------------
+def test_window_snaps_to_1m_once_tokens_prove_it_and_sticks():
+    base = transcript.CONTEXT_WINDOW_TOKENS
+    one_m = transcript.WINDOW_1M_TOKENS
+    assert transcript.window_for(150_000, base) == base       # under: stays 200k
+    assert transcript.window_for(250_000, base) == one_m      # proven: snaps
+    # Sticky: a post-compaction token drop keeps the proven window — the session
+    # doesn't flip back to reading 60k as 30% of 200k.
+    assert transcript.window_for(60_000, one_m) == one_m
+
+
+def test_context_pct_scales_by_the_given_window():
+    assert transcript.context_pct(350_000, transcript.WINDOW_1M_TOKENS) == 35.0
+    assert transcript.context_pct(100_000) == 50.0            # default divisor stands
+
+
+def test_tailer_adapts_the_window_per_session(tmp_path):
+    p = tmp_path / "t.jsonl"
+
+    def usage_line(tokens: int) -> str:
+        return json.dumps({"type": "assistant",
+                           "message": {"usage": {"input_tokens": tokens}}}) + "\n"
+
+    t = transcript.TranscriptTailer()
+    p.write_text(usage_line(150_000), encoding="utf-8")
+    assert t.poll({"s": str(p)})["s"] == 75.0                 # 150k / 200k
+    with open(p, "a", encoding="utf-8") as fh:
+        fh.write(usage_line(350_000))
+    assert t.poll({"s": str(p)})["s"] == 35.0                 # crossed: 350k / 1M
+    with open(p, "a", encoding="utf-8") as fh:
+        fh.write(usage_line(120_000))                         # compacted back down
+    assert t.poll({"s": str(p)})["s"] == 12.0                 # the window sticks

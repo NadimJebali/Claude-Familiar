@@ -35,9 +35,14 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-# The v1 divisor for the gauge. A named constant, not a per-model lookup: the
-# default Claude Code window. Sessions on a larger window (1M) clamp at 100%.
+# The default divisor for the gauge — the standard Claude Code window. Claude
+# Code doesn't expose the session's real window, so the evidence decides (#84):
+# once a session's observed tokens exceed this, the window must be 1M and the
+# divisor snaps there, sticking for that session (a post-compaction token drop
+# doesn't flip it back). Honest limit: a [1m] session below 200k still reads
+# against 200k until it crosses.
 CONTEXT_WINDOW_TOKENS = 200_000
+WINDOW_1M_TOKENS = 1_000_000
 
 # First sight of a transcript reads at most this many bytes from the tail —
 # the latest message lives at the end, so a long history costs nothing.
@@ -60,10 +65,17 @@ def context_tokens(usage: Any) -> int:
     return total
 
 
-def context_pct(tokens: int) -> float:
-    """The gauge percentage: 0..100 of :data:`CONTEXT_WINDOW_TOKENS` (clamped —
-    a 1M-window session overflows the v1 divisor and reads full, not wrong)."""
-    return max(0.0, min(100.0, tokens / CONTEXT_WINDOW_TOKENS * 100.0))
+def window_for(tokens: int, prev_window: int) -> int:
+    """The divisor a session has earned: 1M once its tokens prove it (or once
+    proven before — sticky), else the 200k default."""
+    if prev_window == WINDOW_1M_TOKENS or tokens > CONTEXT_WINDOW_TOKENS:
+        return WINDOW_1M_TOKENS
+    return CONTEXT_WINDOW_TOKENS
+
+
+def context_pct(tokens: int, window: int = CONTEXT_WINDOW_TOKENS) -> float:
+    """The gauge percentage: 0..100 of ``window`` (clamped)."""
+    return max(0.0, min(100.0, tokens / window * 100.0))
 
 
 def consume(chunk: bytes) -> tuple[dict[str, Any] | None, int]:
@@ -109,6 +121,7 @@ class TranscriptTailer:
     def __init__(self) -> None:
         self._offsets: dict[str, int] = {}
         self._pct: dict[str, float] = {}
+        self._window: dict[str, int] = {}   # per-sid earned divisor (#84, sticky)
 
     def poll(self, sessions: Mapping[str, str]) -> dict[str, float]:
         for sid, path_text in sessions.items():
@@ -116,12 +129,10 @@ class TranscriptTailer:
                 self._read(sid, Path(path_text))
         # Prune state for sessions that vanished, so a long-running widget
         # doesn't accumulate offsets forever (and a re-appearing sid re-anchors).
-        for sid in list(self._offsets):
-            if sid not in sessions:
-                del self._offsets[sid]
-        for sid in list(self._pct):
-            if sid not in sessions:
-                del self._pct[sid]
+        for tracked in (self._offsets, self._pct, self._window):
+            for sid in list(tracked):
+                if sid not in sessions:
+                    del tracked[sid]
         return dict(self._pct)
 
     def _read(self, sid: str, path: Path) -> None:
@@ -140,4 +151,8 @@ class TranscriptTailer:
         usage, consumed = consume(chunk)
         self._offsets[sid] = offset + consumed
         if usage is not None:
-            self._pct[sid] = context_pct(context_tokens(usage))
+            tokens = context_tokens(usage)
+            window = window_for(
+                tokens, self._window.get(sid, CONTEXT_WINDOW_TOKENS))
+            self._window[sid] = window
+            self._pct[sid] = context_pct(tokens, window)
