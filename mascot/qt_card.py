@@ -441,7 +441,12 @@ class QtCard(QWidget):
         if event.button() == Qt.MouseButton.LeftButton and self._press_pos is not None:
             moved = (event.globalPosition().toPoint() - self._press_pos).manhattanLength()
             now = time.time()
-            if moved <= PET_TAP_MAX_DIST and not self._overlay.is_dizzy(now):
+            # A tap (no drag) pets the mascot. Gated like the Tk card: dead in simple
+            # mode (a read-only indicator), and never while dizzy, or while the card is
+            # waiting/dead (don't cheer over a "needs you" or a gravestone).
+            if (self._pet_enabled and moved <= PET_TAP_MAX_DIST
+                    and not self._overlay.is_dizzy(now)
+                    and self._raw not in ("waiting", "dead")):
                 self._overlay.note_celebrate(now)   # a happy hop
                 self.petted.emit(self.session_id)
                 self._render(now)

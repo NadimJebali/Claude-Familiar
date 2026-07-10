@@ -155,12 +155,32 @@ def _tap(card, x=5, y=5):
 
 
 def test_tap_emits_petted_and_hops(app):
-    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer())
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer(), pet_enabled=True)
     got: list[str] = []
     card.petted.connect(got.append)
     _tap(card)                              # press+release in place = a pet tap
     assert got == ["s"]
     assert card._face == "happy"            # petting plays the happy hop
+    card.close()
+
+
+def test_a_tap_in_simple_mode_is_dead(app):
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer(), pet_enabled=False)
+    got: list[str] = []
+    card.petted.connect(got.append)
+    _tap(card)
+    assert got == []                        # a read-only indicator — no pet, no hop
+    assert card._face != "happy"
+    card.close()
+
+
+@pytest.mark.parametrize("raw", ["waiting", "dead"])
+def test_no_petting_while_waiting_or_dead(app, raw):
+    card = qt_card.QtCard("s", _state("s", raw), 0, QtPixmapRenderer(), pet_enabled=True)
+    got: list[str] = []
+    card.petted.connect(got.append)
+    _tap(card)
+    assert got == []                        # don't cheer over "needs you" / a gravestone
     card.close()
 
 
