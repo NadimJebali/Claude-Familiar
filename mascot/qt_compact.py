@@ -174,10 +174,67 @@ def _has_animated(sessions: dict[str, dict[str, Any]]) -> bool:
                for st in sessions.values())
 
 
+# --- the panel (the child that actually paints) --------------------------------------
+class _CompactPanel(QWidget):
+    """The rounded panel that paints the rows — a CHILD of the translucent
+    window so the ``QGraphicsDropShadowEffect`` applies reliably: an effect on
+    a translucent TOP-LEVEL renders once into its cache and then ignores
+    ``update()`` on real compositors (#88 — the frozen-rainbow bug). Same rule
+    ``qt_card._CardPanel`` documents. Dumb by design — the window computes the
+    frame and pushes it in via :meth:`show_frame`."""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self._frame: tuple | None = None
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(24)
+        shadow.setOffset(0, 6)
+        shadow.setColor(QColor(0, 0, 0, 160))
+        self.setGraphicsEffect(shadow)
+
+    def show_frame(self, frame: tuple) -> None:
+        """Adopt a computed frame; repaint only when it really changed."""
+        if frame == self._frame:
+            return
+        self._frame = frame
+        self.update()
+
+    def paintEvent(self, _event) -> None:
+        if self._frame is None:
+            return
+        rows, bars, stale = self._frame
+        p = QPainter(self)
+        try:
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            panel = QRectF(0.5, 0.5, PANEL_W - 1, self.height() - 1)
+            path = QPainterPath()
+            path.addRoundedRect(panel, PANEL_RADIUS, PANEL_RADIUS)
+            p.fillPath(path, QColor(PANEL_FILL))
+            p.setPen(QColor(PANEL_EDGE))
+            p.drawPath(path)
+
+            top = panel.y() + PAD
+            if not rows:
+                p.setPen(QColor(_MUTED_FG))
+                p.setFont(QFont("Segoe UI", 9))
+                p.drawText(QRectF(panel.x(), top, PANEL_W, ROW_H),
+                           Qt.AlignmentFlag.AlignCenter, _EMPTY_TEXT)
+                top += ROW_H
+            for _sid, text, dot, dim, backdrop, bg, model, subs, ctx in rows:
+                _paint_row(p, panel.x(), top, text, dot, dim, backdrop, bg,
+                           model, subs, ctx)
+                top += ROW_H
+            _paint_usage(p, panel.x(), top, bars, stale)
+        finally:
+            p.end()
+
+
 # --- the window --------------------------------------------------------------------
 class CompactWindow(QWidget):
-    """The single compact panel: rows painted straight onto the panel (no child
-    widgets), sized to the session count, animated only when needed."""
+    """The single compact panel: a translucent top-level shell owning the
+    state, anim timer, drag and placement; all painting happens on the
+    :class:`_CompactPanel` child (rows painted straight onto it, no per-row
+    widgets), sized to the session count."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -192,14 +249,10 @@ class CompactWindow(QWidget):
         self._usage: dict[str, Any] | None = None
         self._context: dict[str, float] = {}
         self._drag_offset: QPoint | None = None
-        self._frame: tuple | None = None
         self._anim_t0 = time.time()
 
-        self._shadow = QGraphicsDropShadowEffect(self)
-        self._shadow.setBlurRadius(24)
-        self._shadow.setOffset(0, 6)
-        self._shadow.setColor(QColor(0, 0, 0, 160))
-        self.setGraphicsEffect(self._shadow)
+        self._panel = _CompactPanel(self)
+        self._panel.move(SHADOW_PAD, SHADOW_PAD)
 
         self._resize_to(0)
         self._place()
@@ -208,6 +261,7 @@ class CompactWindow(QWidget):
         self._timer.setInterval(ANIM_MS)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
+        self._tick()                          # seed the first frame
 
     # --- pushes from the app (the same feeds the cards get) --------------------
     def set_sessions(self, live: dict[str, dict[str, Any]]) -> None:
@@ -233,6 +287,7 @@ class CompactWindow(QWidget):
         body_rows = max(1, rows)                 # an empty panel keeps one text row
         h = PAD + body_rows * ROW_H + USAGE_BLOCK_H + PAD
         self.setFixedSize(PANEL_W + 2 * SHADOW_PAD, h + 2 * SHADOW_PAD)
+        self._panel.setFixedSize(PANEL_W, h)
 
     def _place(self) -> None:
         """Anchor to the bottom-right of the home monitor's work area (the same
@@ -260,165 +315,9 @@ class CompactWindow(QWidget):
         )
         bars = tuple((b.label, b.pct, _hex(usage.bar_color(b.pct)))
                      for b in usage.usage_view(self._usage, now))
-        frame = (rows, bars, usage.is_stale(self._usage, now))
-        if frame == self._frame:
-            return
-        self._frame = frame
-        self.update()
+        self._panel.show_frame((rows, bars, usage.is_stale(self._usage, now)))
 
-    # --- painting -------------------------------------------------------------------
-    def paintEvent(self, _event) -> None:
-        if self._frame is None:
-            self._tick()
-        rows, bars, stale = self._frame or ((), (), False)
-        p = QPainter(self)
-        try:
-            p.setRenderHint(QPainter.RenderHint.Antialiasing)
-            panel = QRectF(SHADOW_PAD + 0.5, SHADOW_PAD + 0.5,
-                           PANEL_W - 1, self.height() - 2 * SHADOW_PAD - 1)
-            path = QPainterPath()
-            path.addRoundedRect(panel, PANEL_RADIUS, PANEL_RADIUS)
-            p.fillPath(path, QColor(PANEL_FILL))
-            p.setPen(QColor(PANEL_EDGE))
-            p.drawPath(path)
-
-            top = panel.y() + PAD
-            if not rows:
-                p.setPen(QColor(_MUTED_FG))
-                p.setFont(QFont("Segoe UI", 9))
-                p.drawText(QRectF(panel.x(), top, PANEL_W, ROW_H),
-                           Qt.AlignmentFlag.AlignCenter, _EMPTY_TEXT)
-                top += ROW_H
-            for _sid, text, dot, dim, backdrop, bg, model, subs, ctx in rows:
-                self._paint_row(p, panel.x(), top, text, dot, dim, backdrop, bg,
-                                model, subs, ctx)
-                top += ROW_H
-            self._paint_usage(p, panel.x(), top, bars, stale)
-        finally:
-            p.end()
-
-    def _paint_row(self, p: QPainter, px: float, top: float, text: str, dot: str,
-                   dim: bool, backdrop: str | None, bg: tuple, model: str, subs: int,
-                   ctx: float | None) -> None:
-        row = QRectF(px + 6, top + 2, PANEL_W - 12, ROW_H - 4)
-        if backdrop is not None:
-            bpath = QPainterPath()
-            bpath.addRoundedRect(row, ROW_RADIUS, ROW_RADIUS)
-            p.fillPath(bpath, QColor(backdrop))
-        if bg[0] != "solid":                 # max wash / xhigh rings, clipped to the row (#86)
-            bpath = QPainterPath()
-            bpath.addRoundedRect(row, ROW_RADIUS, ROW_RADIUS)
-            p.save()
-            p.setClipPath(bpath)
-            self._paint_row_bg(p, row, bg)
-            p.restore()
-        if dim:
-            p.setOpacity(0.5)
-
-        cy = row.y() + row.height() / 2
-        p.setBrush(QColor(dot))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawEllipse(QRectF(row.x() + 8, cy - DOT_D / 2, DOT_D, DOT_D))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-
-        right = row.right() - 8
-        if ctx is not None:                       # the small per-row context ring
-            ring = QRectF(right - RING_D, cy - RING_D / 2, RING_D, RING_D)
-            pen = p.pen()
-            pen.setStyle(Qt.PenStyle.SolidLine)
-            pen.setWidth(RING_STROKE - 1)
-            pen.setColor(QColor(RING_TRACK))
-            p.setPen(pen)
-            p.drawEllipse(ring)
-            span = round(max(0.0, min(100.0, ctx)) / 100.0 * 360.0 * 16)
-            if span > 0:
-                pen.setColor(QColor(_hex(usage.bar_color(ctx))))
-                p.setPen(pen)
-                p.drawArc(ring, 90 * 16, -span)
-            right -= RING_D + 8
-
-        p.setPen(QColor(_MUTED_FG))
-        p.setFont(QFont("Segoe UI", 8))
-        if subs:
-            p.drawText(QRectF(right - 24, row.y(), 24, row.height()),
-                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                       f"×{subs}")
-            right -= 28
-        if model:
-            p.drawText(QRectF(right - 76, row.y(), 76, row.height()),
-                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                       model)
-            right -= 80
-
-        p.setPen(QColor(_TEXT_FG))
-        p.setFont(QFont("Segoe UI", 9))
-        text_left = row.x() + 8 + DOT_D + 8
-        p.drawText(QRectF(text_left, row.y(), max(0.0, right - text_left), row.height()),
-                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
-        if dim:
-            p.setOpacity(1.0)
-
-    def _paint_row_bg(self, p: QPainter, row: QRectF, bg: tuple) -> None:
-        """The animated effort backdrop at row scale (#86) — the card's pixel
-        rainbow wash / ripple rings, in ROW_EFFORT_PIXEL cells; xhigh's rings
-        radiate from the effort dot (the row's stand-in for the mascot)."""
-        kind, t = bg[0], bg[1]
-        x0, y0 = int(row.x()), int(row.y())
-        if kind == "rainbow":
-            for y in range(y0, int(row.bottom()) + 1, ROW_EFFORT_PIXEL):
-                for x in range(x0, int(row.right()) + 1, ROW_EFFORT_PIXEL):
-                    f = (x - x0 + y - y0) / RAINBOW_WAVELENGTH_PX
-                    r, g, b = effort.rainbow_wash_color(_PANEL_FILL_RGB, t, f)
-                    p.fillRect(x, y, ROW_EFFORT_PIXEL, ROW_EFFORT_PIXEL,
-                               QColor(r, g, b))
-        elif kind == "ripple":
-            half = ROW_EFFORT_PIXEL / 2
-            dot_cx = row.x() + 8 + DOT_D / 2
-            dot_cy = row.y() + row.height() / 2
-            for y in range(y0, int(row.bottom()) + 1, ROW_EFFORT_PIXEL):
-                for x in range(x0, int(row.right()) + 1, ROW_EFFORT_PIXEL):
-                    d = math.hypot(x + half - dot_cx, y + half - dot_cy)
-                    phase = d / RIPPLE_WAVELENGTH_PX - t / RIPPLE_PERIOD_S
-                    rgb = effort.ripple_color(_PANEL_FILL_RGB, phase)
-                    if rgb != _PANEL_FILL_RGB:   # gap cells stay bare -> base shows
-                        p.fillRect(x, y, ROW_EFFORT_PIXEL, ROW_EFFORT_PIXEL,
-                                   QColor(*rgb))
-
-    def _paint_usage(self, p: QPainter, px: float, top: float,
-                     bars: tuple, stale: bool) -> None:
-        """The account-global 5h/7d bars, once, at the panel bottom — dimmed with a
-        small "stale" caption when the snapshot has aged (#69)."""
-        if not bars:
-            return
-        p.setFont(QFont("Segoe UI", 6))
-        if stale:
-            p.setOpacity(0.45)
-        label_x, bar_x0 = px + 14, px + 40
-        bar_x1, pct_x = px + PANEL_W - 60, px + PANEL_W - 14
-        for i, (label, pct, color) in enumerate(bars):
-            bar_top = top + 4 + i * (BAR_H + 6)
-            row = QRectF(px, bar_top - 4, PANEL_W, BAR_H + 8)
-            p.setPen(QColor(USAGE_LABEL_FG))
-            p.drawText(QRectF(label_x - 14, row.y(), 28, row.height()),
-                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, label)
-            p.fillRect(QRectF(bar_x0, bar_top, bar_x1 - bar_x0, BAR_H),
-                       QColor(USAGE_TRACK))
-            frac = max(0.0, min(1.0, pct / 100.0))
-            if frac > 0:
-                p.fillRect(QRectF(bar_x0, bar_top, (bar_x1 - bar_x0) * frac, BAR_H),
-                           QColor(color))
-            p.setPen(QColor(USAGE_PCT_FG))
-            p.drawText(QRectF(pct_x - 40, row.y(), 40, row.height()),
-                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                       f"{round(pct)}%")
-        if stale:
-            p.setOpacity(1.0)
-            p.setPen(QColor(USAGE_LABEL_FG))
-            block_h = len(bars) * (BAR_H + 6)
-            p.drawText(QRectF(px, top + 2, PANEL_W, block_h),
-                       Qt.AlignmentFlag.AlignCenter, "stale")
-
-    # --- drag anywhere -----------------------------------------------------------------
+    # --- drag anywhere ---------------------------------------------------------------
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_offset = (event.globalPosition().toPoint()
@@ -435,3 +334,128 @@ class CompactWindow(QWidget):
     def closeEvent(self, event) -> None:
         self._timer.stop()
         super().closeEvent(event)
+
+
+# --- pure painters (called by _CompactPanel with panel-local coordinates) ----------
+def _paint_row(p: QPainter, px: float, top: float, text: str, dot: str,
+               dim: bool, backdrop: str | None, bg: tuple, model: str, subs: int,
+               ctx: float | None) -> None:
+    row = QRectF(px + 6, top + 2, PANEL_W - 12, ROW_H - 4)
+    if backdrop is not None:
+        bpath = QPainterPath()
+        bpath.addRoundedRect(row, ROW_RADIUS, ROW_RADIUS)
+        p.fillPath(bpath, QColor(backdrop))
+    if bg[0] != "solid":                 # max wash / xhigh rings, clipped to the row (#86)
+        bpath = QPainterPath()
+        bpath.addRoundedRect(row, ROW_RADIUS, ROW_RADIUS)
+        p.save()
+        p.setClipPath(bpath)
+        _paint_row_bg(p, row, bg)
+        p.restore()
+    if dim:
+        p.setOpacity(0.5)
+
+    cy = row.y() + row.height() / 2
+    p.setBrush(QColor(dot))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawEllipse(QRectF(row.x() + 8, cy - DOT_D / 2, DOT_D, DOT_D))
+    p.setBrush(Qt.BrushStyle.NoBrush)
+
+    right = row.right() - 8
+    if ctx is not None:                       # the small per-row context ring
+        ring = QRectF(right - RING_D, cy - RING_D / 2, RING_D, RING_D)
+        pen = p.pen()
+        pen.setStyle(Qt.PenStyle.SolidLine)
+        pen.setWidth(RING_STROKE - 1)
+        pen.setColor(QColor(RING_TRACK))
+        p.setPen(pen)
+        p.drawEllipse(ring)
+        span = round(max(0.0, min(100.0, ctx)) / 100.0 * 360.0 * 16)
+        if span > 0:
+            pen.setColor(QColor(_hex(usage.bar_color(ctx))))
+            p.setPen(pen)
+            p.drawArc(ring, 90 * 16, -span)
+        right -= RING_D + 8
+
+    p.setPen(QColor(_MUTED_FG))
+    p.setFont(QFont("Segoe UI", 8))
+    if subs:
+        p.drawText(QRectF(right - 24, row.y(), 24, row.height()),
+                   Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                   f"×{subs}")
+        right -= 28
+    if model:
+        p.drawText(QRectF(right - 76, row.y(), 76, row.height()),
+                   Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                   model)
+        right -= 80
+
+    p.setPen(QColor(_TEXT_FG))
+    p.setFont(QFont("Segoe UI", 9))
+    text_left = row.x() + 8 + DOT_D + 8
+    p.drawText(QRectF(text_left, row.y(), max(0.0, right - text_left), row.height()),
+               Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+    if dim:
+        p.setOpacity(1.0)
+
+
+def _paint_row_bg(p: QPainter, row: QRectF, bg: tuple) -> None:
+    """The animated effort backdrop at row scale (#86) — the card's pixel
+    rainbow wash / ripple rings, in ROW_EFFORT_PIXEL cells; xhigh's rings
+    radiate from the effort dot (the row's stand-in for the mascot)."""
+    kind, t = bg[0], bg[1]
+    x0, y0 = int(row.x()), int(row.y())
+    if kind == "rainbow":
+        for y in range(y0, int(row.bottom()) + 1, ROW_EFFORT_PIXEL):
+            for x in range(x0, int(row.right()) + 1, ROW_EFFORT_PIXEL):
+                f = (x - x0 + y - y0) / RAINBOW_WAVELENGTH_PX
+                r, g, b = effort.rainbow_wash_color(_PANEL_FILL_RGB, t, f)
+                p.fillRect(x, y, ROW_EFFORT_PIXEL, ROW_EFFORT_PIXEL,
+                           QColor(r, g, b))
+    elif kind == "ripple":
+        half = ROW_EFFORT_PIXEL / 2
+        dot_cx = row.x() + 8 + DOT_D / 2
+        dot_cy = row.y() + row.height() / 2
+        for y in range(y0, int(row.bottom()) + 1, ROW_EFFORT_PIXEL):
+            for x in range(x0, int(row.right()) + 1, ROW_EFFORT_PIXEL):
+                d = math.hypot(x + half - dot_cx, y + half - dot_cy)
+                phase = d / RIPPLE_WAVELENGTH_PX - t / RIPPLE_PERIOD_S
+                rgb = effort.ripple_color(_PANEL_FILL_RGB, phase)
+                if rgb != _PANEL_FILL_RGB:   # gap cells stay bare -> base shows
+                    p.fillRect(x, y, ROW_EFFORT_PIXEL, ROW_EFFORT_PIXEL,
+                               QColor(*rgb))
+
+
+def _paint_usage(p: QPainter, px: float, top: float,
+                 bars: tuple, stale: bool) -> None:
+    """The account-global 5h/7d bars, once, at the panel bottom — dimmed with a
+    small "stale" caption when the snapshot has aged (#69)."""
+    if not bars:
+        return
+    p.setFont(QFont("Segoe UI", 6))
+    if stale:
+        p.setOpacity(0.45)
+    label_x, bar_x0 = px + 14, px + 40
+    bar_x1, pct_x = px + PANEL_W - 60, px + PANEL_W - 14
+    for i, (label, pct, color) in enumerate(bars):
+        bar_top = top + 4 + i * (BAR_H + 6)
+        row = QRectF(px, bar_top - 4, PANEL_W, BAR_H + 8)
+        p.setPen(QColor(USAGE_LABEL_FG))
+        p.drawText(QRectF(label_x - 14, row.y(), 28, row.height()),
+                   Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, label)
+        p.fillRect(QRectF(bar_x0, bar_top, bar_x1 - bar_x0, BAR_H),
+                   QColor(USAGE_TRACK))
+        frac = max(0.0, min(1.0, pct / 100.0))
+        if frac > 0:
+            p.fillRect(QRectF(bar_x0, bar_top, (bar_x1 - bar_x0) * frac, BAR_H),
+                       QColor(color))
+        p.setPen(QColor(USAGE_PCT_FG))
+        p.drawText(QRectF(pct_x - 40, row.y(), 40, row.height()),
+                   Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                   f"{round(pct)}%")
+    if stale:
+        p.setOpacity(1.0)
+        p.setPen(QColor(USAGE_LABEL_FG))
+        block_h = len(bars) * (BAR_H + 6)
+        p.drawText(QRectF(px, top + 2, PANEL_W, block_h),
+                   Qt.AlignmentFlag.AlignCenter, "stale")
