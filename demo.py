@@ -96,29 +96,18 @@ pet_backup = PET_PATH.read_bytes() if PET_PATH.exists() else None
 PET_PATH.write_text(json.dumps(demo_pet, indent=2), encoding="utf-8")
 
 print()
-# `python demo.py --qt` drives the new PySide6 walking skeleton (#56) instead of
-# the Tk widget; the same fake sessions + tour + demo pet feed either one.
-_QT = "--qt" in sys.argv
-_TARGET = "mascot.qt_app" if _QT else "mascot"
-
-if _QT:
-    print("Launching mascot widget (PySide6/Qt walking skeleton)...")
-    print("✓ Cards appear bottom-right: working / idle / a tour card cycling faces")
-    print("✓ Translucent rounded cards, always-on-top, event-driven (no polling)")
-    print("✓ Skeleton scope: pet stage/hat/mood, drag, tooltip, badges come next (#57/#58)")
-else:
-    print("Launching mascot widget (tkinter)...")
-    print("✓ Three cards appear bottom-right: one working, one idle, one on a face tour")
-    print("✓ The tour card cycles: reading / editing / running / browsing eyes,")
-    print("  planning (plan mode), tidying memories (compacting), and a brief 'oops…'")
-    print("✓ The idle card shows the pet's mood face + a food popup (it's hungry)")
-    print("✓ Hover a card for the status tooltip (needs / coins / level / name)")
-    print("✓ Click the paw button (or tray 'Pet...') to open the Pet window — shop, feed, play")
-    print("✓ Tap a card to pet it (+1 coin, rising hearts)")
+print("Launching the Claude Familiar widget (PySide6/Qt)...")
+print("✓ Three cards appear bottom-right: one working, one idle, one on a face tour")
+print("✓ The tour card cycles: reading / editing / running / browsing eyes,")
+print("  planning (plan mode), tidying memories (compacting), and a brief 'oops…'")
+print("✓ The idle card shows the pet's mood face + a food popup (it's hungry)")
+print("✓ Hover a card for the status tooltip (needs / coins / level / name)")
+print("✓ Click the paw button (or tray 'Pet…') to open the Pet window — shop, feed, play")
+print("✓ Tap a card to pet it (+1 coin, rising hearts); faces crossfade, motion is smooth")
 print("✓ Press Ctrl+C here to stop")
 print()
 
-proc = subprocess.Popen([sys.executable, "-m", _TARGET], cwd=Path(__file__).parent)
+proc = subprocess.Popen([sys.executable, "-m", "mascot.qt_app"], cwd=Path(__file__).parent)
 
 try:
     step = 0

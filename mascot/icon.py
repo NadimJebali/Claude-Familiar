@@ -1,21 +1,19 @@
 """App icon, rendered from the pixel mascot (single source of truth).
 
 The same `sprite_pixel` idle grid that draws the on-screen creature also produces
-the app icon, so they can never drift apart. Two outputs:
+the app-icon **file** the shortcuts point at, so they can never drift apart:
 
-  * ``make_photo`` — a ``tk.PhotoImage`` for ``window.iconphoto`` (taskbar / title
-    bar of the live windows).
   * ``ensure_ico`` — a Windows ``.ico`` file (for Start-up / desktop shortcuts),
     written as raw bytes so there are no external dependencies.
   * ``ensure_png`` — a ``.png`` file for Linux ``.desktop`` launchers, likewise
     written from scratch (zlib) with no third-party imaging library.
 
-Use ``ensure_app_icon`` to get the right file for the current platform.
+Use ``ensure_app_icon`` to get the right file for the current platform. (The Qt
+widgets set their own window icon from the sprite renderer — no Tk PhotoImage.)
 """
 from __future__ import annotations
 
 import struct
-import tkinter as tk
 import zlib
 from pathlib import Path
 
@@ -46,31 +44,6 @@ def _pixel_rows() -> list[list[tuple[int, int, int] | None]]:
                 cells.append(_rgb(sprite_pixel.COLORS[ch]))
         rows.append(cells)
     return rows
-
-
-# --- live window icon ------------------------------------------------------
-def make_photo(master: tk.Misc, px: int = 2) -> tk.PhotoImage:
-    """A transparent-background PhotoImage of the mascot (16*px square)."""
-    rows = _pixel_rows()
-    h, w = len(rows) * px, len(rows[0]) * px
-    img = tk.PhotoImage(master=master, width=w, height=h)
-    for y, row in enumerate(rows):
-        for x, cell in enumerate(row):
-            if cell is None:
-                continue
-            box = (x * px, y * px, (x + 1) * px, (y + 1) * px)
-            img.put("#{:02x}{:02x}{:02x}".format(*cell), to=box)
-    return img
-
-
-def apply(window: tk.Tk | tk.Toplevel) -> None:
-    """Set the mascot as `window`'s icon (and the default for its children)."""
-    try:
-        photo = make_photo(window)
-        window._app_icon = photo  # type: ignore[union-attr]  # keep a ref alive
-        window.iconphoto(True, photo)
-    except tk.TclError:
-        pass  # headless / unsupported — the widget still runs fine
 
 
 # --- .ico file (for Windows shortcuts) -------------------------------------

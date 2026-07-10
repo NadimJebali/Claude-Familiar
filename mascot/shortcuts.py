@@ -28,7 +28,7 @@ RUN_SCRIPT = PROJECT_ROOT / "run_mascot.py"
 
 # The app icon opens the Settings / control panel (run as a module from the
 # project root, which is the shortcut's WorkingDirectory).
-SETTINGS_MODULE = "mascot.control_panel"
+SETTINGS_MODULE = "mascot.qt_control_panel"
 SETTINGS_ARGS = f"-m {SETTINGS_MODULE}"
 
 # --- Windows paths ---------------------------------------------------------

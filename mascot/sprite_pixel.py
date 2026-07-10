@@ -1,8 +1,9 @@
 """Pixel-art mascot, styled after Claude Code's blocky terminal creature.
 
-The character is defined as 16x16 character grids — one face per state — drawn
-as a grid of square "pixels" on the Canvas. Designing in ASCII means the art is
-readable and editable right here in the source: tweak a grid, see the change.
+The character is defined as 16x16 character grids — one face per state — the single
+source of truth the Qt renderer (:mod:`mascot.sprite_qt`) rasterizes to pixmaps.
+Designing in ASCII means the art is readable and editable right here in the source:
+tweak a grid, see the change.
 
 Legend:  '.' transparent · 'o' outline · 'O' body (Claude orange) ·
          'w' eye white · 'k' pupil · 'm' mouth · 't' tear (always blue) ·
@@ -10,13 +11,7 @@ Legend:  '.' transparent · 'o' outline · 'O' body (Claude orange) ·
 """
 from __future__ import annotations
 
-import tkinter as tk
-from typing import TYPE_CHECKING, Any
-
-from . import pixel_grid
-
-if TYPE_CHECKING:
-    from .pet_view import PetView
+from typing import Any
 
 # --- palette (Claude burnt-orange) -----------------------------------------
 BODY = "#d97757"
@@ -148,11 +143,6 @@ GRAVE_COLORS = {
     "G": "#55684f",   # grass tufts
 }
 
-
-def draw_gravestone(c: tk.Canvas, cx: float, cy: float, px: int = 5,
-                    tag: str = "creature") -> None:
-    """Draw the pixel gravestone centered at (cx, cy) — the mascot's 'dead' look."""
-    pixel_grid.draw_grid(c, _GRAVE, GRAVE_COLORS, cx, cy, px, tag)
 
 # Per-state face (the 5 middle rows: eyes + mouth).
 _FACES = {
@@ -324,44 +314,9 @@ def grid_for(stage: str, state: str) -> list[str]:
 # in tests/test_pixel_grid.py::test_every_registry_grid_is_wellformed.
 
 
-def draw_creature(
-    c: tk.Canvas, cx: float, cy: float, state: str, accent: str,
-    px: int = 5, tag: str = "creature", stage: str = "baby", flourish: bool = False,
-) -> None:
-    """Draw the pixel creature for `stage`/`state` centered at (cx, cy), one square
-    per grid cell.
-
-    `px` is the size of each pixel; the default renders an ~80px character. All
-    cells are tagged `tag` so the caller can bob or delete the whole group. When
-    `flourish` is set (a leveled-up milestone), a few accent sparkles are added.
-    """
-    grid = grid_for(stage, state)
-    # 'a' is the accent sparkle on a creature, but the egg's fixed grey speckles.
-    spot = EGG_SPECKLE if stage == "egg" else accent
-    x0 = cx - (GRID_W * px) / 2
-    y0 = cy - (GRID_H * px) / 2
-    for r, row in enumerate(grid):
-        y = y0 + r * px
-        for col, ch in enumerate(row):
-            if ch == ".":
-                continue
-            color = spot if ch == "a" else COLORS[ch]
-            x = x0 + col * px
-            c.create_rectangle(x, y, x + px, y + px, fill=color, outline="", tags=tag)
-    if flourish:
-        _draw_flourish(c, cx, cy, px, accent, tag)
-
-
 # A small milestone sparkle: a few accent pixels at the upper corners, drawn over
 # the creature once it has leveled up enough (a visual reward, tuning not structural).
 _FLOURISH = [(-7, -7), (-6, -6), (7, -7), (6, -6), (-8, -3), (8, -3)]
-
-
-def _draw_flourish(c: tk.Canvas, cx: float, cy: float, px: int, accent: str, tag: str) -> None:
-    for gx, gy in _FLOURISH:
-        x = cx + gx * px
-        y = cy + gy * px
-        c.create_rectangle(x, y, x + px, y + px, fill=accent, outline="", tags=tag)
 
 
 # --- wardrobe hats (cosmetics.py catalog art) --------------------------------
@@ -426,51 +381,6 @@ _HAT_ANCHOR_ROW = {"baby": 3, "teen": 3, "adult": 2}
 # covered) in tests/test_pixel_grid.py::test_every_registry_grid_is_wellformed.
 
 
-def draw_hat_icon(c: tk.Canvas, hat_id: str, cx: float, cy: float, px: int = 3,
-                  tag: str = "hat_icon") -> None:
-    """Draw a hat by itself, centered at (cx, cy) — for wardrobe lists, not the
-    creature (see `draw_hat` for wearing)."""
-    hat = _HATS.get(hat_id)
-    if hat is None:
-        return
-    pixel_grid.draw_grid(c, hat["grid"], hat["colors"], cx, cy, px, tag)
-
-
-def draw_hat(c: tk.Canvas, cx: float, cy: float, hat_id: str, px: int,
-             stage: str = "baby", tag: str = "creature") -> None:
-    """Draw a wardrobe hat over the creature at (cx, cy) — same center and cell
-    size as the `draw_creature` call it decorates, so it scales and bobs with the
-    body (it shares the tag). Unknown hat ids and the egg draw nothing."""
-    hat = _HATS.get(hat_id)
-    if hat is None or stage == "egg":
-        return
-    grid, colors = hat["grid"], hat["colors"]
-    anchor = _HAT_ANCHOR_ROW.get(stage, 3)
-    y0 = cy - (GRID_H * px) / 2 + (anchor - len(grid) + 1) * px
-    x0 = cx - (len(grid[0]) * px) / 2
-    for r, row in enumerate(grid):
-        y = y0 + r * px
-        for col, ch in enumerate(row):
-            if ch == ".":
-                continue
-            x = x0 + col * px
-            c.create_rectangle(x, y, x + px, y + px, fill=colors[ch], outline="", tags=tag)
-
-
-def draw_pet(c: tk.Canvas, cx: float, cy: float, view: PetView, *, state: str,
-             accent: str, px: int, tag: str = "creature") -> None:
-    """Render the wearing pet from its :class:`~mascot.pet_view.PetView` — the body
-    for ``view.stage`` + the ``state`` face + the milestone ``view.flourish``, with
-    ``view.hat`` worn on top. The egg stays bare (its ``hat`` is already None, and
-    ``draw_hat`` guards the egg too). One home for the draw-creature-then-hat sequence
-    both windows used to inline; the caller sizes ``px`` (the card grows it with the
-    stage, the Pet window keeps it fixed) and owns the stage-independent gravestone."""
-    draw_creature(c, cx, cy, state, accent, px, tag=tag, stage=view.stage,
-                  flourish=view.flourish)
-    if view.hat:
-        draw_hat(c, cx, cy, view.hat, px, stage=view.stage, tag=tag)
-
-
 # --- pet hearts -------------------------------------------------------------
 # A small hand-drawn heart, same blocky technique as the creature (no emoji).
 # Drawn in a single flat color so it can be faded by lerping toward the panel.
@@ -483,23 +393,6 @@ _HEART = [
     "..OOOO..",
     "...OO...",
 ]
-_HEART_W = len(_HEART[0])
-_HEART_H = len(_HEART)
-
-
-def draw_heart(
-    c: tk.Canvas, cx: float, cy: float, px: int, color: str, tag: str = "heart",
-) -> None:
-    """Draw a small pixel heart centered at (cx, cy), one square per cell."""
-    x0 = cx - (_HEART_W * px) / 2
-    y0 = cy - (_HEART_H * px) / 2
-    for r, row in enumerate(_HEART):
-        y = y0 + r * px
-        for col, ch in enumerate(row):
-            if ch == ".":
-                continue
-            x = x0 + col * px
-            c.create_rectangle(x, y, x + px, y + px, fill=color, outline="", tags=tag)
 
 
 # --- mood emotes (popups above the creature) -------------------------------
@@ -514,8 +407,6 @@ _FOOD = [          # a little apple (g = leaf, s = stem, r = apple body)
     ".rrrr.",
 ]
 _FOOD_COLORS = {"r": "#e0556a", "g": "#6fcf83", "s": MOUTH}
-_FOOD_W = len(_FOOD[0])
-_FOOD_H = len(_FOOD)
 
 _ZED = [           # a single "Z"; the widget staggers a few to read as "zzz"
     "ZZZZ",
@@ -524,16 +415,3 @@ _ZED = [           # a single "Z"; the widget staggers a few to read as "zzz"
     ".Z..",
     "ZZZZ",
 ]
-_ZED_W = len(_ZED[0])
-_ZED_H = len(_ZED)
-
-
-def draw_food(c: tk.Canvas, cx: float, cy: float, px: int, tag: str = "emote") -> None:
-    """Draw a small food icon centered at (cx, cy) (the 'hungry' mood popup)."""
-    pixel_grid.draw_grid(c, _FOOD, _FOOD_COLORS, cx, cy, px, tag)
-
-
-def draw_zzz(c: tk.Canvas, cx: float, cy: float, px: int,
-             color: str = WHITE, tag: str = "emote") -> None:
-    """Draw a single sleepy 'Z' centered at (cx, cy) (the 'tired' mood popup)."""
-    pixel_grid.draw_grid(c, _ZED, {"Z": color}, cx, cy, px, tag)

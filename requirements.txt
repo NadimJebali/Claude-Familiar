@@ -6,19 +6,11 @@
 #
 # Dev/test tools (pytest, hypothesis, ruff) live in requirements-dev.txt.
 
-# Qt for Python — the widget's view layer (ADR-0002 / PRD #51). The migration is a
-# hard cutover to PySide6; once it lands it replaces the Tk view and subsumes the
-# tray + toast deps below (pystray/Pillow/plyer are removed at the cutover, #63).
+# Qt for Python — the widget's entire view layer (ADR-0002 / PRD #51). Since the #63
+# cutover PySide6 is the only view framework: the card, pet window, control panel,
+# system tray (QSystemTrayIcon) and native toasts (showMessage) all go through Qt, so
+# the former tray/toast deps (pystray/Pillow/plyer) are gone.
 PySide6>=6.8
-
-# Cross-platform system tray (#18). pystray renders the tray icon + menu on
-# Windows / Linux / macOS; Pillow supplies the icon image.
-pystray>=0.19
-Pillow>=10
-
-# Native OS toast notifications (#19) for permission/attention + usage-limit
-# events, complementing the in-app speech bubble.
-plyer>=2.1
 
 # Cross-platform process detection / liveness (#17): finding the owning Claude
 # process (hooks) and pruning a session when it dies (widget). Imported lazily and

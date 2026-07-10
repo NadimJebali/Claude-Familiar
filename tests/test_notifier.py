@@ -1,8 +1,8 @@
-"""Tests for native OS notifications (#19).
+"""Tests for the native-notification core (#19).
 
-The plyer call is thin I/O (verified live); the logic — edge-triggering across
-polls and title/message formatting — is pure and tested here. ``emit`` takes an
-injectable ``show`` so the routing is tested without touching plyer or threads.
+The logic — edge-triggering across ingest cycles and title/message formatting — is
+pure and tested here. Raising the toast itself is the Qt tray's job
+(``QtSystemTray.show_toast``), verified live.
 """
 from mascot import notifier
 
@@ -82,20 +82,3 @@ def test_toast_for_untyped_attention_titles_needs_you():
     title, message = notifier.toast_for({"message": "Claude needs you", "type": ""})
     assert title == f"{notifier.APP_NAME} — needs you"
     assert message == "Claude needs you"
-
-
-# --- emit (routing, with injected show) -----------------------------------
-
-def test_emit_shows_a_formatted_toast():
-    shown = []
-    notifier.emit(_PERM, show=lambda title, msg: shown.append((title, msg)))
-    assert len(shown) == 1
-    assert shown[0][1] == "Approve edit?"
-
-
-def test_emit_does_nothing_for_an_empty_or_missing_notify():
-    shown = []
-    record = lambda title, msg: shown.append((title, msg))  # noqa: E731
-    notifier.emit(None, show=record)
-    notifier.emit({"type": "permission"}, show=record)   # no message
-    assert shown == []
