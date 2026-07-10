@@ -303,3 +303,39 @@ def test_dragging_suppresses_the_jostle(app):
     _shake_frames(card, time.time() + config.SHAKE_AFTER_S + 5)
     assert not card._shake.is_shaking                    # don't fight the user's drag
     card.close()
+
+
+# --- QtCard: sub-agent badges ------------------------------------------------
+def _with_subs(sid, n):
+    st = _state(sid, "working")
+    st["subagents"] = [{"type": "task"} for _ in range(n)]
+    return st
+
+
+def test_card_shows_a_badge_per_subagent(app):
+    card = qt_card.QtCard("s", _with_subs("s", 2), 0, QtPixmapRenderer())
+    assert card._panel._badge_count == 2
+    assert card._panel._badge is not None
+    card.close()
+
+
+def test_card_caps_badges_at_four(app):
+    card = qt_card.QtCard("s", _with_subs("s", 9), 0, QtPixmapRenderer())
+    assert card._panel._badge_count == 4       # capped, never a crowd
+    card.close()
+
+
+def test_card_without_subagents_shows_no_badges(app):
+    card = qt_card.QtCard("s", _state("s", "working"), 0, QtPixmapRenderer())
+    assert card._panel._badge_count == 0
+    assert card._panel._badge is None
+    card.close()
+
+
+def test_badges_appear_and_clear_as_subagents_come_and_go(app):
+    card = qt_card.QtCard("s", _state("s", "working"), 0, QtPixmapRenderer())
+    card.set_state(_with_subs("s", 3))
+    assert card._panel._badge_count == 3
+    card.set_state(_state("s", "working"))     # the sub-agents finished
+    assert card._panel._badge_count == 0
+    card.close()

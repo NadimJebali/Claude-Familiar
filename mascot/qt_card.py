@@ -22,8 +22,10 @@ While a prompt sits unanswered the whole card jostles (the pure ``shake.Shake`` 
 gently at first then more frantic the longer it's ignored — settling the moment it's
 answered or grabbed.
 
-Still on the parity list (later #57 work / #60): sub-agent badges and home-monitor
-placement.
+Each live sub-agent shows as a small mini-mascot badge in a centered row below the
+caption (capped so a swarm can't crowd the card).
+
+Still on the parity list (later #57 work / #60): home-monitor placement.
 """
 from __future__ import annotations
 
@@ -63,6 +65,14 @@ CREATURE_PX = 5
 CREATURE_CY = 68        # vertical center of the creature zone
 CAPTION_Y = 132
 SHADOW_PAD = 18         # room around the panel so the drop shadow isn't clipped
+
+# Sub-agent badges: each live sub-agent shows as a small "working" mini-mascot in
+# the sub-agent accent, in a centered row below the caption (capped so a swarm can't
+# crowd the card).
+MAX_BADGES = 4
+BADGE_MINI_PX = 1       # 1px/cell -> a ~16px mini creature (matches the Tk badge)
+BADGE_GAP = 24          # spacing between badge centers
+BADGE_CY = 176          # vertical center of the badge row
 
 PANEL_FILL = "#1d1f29"
 PANEL_EDGE = "#2a2d3b"
@@ -171,11 +181,18 @@ class _CardPanel(QWidget):
         self._pixmap: QPixmap | None = None
         self._caption = ""
         self._bob = 0
+        # The sub-agent badges: one shared mini-mascot pixmap, drawn ``_badge_count``
+        # times in a centered row (all badges are identical, so a count is enough).
+        self._badge: QPixmap | None = None
+        self._badge_count = 0
 
-    def show_art(self, pixmap: QPixmap | None, caption: str, bob: int) -> None:
-        if pixmap is self._pixmap and caption == self._caption and bob == self._bob:
+    def show_art(self, pixmap: QPixmap | None, caption: str, bob: int, *,
+                 badge: QPixmap | None = None, badge_count: int = 0) -> None:
+        if (pixmap is self._pixmap and caption == self._caption and bob == self._bob
+                and badge is self._badge and badge_count == self._badge_count):
             return
         self._pixmap, self._caption, self._bob = pixmap, caption, bob
+        self._badge, self._badge_count = badge, badge_count
         self.update()
 
     def paintEvent(self, _event) -> None:
@@ -199,8 +216,20 @@ class _CardPanel(QWidget):
             p.drawText(QRectF(0, CAPTION_Y, CARD_W, 22),
                        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
                        self._caption)
+
+            self._paint_badges(p)
         finally:
             p.end()
+
+    def _paint_badges(self, p: QPainter) -> None:
+        """A centered row of identical sub-agent mini-mascots below the caption."""
+        if self._badge is None or self._badge_count <= 0:
+            return
+        bw, bh = self._badge.width(), self._badge.height()
+        center0 = CARD_W / 2 - (self._badge_count - 1) * BADGE_GAP / 2
+        for i in range(self._badge_count):
+            cx = center0 + i * BADGE_GAP
+            p.drawPixmap(round(cx - bw / 2), BADGE_CY - bh // 2, self._badge)
 
 
 class QtCard(QWidget):
@@ -319,7 +348,10 @@ class QtCard(QWidget):
             self._pixmap = self._pixmap_for(face)
         bob = 0 if (eff == "sleeping" or self._raw == "dead") else round(
             BOB_AMPLITUDE * math.sin((now - self._anim_t0) * 2 * math.pi / BOB_PERIOD_S))
-        self._panel.show_art(self._pixmap, _CAPTIONS.get(face, self._raw), bob)
+        count = min(len(self._state.get("subagents") or []), MAX_BADGES)
+        badge = self._badge_pixmap() if count else None
+        self._panel.show_art(self._pixmap, _CAPTIONS.get(face, self._raw), bob,
+                             badge=badge, badge_count=count)
 
     def _display_face(self, eff: str, now: float) -> str:
         ts = self._state.get("ts")
@@ -329,6 +361,13 @@ class QtCard(QWidget):
             eff, tool=self._state.get("tool"),
             permission_mode=str(self._state.get("permission_mode", "")),
             stumbled_recent=stumbled_recent)
+
+    def _badge_pixmap(self) -> QPixmap:
+        """The shared sub-agent mini-mascot: a small ``working`` creature in the
+        sub-agent accent (renderer-cached, so all badges are one pixmap)."""
+        accent = _hex(config.SUBAGENT_COLOR)
+        return self._renderer.creature(
+            SpriteSpec(stage="baby", state="working", accent=accent), BADGE_MINI_PX)
 
     def _pixmap_for(self, face: str) -> QPixmap:
         if self._raw == "dead":
