@@ -56,14 +56,21 @@ def is_session_live(
 
     A session stays as long as its owning `claude` process is alive — even when
     idle or sleeping (sleep is the pet's energy-recovery rhythm now, not death),
-    so a quiet-but-live session is never timed out. The card is removed only when
-    the session truly ends: the owner PID is confirmed dead, or `SessionEnd`
-    deleted the file (so it isn't found at all). When there is no trackable owner
-    PID (unknown platform / lookup failed), the heartbeat-staleness timeout is the
-    backstop that still prunes an abandoned file.
+    so a quiet-but-live session is never timed out. When there is no trackable
+    owner PID (unknown platform / lookup failed), the heartbeat-staleness timeout
+    is the backstop that still prunes an abandoned file.
+
+    A *positively dead* stamp is not the whole verdict (#83): the host can
+    restart mid-session (a VS Code reload relaunches the CLI), leaving a dead
+    PID stamped on a file that hooks are still writing. Evidence of life wins —
+    the session survives while its heartbeat is fresher than the (tight)
+    ``DEAD_OWNER_GRACE_S``, which still prunes a truly-ended session far faster
+    than the ownerless backstop.
     """
     if _has_trackable_owner(state):
-        return pid_alive(state.get("owner_pid"))
+        if pid_alive(state.get("owner_pid")):
+            return True
+        return not is_stale(state, now, config.DEAD_OWNER_GRACE_S)
     return not is_stale(state, now, timeout)
 
 

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from proc import find_owner_pid
+from proc import find_owner_pid, pid_alive
 from state_logic import SCHEMA_VERSION, compute_next_state, default_state
 
 STATE_DIR = Path.home() / ".claude" / "mascot" / "state"
@@ -104,7 +104,12 @@ def update_state(
     # Record the owning claude.exe PID once per session so the widget can prune
     # this mascot the instant that process dies (closed terminal, no SessionEnd).
     # Key-presence (not truthiness) so a None result isn't re-detected every hook.
+    # One exception (#83): the host can restart mid-session (a VS Code reload
+    # relaunches the CLI), so a stamped PID that is positively dead is re-detected
+    # — otherwise the widget prunes a session whose hooks are still firing.
     if "owner_pid" not in nxt:
+        nxt["owner_pid"] = find_owner_pid()
+    elif nxt["owner_pid"] and not pid_alive(nxt["owner_pid"]):
         nxt["owner_pid"] = find_owner_pid()
     # Stamp the session's start time once, so the widget can show its duration.
     if "started" not in nxt:
