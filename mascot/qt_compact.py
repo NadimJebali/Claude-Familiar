@@ -1,29 +1,169 @@
 """The Compact theme window — one panel listing every session as a row (#75).
 
 The Rust widget's shape: instead of one mascot card per session, a single
-frameless always-on-top panel holds a slim row per live session (effort dot ·
-state text · model · sub-agent count · context ring), the account-global usage
-bars once at the bottom, and no mascot, no jostle, no popup bubbles (notify
-text rides inline in its row).
+frameless always-on-top panel holds a slim row per live session —
 
-This module lands with the presentation seam (#74) as a skeleton — the app
-routes sessions/usage/context here when ``theme == "compact"`` — and the rows,
-effort backdrops, inline notify and bottom bars arrive in #75. The pet layer is
-orthogonal: PetService keeps earning and the tray "Pet…" window works; only the
-card-side pet expressions have no home here.
+    [dot] working - Edit      opus-4-8   x2   (ring)
+
+an effort-colored activity dot, the state text (with the notify message inline
+while Claude needs you — no popup bubbles in compact), the model, the live
+sub-agent count, and a small context ring. Idle rows dim (the Rust widget's
+trick); waiting rows wear the attention accent; **nothing jostles**. Row
+backdrops keep the effort language at row scale via the pure ``effort`` math —
+a static tint for the quiet levels, the purple shimmer for xhigh and the
+rainbow cycle for max. The account-global usage bars (with the #69 stale
+label) draw once at the bottom.
+
+Rows inherit the #52 pending-permission heuristic through the same pure core
+the card uses (:func:`mascot.effective_state.promote_pending_tool`): a
+main-thread tool stuck past the permission wait reads "needs you!".
+
+The row content is decided by pure helpers (:func:`row_text`,
+:func:`row_dim`, :func:`dot_color`, :func:`model_label`) so it is tested
+without painting; the window itself paints directly (no child widgets) behind
+a repaint-guard frame like the card's panel, animating only while an animated
+effort level is on screen. A drag anywhere moves the panel; the tray's
+show/hide and Quit cover it (wired in ``qt_app``). The pet layer is
+orthogonal: PetService keeps earning and the tray "Pet…" window works — only
+the card-side pet expressions have no home here.
 """
 from __future__ import annotations
 
+import time
 from typing import Any
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QMouseEvent, QPainter, QPainterPath
+from PySide6.QtWidgets import QGraphicsDropShadowEffect, QWidget
+
+from . import config, effective_state, effort, qt_screens, usage
+from .qt_card import (
+    PANEL_EDGE,
+    PANEL_FILL,
+    PERMISSION_WAIT_S,
+    RING_STROKE,
+    RING_TRACK,
+    USAGE_LABEL_FG,
+    USAGE_PCT_FG,
+    USAGE_TRACK,
+    WORKING_STALL_S,
+    _anchor_xy,
+    _hex,
+)
+
+# --- geometry -----------------------------------------------------------------
+PANEL_W = 300
+ROW_H = 34
+PAD = 10                 # inner padding (panel edge -> content)
+PANEL_RADIUS = 14
+SHADOW_PAD = 18          # room for the drop shadow around the panel
+ROW_RADIUS = 8
+DOT_D = 10               # the activity dot's diameter
+RING_D = 14              # the per-row context ring
+USAGE_BLOCK_H = 40       # the bottom bars block (two thin bars + labels)
+BAR_H = 5
+
+NOTIFY_MAX_CHARS = 34    # inline notify text budget before the ellipsis
+_ROW_TINT_STRENGTH = 0.18   # quiet-level backdrop blend (the CLI's own 18%)
+ANIM_MS = 33             # ~30fps tick; the repaint guard skips unchanged frames
+
+_PANEL_FILL_RGB = (29, 31, 41)      # PANEL_FILL as RGB, for the effort blends
+_TEXT_FG = "#e8e6ef"
+_MUTED_FG = "#8b8fa3"
+_EMPTY_TEXT = "no sessions"
 
 
+# --- pure row content -----------------------------------------------------------
+def model_label(model: str | None) -> str:
+    """A short model tag for the row: the ``claude-`` prefix and a trailing
+    ``-YYYYMMDD`` date stamp dropped, budgeted to 14 chars."""
+    text = model or ""
+    if text.startswith("claude-"):
+        text = text[len("claude-"):]
+    parts = text.rsplit("-", 1)
+    if len(parts) == 2 and len(parts[1]) == 8 and parts[1].isdigit():
+        text = parts[0]
+    return text[:14]
+
+
+def _draw_raw(state: dict[str, Any], now: float) -> str:
+    """The raw to display, with the #52 pending-permission promotion applied —
+    the same pure core the Classic card runs each frame."""
+    ts = state.get("ts")
+    return effective_state.promote_pending_tool(
+        str(state.get("state", "idle")), state.get("tool"),
+        ts if isinstance(ts, (int, float)) else None, now,
+        permission_wait_s=PERMISSION_WAIT_S, working_stall_s=WORKING_STALL_S)
+
+
+def row_text(state: dict[str, Any], now: float) -> str:
+    """The row's state text. Waiting (real or promoted) carries the notify
+    message inline, truncated — compact has no popup bubbles."""
+    raw = _draw_raw(state, now)
+    if raw == "dead":
+        return "out of usage"
+    if raw == "waiting":
+        notify = state.get("notify")
+        message = notify.get("message", "") if isinstance(notify, dict) else ""
+        if message:
+            if len(message) > NOTIFY_MAX_CHARS:
+                message = message[:NOTIFY_MAX_CHARS] + "…"
+            return f"needs you! · {message}"
+        return "needs you!"
+    if raw == "compacting":
+        return "tidying memories…"
+    if raw in ("thinking", "working") and state.get("permission_mode") == "plan":
+        return "planning…"
+    if raw == "thinking":
+        return "thinking…"
+    if raw == "working":
+        tool = state.get("tool")
+        return f"working · {tool}" if tool else "working…"
+    return str(raw)
+
+
+def row_dim(state: dict[str, Any], now: float) -> bool:
+    """Idle rows dim (the Rust widget's trick); every active state reads full."""
+    return _draw_raw(state, now) == "idle"
+
+
+def dot_color(state: dict[str, Any], now: float) -> str:
+    """The activity dot: attention states win (waiting — real or promoted — and
+    dead wear their accents), then the resolved effort tint, then the state
+    accent (unknown states read as idle grey)."""
+    raw = _draw_raw(state, now)
+    if raw in ("waiting", "dead"):
+        return _hex(config.STATE_COLORS[raw])
+    level = effort.resolve(state.get("effort", ""), effort.settings_effort())
+    if level:
+        return _hex(effort.TINTS[level])
+    return _hex(config.STATE_COLORS.get(raw, config.STATE_COLORS["idle"]))
+
+
+def row_backdrop(state: dict[str, Any], now: float, t: float) -> str | None:
+    """The row's effort backdrop, or ``None`` for the plain panel: the pure
+    ``effort.panel_fill`` — a static 18% tint for low/medium/high, the purple
+    shimmer for xhigh, the rainbow cycle for max — suppressed for waiting/dead
+    (attention and the gravestone stay uncontested)."""
+    if _draw_raw(state, now) in ("waiting", "dead"):
+        return None
+    level = effort.resolve(state.get("effort", ""), effort.settings_effort())
+    rgb = effort.panel_fill(level, _PANEL_FILL_RGB, t)
+    return None if rgb is None else _hex(rgb)
+
+
+def _has_animated(sessions: dict[str, dict[str, Any]]) -> bool:
+    """Whether any row wears an animated effort level (xhigh/max) — if not, the
+    frame signature drops the clock and the panel repaints only on data changes."""
+    fallback = effort.settings_effort()
+    return any(effort.resolve(st.get("effort", ""), fallback) in ("xhigh", "max")
+               for st in sessions.values())
+
+
+# --- the window --------------------------------------------------------------------
 class CompactWindow(QWidget):
-    """The single compact panel. Skeleton (#74): stores what the app pushes —
-    ``sessions`` / ``usage`` / ``context`` — so the seam is real and testable;
-    the rendering lands in #75."""
+    """The single compact panel: rows painted straight onto the panel (no child
+    widgets), sized to the session count, animated only when needed."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -33,18 +173,217 @@ class CompactWindow(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
         self.sessions: dict[str, dict[str, Any]] = {}
         self._usage: dict[str, Any] | None = None
         self._context: dict[str, float] = {}
+        self._drag_offset: QPoint | None = None
+        self._frame: tuple | None = None
+        self._anim_t0 = time.time()
 
+        self._shadow = QGraphicsDropShadowEffect(self)
+        self._shadow.setBlurRadius(24)
+        self._shadow.setOffset(0, 6)
+        self._shadow.setColor(QColor(0, 0, 0, 160))
+        self.setGraphicsEffect(self._shadow)
+
+        self._resize_to(0)
+        self._place()
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(ANIM_MS)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    # --- pushes from the app (the same feeds the cards get) --------------------
     def set_sessions(self, live: dict[str, dict[str, Any]]) -> None:
-        """Adopt this poll's live snapshots (the roster-equivalent for rows)."""
+        """Adopt this poll's live snapshots; the panel grows/shrinks to fit."""
+        count_changed = len(live) != len(self.sessions)
         self.sessions = dict(live)
+        if count_changed:
+            self._resize_to(len(live))
+        self._tick()
 
     def set_usage(self, snapshot: dict[str, Any] | None) -> None:
         """Adopt the account-global usage snapshot for the bottom bars."""
         self._usage = snapshot
+        self._tick()
 
     def set_context(self, results: dict[str, float]) -> None:
         """Adopt the per-session context percentages for the row rings."""
         self._context = dict(results)
+        self._tick()
+
+    # --- geometry ----------------------------------------------------------------
+    def _resize_to(self, rows: int) -> None:
+        body_rows = max(1, rows)                 # an empty panel keeps one text row
+        h = PAD + body_rows * ROW_H + USAGE_BLOCK_H + PAD
+        self.setFixedSize(PANEL_W + 2 * SHADOW_PAD, h + 2 * SHADOW_PAD)
+
+    def _place(self) -> None:
+        """Anchor to the bottom-right of the home monitor's work area (the same
+        placement convention as the Classic cards, index 0)."""
+        area = qt_screens.choose(config.HOME_MONITOR, qt_screens.work_areas())
+        if area is None:
+            screen = QGuiApplication.primaryScreen()
+            if screen is None:
+                return
+            g = screen.availableGeometry()
+            area = (g.x(), g.y(), g.width(), g.height())
+        self.move(*_anchor_xy(area, self.width(), self.height(), 0))
+
+    # --- animation: repaint only when the frame really changed --------------------
+    def _tick(self) -> None:
+        now = time.time()
+        rows = tuple(
+            (sid, row_text(st, now), dot_color(st, now), row_dim(st, now),
+             row_backdrop(st, now, now - self._anim_t0),
+             model_label(st.get("model")),
+             len(st.get("subagents") or []),
+             self._context.get(sid))
+            for sid, st in self.sessions.items()
+        )
+        bars = tuple((b.label, b.pct, _hex(usage.bar_color(b.pct)))
+                     for b in usage.usage_view(self._usage, now))
+        frame = (rows, bars, usage.is_stale(self._usage, now))
+        if frame == self._frame:
+            return
+        self._frame = frame
+        self.update()
+
+    # --- painting -------------------------------------------------------------------
+    def paintEvent(self, _event) -> None:
+        if self._frame is None:
+            self._tick()
+        rows, bars, stale = self._frame or ((), (), False)
+        p = QPainter(self)
+        try:
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            panel = QRectF(SHADOW_PAD + 0.5, SHADOW_PAD + 0.5,
+                           PANEL_W - 1, self.height() - 2 * SHADOW_PAD - 1)
+            path = QPainterPath()
+            path.addRoundedRect(panel, PANEL_RADIUS, PANEL_RADIUS)
+            p.fillPath(path, QColor(PANEL_FILL))
+            p.setPen(QColor(PANEL_EDGE))
+            p.drawPath(path)
+
+            top = panel.y() + PAD
+            if not rows:
+                p.setPen(QColor(_MUTED_FG))
+                p.setFont(QFont("Segoe UI", 9))
+                p.drawText(QRectF(panel.x(), top, PANEL_W, ROW_H),
+                           Qt.AlignmentFlag.AlignCenter, _EMPTY_TEXT)
+                top += ROW_H
+            for _sid, text, dot, dim, backdrop, model, subs, ctx in rows:
+                self._paint_row(p, panel.x(), top, text, dot, dim, backdrop,
+                                model, subs, ctx)
+                top += ROW_H
+            self._paint_usage(p, panel.x(), top, bars, stale)
+        finally:
+            p.end()
+
+    def _paint_row(self, p: QPainter, px: float, top: float, text: str, dot: str,
+                   dim: bool, backdrop: str | None, model: str, subs: int,
+                   ctx: float | None) -> None:
+        row = QRectF(px + 6, top + 2, PANEL_W - 12, ROW_H - 4)
+        if backdrop is not None:
+            bpath = QPainterPath()
+            bpath.addRoundedRect(row, ROW_RADIUS, ROW_RADIUS)
+            p.fillPath(bpath, QColor(backdrop))
+        if dim:
+            p.setOpacity(0.5)
+
+        cy = row.y() + row.height() / 2
+        p.setBrush(QColor(dot))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QRectF(row.x() + 8, cy - DOT_D / 2, DOT_D, DOT_D))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+
+        right = row.right() - 8
+        if ctx is not None:                       # the small per-row context ring
+            ring = QRectF(right - RING_D, cy - RING_D / 2, RING_D, RING_D)
+            pen = p.pen()
+            pen.setStyle(Qt.PenStyle.SolidLine)
+            pen.setWidth(RING_STROKE - 1)
+            pen.setColor(QColor(RING_TRACK))
+            p.setPen(pen)
+            p.drawEllipse(ring)
+            span = round(max(0.0, min(100.0, ctx)) / 100.0 * 360.0 * 16)
+            if span > 0:
+                pen.setColor(QColor(_hex(usage.bar_color(ctx))))
+                p.setPen(pen)
+                p.drawArc(ring, 90 * 16, -span)
+            right -= RING_D + 8
+
+        p.setPen(QColor(_MUTED_FG))
+        p.setFont(QFont("Segoe UI", 8))
+        if subs:
+            p.drawText(QRectF(right - 24, row.y(), 24, row.height()),
+                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                       f"×{subs}")
+            right -= 28
+        if model:
+            p.drawText(QRectF(right - 76, row.y(), 76, row.height()),
+                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                       model)
+            right -= 80
+
+        p.setPen(QColor(_TEXT_FG))
+        p.setFont(QFont("Segoe UI", 9))
+        text_left = row.x() + 8 + DOT_D + 8
+        p.drawText(QRectF(text_left, row.y(), max(0.0, right - text_left), row.height()),
+                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+        if dim:
+            p.setOpacity(1.0)
+
+    def _paint_usage(self, p: QPainter, px: float, top: float,
+                     bars: tuple, stale: bool) -> None:
+        """The account-global 5h/7d bars, once, at the panel bottom — dimmed with a
+        small "stale" caption when the snapshot has aged (#69)."""
+        if not bars:
+            return
+        p.setFont(QFont("Segoe UI", 6))
+        if stale:
+            p.setOpacity(0.45)
+        label_x, bar_x0 = px + 14, px + 40
+        bar_x1, pct_x = px + PANEL_W - 60, px + PANEL_W - 14
+        for i, (label, pct, color) in enumerate(bars):
+            bar_top = top + 4 + i * (BAR_H + 6)
+            row = QRectF(px, bar_top - 4, PANEL_W, BAR_H + 8)
+            p.setPen(QColor(USAGE_LABEL_FG))
+            p.drawText(QRectF(label_x - 14, row.y(), 28, row.height()),
+                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, label)
+            p.fillRect(QRectF(bar_x0, bar_top, bar_x1 - bar_x0, BAR_H),
+                       QColor(USAGE_TRACK))
+            frac = max(0.0, min(1.0, pct / 100.0))
+            if frac > 0:
+                p.fillRect(QRectF(bar_x0, bar_top, (bar_x1 - bar_x0) * frac, BAR_H),
+                           QColor(color))
+            p.setPen(QColor(USAGE_PCT_FG))
+            p.drawText(QRectF(pct_x - 40, row.y(), 40, row.height()),
+                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                       f"{round(pct)}%")
+        if stale:
+            p.setOpacity(1.0)
+            p.setPen(QColor(USAGE_LABEL_FG))
+            block_h = len(bars) * (BAR_H + 6)
+            p.drawText(QRectF(px, top + 2, PANEL_W, block_h),
+                       Qt.AlignmentFlag.AlignCenter, "stale")
+
+    # --- drag anywhere -----------------------------------------------------------------
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_offset = (event.globalPosition().toPoint()
+                                 - self.frameGeometry().topLeft())
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._drag_offset is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_offset)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_offset = None
+
+    def closeEvent(self, event) -> None:
+        self._timer.stop()
+        super().closeEvent(event)
