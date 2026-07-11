@@ -223,3 +223,52 @@ def test_tailer_adapts_the_window_per_session(tmp_path):
     with open(p, "a", encoding="utf-8") as fh:
         fh.write(usage_line(120_000))                         # compacted back down
     assert t.poll({"s": str(p)})["s"] == 12.0                 # the window sticks
+
+
+# --- the context-window override (#95) --------------------------------------------
+def test_tailer_honors_a_fixed_1m_window_from_the_first_turn(tmp_path, monkeypatch):
+    # #95, live report: a [1m] session at 160k tokens read 80% of the assumed
+    # 200k ("almost full" at 16% real) — and nothing on disk exposes the true
+    # window (bare transcript model string, windowless hook payloads). The
+    # explicit setting pins it.
+    from mascot import config
+    monkeypatch.setattr(config, "CONTEXT_WINDOW_MODE", "1m")
+    t = tmp_path / "s.jsonl"
+    _write_lines(t, _line(cache_read=160_000, cache_create=0, input_tokens=0))
+    assert transcript.TranscriptTailer().poll({"s1": str(t)})["s1"] == 16.0
+
+
+def test_tailer_honors_a_fixed_200k_window_even_past_the_threshold(tmp_path,
+                                                                   monkeypatch):
+    from mascot import config
+    monkeypatch.setattr(config, "CONTEXT_WINDOW_MODE", "200k")
+    t = tmp_path / "s.jsonl"
+    _write_lines(t, _line(cache_read=250_000, cache_create=0, input_tokens=0))
+    assert transcript.TranscriptTailer().poll({"s1": str(t)})["s1"] == 100.0
+
+
+def test_mode_flip_corrects_the_gauge_without_new_transcript_lines(tmp_path,
+                                                                   monkeypatch):
+    # The live settings watcher flips the mode; the very next poll must correct
+    # the gauge even while the session is idle (no new transcript bytes).
+    from mascot import config
+    monkeypatch.setattr(config, "CONTEXT_WINDOW_MODE", "auto")
+    t = tmp_path / "s.jsonl"
+    _write_lines(t, _line(cache_read=160_000, cache_create=0, input_tokens=0))
+    tailer = transcript.TranscriptTailer()
+    assert tailer.poll({"s1": str(t)})["s1"] == 80.0          # auto: assumed 200k
+    monkeypatch.setattr(config, "CONTEXT_WINDOW_MODE", "1m")
+    assert tailer.poll({"s1": str(t)})["s1"] == 16.0          # corrected, same file
+
+
+def test_fixed_modes_do_not_pollute_autos_sticky_snap(tmp_path, monkeypatch):
+    # A spell under a forced 1M must not count as auto's "proven 1M" — flipping
+    # back to auto re-reads an under-200k session against 200k.
+    from mascot import config
+    monkeypatch.setattr(config, "CONTEXT_WINDOW_MODE", "1m")
+    t = tmp_path / "s.jsonl"
+    _write_lines(t, _line(cache_read=50_000, cache_create=0, input_tokens=0))
+    tailer = transcript.TranscriptTailer()
+    assert tailer.poll({"s1": str(t)})["s1"] == 5.0
+    monkeypatch.setattr(config, "CONTEXT_WINDOW_MODE", "auto")
+    assert tailer.poll({"s1": str(t)})["s1"] == 25.0          # earned-only 200k

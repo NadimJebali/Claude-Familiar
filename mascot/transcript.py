@@ -16,9 +16,9 @@ session's, so they are skipped.
 The pure pieces are bytes-in/values-out: :func:`consume` parses only complete
 lines (a partially-written tail line is left for the next poll — its byte count
 simply isn't consumed), :func:`context_tokens` sums tolerantly, and
-:func:`context_pct` scales against :data:`CONTEXT_WINDOW_TOKENS` — a fixed
-200k in v1 (a named constant; model-specific windows, e.g. the 1M models, are
-a later refinement — an overflowing session clamps to 100%).
+:func:`context_pct` scales against the divisor the session has earned (#84) or
+the one the ``context_window`` setting pins (#95) — see the mode notes at
+:data:`CONTEXT_WINDOW_TOKENS`; an overflowing session clamps to 100%.
 
 :class:`TranscriptTailer` owns the per-session byte offsets: the first sight of
 a file starts at most :data:`FIRST_READ_TAIL_CAP` bytes from its end (the
@@ -35,12 +35,18 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from . import config
+
 # The default divisor for the gauge — the standard Claude Code window. Claude
-# Code doesn't expose the session's real window, so the evidence decides (#84):
-# once a session's observed tokens exceed this, the window must be 1M and the
-# divisor snaps there, sticking for that session (a post-compaction token drop
-# doesn't flip it back). Honest limit: a [1m] session below 200k still reads
-# against 200k until it crosses.
+# Code doesn't expose the session's real window ANYWHERE (bare transcript model
+# strings, windowless hook payloads — verified live, #95), so in "auto" mode the
+# evidence decides (#84): once a session's observed tokens exceed this, the
+# window must be 1M and the divisor snaps there, sticking for that session (a
+# post-compaction token drop doesn't flip it back). Honest limit: a [1m] session
+# below 200k still reads against 200k until it crosses — which is why the
+# ``context_window`` setting (#95) can pin the mode to "200k"/"1m" outright;
+# the tailer reads ``config.CONTEXT_WINDOW_MODE`` every poll, so a panel Save
+# corrects the gauge live.
 CONTEXT_WINDOW_TOKENS = 200_000
 WINDOW_1M_TOKENS = 1_000_000
 
@@ -120,8 +126,8 @@ class TranscriptTailer:
 
     def __init__(self) -> None:
         self._offsets: dict[str, int] = {}
-        self._pct: dict[str, float] = {}
-        self._window: dict[str, int] = {}   # per-sid earned divisor (#84, sticky)
+        self._tokens: dict[str, int] = {}   # per-sid latest observed context tokens
+        self._window: dict[str, int] = {}   # per-sid earned divisor (#84, auto-only)
 
     def poll(self, sessions: Mapping[str, str]) -> dict[str, float]:
         for sid, path_text in sessions.items():
@@ -129,11 +135,27 @@ class TranscriptTailer:
                 self._read(sid, Path(path_text))
         # Prune state for sessions that vanished, so a long-running widget
         # doesn't accumulate offsets forever (and a re-appearing sid re-anchors).
-        for tracked in (self._offsets, self._pct, self._window):
+        for tracked in (self._offsets, self._tokens, self._window):
             for sid in list(tracked):
                 if sid not in sessions:
                     del tracked[sid]
-        return dict(self._pct)
+        # The percentages are recomputed from the stored tokens every poll under
+        # the CURRENT mode (#95), so a live settings flip corrects the gauge even
+        # while a session is idle. A pinned mode bypasses the sticky store — a
+        # spell under a forced 1M must not count as auto's "proven 1M".
+        mode = config.CONTEXT_WINDOW_MODE
+        out: dict[str, float] = {}
+        for sid, tokens in self._tokens.items():
+            if mode == "1m":
+                window = WINDOW_1M_TOKENS
+            elif mode == "200k":
+                window = CONTEXT_WINDOW_TOKENS
+            else:
+                window = window_for(
+                    tokens, self._window.get(sid, CONTEXT_WINDOW_TOKENS))
+                self._window[sid] = window
+            out[sid] = context_pct(tokens, window)
+        return out
 
     def _read(self, sid: str, path: Path) -> None:
         try:
@@ -151,8 +173,4 @@ class TranscriptTailer:
         usage, consumed = consume(chunk)
         self._offsets[sid] = offset + consumed
         if usage is not None:
-            tokens = context_tokens(usage)
-            window = window_for(
-                tokens, self._window.get(sid, CONTEXT_WINDOW_TOKENS))
-            self._window[sid] = window
-            self._pct[sid] = context_pct(tokens, window)
+            self._tokens[sid] = context_tokens(usage)

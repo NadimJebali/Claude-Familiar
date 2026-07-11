@@ -338,6 +338,9 @@ class QtMascotApp(QObject):
         stage = settings.valid_stage(snap["simple_stage"])
         if stage != config.SIMPLE_STAGE:
             config.SIMPLE_STAGE = stage           # next frame re-dresses the mascot
+        window = settings.valid_window(snap["context_window"])
+        if window != config.CONTEXT_WINDOW_MODE:
+            config.CONTEXT_WINDOW_MODE = window   # the tailer reads it next poll (#95)
         size = settings.valid_size(snap["widget_size"])
         if size != self._widget_size:
             self._set_widget_size(size)

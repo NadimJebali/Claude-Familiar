@@ -51,6 +51,7 @@ _DANGER = "#e06c75"
 
 _SIZES = [("Small", "small"), ("Medium", "medium"), ("Large", "large")]
 _STAGES = [("Egg", "egg"), ("Baby", "baby"), ("Teen", "teen"), ("Adult", "adult")]
+_WINDOWS = [("Auto (infer)", "auto"), ("200k", "200k"), ("1M", "1m")]
 _THEMES = [("Classic — mascot cards", "classic"), ("Compact — session list", "compact")]
 _PREVIEW_PX = {"small": 4, "medium": 5, "large": 6}
 
@@ -175,6 +176,14 @@ class QtControlPanel(QWidget):
         self._notify = QCheckBox("Show native system notifications")
         self._notify.setChecked(bool(s["native_notifications"]))
         box.addWidget(self._notify)
+
+        box.addWidget(_section("CONTEXT GAUGE"))
+        box.addWidget(_muted("Which context window the ring measures against. Auto "
+                             "infers it from the session's tokens — a [1m] session "
+                             "reads against 200k until it crosses — so pick 1M if "
+                             "you always run [1m] sessions."))
+        self._window_mode = _combo(_WINDOWS, s["context_window"], lambda: None)
+        box.addWidget(self._window_mode)
 
         box.addWidget(_section("LIVE USAGE"))
         self._usage_api = QCheckBox("Poll Anthropic for live usage")
@@ -322,11 +331,12 @@ class QtControlPanel(QWidget):
             "native_notifications": self._notify.isChecked(),
             "usage_api_enabled": self._usage_api.isChecked(),
             "theme": self._theme.currentData(),
+            "context_window": self._window_mode.currentData(),
         })
         self._autostart.setChecked(setup.set_autostart(self._autostart.isChecked()))
         self._status.setText(
-            "Saved. Theme, size, mascot look and notifications apply right away; "
-            "the rest lands on the widget's next start.")
+            "Saved. Theme, size, mascot look, notifications and the context gauge "
+            "apply right away; the rest lands on the widget's next start.")
 
     def _toggle_install(self) -> None:
         _installed, msg = setup.toggle_shortcuts()
