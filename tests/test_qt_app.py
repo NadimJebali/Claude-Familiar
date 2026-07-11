@@ -432,21 +432,21 @@ def test_panel_context_window_save_applies_live(app, tmp_path, monkeypatch):
 
     mgr = qt_app.QtMascotApp(state_dir)
     assert config.CONTEXT_WINDOW_MODE == "auto"
-    _write_settings(sp, context_window="1m")          # the panel hits Save
+    _write_settings(sp, context_window="200k")        # the panel hits Save
     mgr._apply_settings_change()
-    assert config.CONTEXT_WINDOW_MODE == "1m"
+    assert config.CONTEXT_WINDOW_MODE == "200k"
     _write_settings(sp, context_window="2m")          # hand-edited garbage clamps
     mgr._apply_settings_change()
-    assert config.CONTEXT_WINDOW_MODE == "auto"
+    assert config.CONTEXT_WINDOW_MODE == "1m"         # ...to the shipped default
     mgr._quit()
 
 
 def test_valid_window_clamps_garbage():
     from mascot import settings as settings_mod
-    assert settings_mod.valid_window("1m") == "1m"
+    assert settings_mod.valid_window("auto") == "auto"
     assert settings_mod.valid_window("200k") == "200k"
-    assert settings_mod.valid_window("2m") == "auto"
-    assert settings_mod.valid_window(None) == "auto"
+    assert settings_mod.valid_window("2m") == "1m"    # garbage -> shipped default
+    assert settings_mod.valid_window(None) == "1m"
 
 
 def test_garbage_size_and_stage_apply_nothing(app, tmp_path, monkeypatch):

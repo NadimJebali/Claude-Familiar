@@ -32,10 +32,12 @@ DEFAULTS: dict[str, Any] = {
     # Presentation theme (#74): "classic" = one mascot card per session (today's
     # look); "compact" = one small panel listing every session as a row.
     "theme": "classic",
-    # Which context window the ring gauge measures against (#95). "auto" infers
-    # it (200k until a session's tokens prove 1M — so a [1m] session under 200k
-    # over-reads); "200k"/"1m" pin it for accounts that always run one size.
-    "context_window": "auto",
+    # Which context window the ring gauge measures against (#95). Ships pinned
+    # to "1m" — current Claude Code plans run 1M-token windows, and "auto"'s
+    # blind spot (a [1m] session below 200k reads against 200k) over-reads the
+    # ring for exactly those sessions. "auto" (200k until a session's tokens
+    # prove 1M) and "200k" remain one Settings pick away for 200k accounts.
+    "context_window": "1m",
 }
 
 THEMES = ("classic", "compact")
@@ -63,8 +65,8 @@ WINDOWS = ("auto", "200k", "1m")
 
 
 def valid_window(value: Any) -> str:
-    """``value`` if it names a context-window mode, else the auto default."""
-    return value if value in WINDOWS else "auto"
+    """``value`` if it names a context-window mode, else the shipped 1m default."""
+    return value if value in WINDOWS else "1m"
 
 
 def load_settings() -> dict[str, Any]:
