@@ -237,7 +237,15 @@ python install.py          # or double-click install.bat
 This installs Claude Familiar as a real desktop app: it installs the Claude Code
 hooks, adds **application-menu and desktop shortcuts** (Start-menu `.lnk` files on
 Windows, freedesktop `.desktop` entries on Linux — so you can launch it with the
-mascot icon, just like any other app), and opens the **settings panel**. There you can pick the mascot art, choose the
+mascot icon, just like any other app), and opens the **settings panel**.
+
+On Linux the system Python usually refuses `pip install` (PEP 668, *externally
+managed* — any recent Debian/Ubuntu/Fedora): the installer then provisions a
+project venv at `.venv/` automatically and finishes the install under it, so
+every shortcut and hook records an interpreter that provably runs the app. If
+even a venv can't be created, it stops with the exact commands to run
+(typically `sudo apt install python3-venv` first) — it never installs
+launchers that would die silently. There you can pick the mascot art, choose the
 **widget size** (small / medium / large), toggle the transparent floating card,
 enable or disable the Tamagotchi pet (off = a simple hook visualiser),
 add/remove the app shortcuts, enable run-at-login, and launch the widget.
@@ -492,6 +500,13 @@ Static typing is [mypy](https://mypy.readthedocs.io/) (config in `mypy.ini`);
   desktop has no tray host, the widget runs exactly the same, just without an icon.
   Open settings with `python -m mascot.qt_control_panel` and quit the widget from
   its launcher/process.
+- **Cards can't be dragged / ignore their corner (Linux + Wayland).** Wayland
+  doesn't let an app position its own windows, and the cards are nothing *but*
+  positioned windows — drag, the bottom-right stack, the attention shake and the
+  popup anchoring all move windows to screen coordinates. The widget therefore
+  runs on XWayland (`xcb`) when the session provides one, which restores all of
+  it. Set `QT_QPA_PLATFORM` yourself to override (e.g. `wayland` to force the
+  native backend, positioning caveats and all).
 - **Only one widget runs at a time.** Launching the widget again (e.g. autostart
   plus a manual launch) is a no-op — a single-instance guard makes the second one
   exit cleanly, so cards never appear doubled.
