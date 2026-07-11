@@ -1189,3 +1189,44 @@ def test_app_pushes_usage_to_every_card_each_poll(app, tmp_path, monkeypatch):
     assert card._usage == snap                                    # pushed to the card
     assert [label for label, *_ in card._panel._bars] == ["5h"]   # rendered as one bar
     mgr._on_sessions({})                                          # tidy up the card
+
+
+# --- Wayland platform preference ---------------------------------------------
+# Dragging, the bottom-right stack, the shake and the popup anchoring all move
+# windows to global coordinates — semantics Wayland withholds from clients, so
+# on the native backend the cards can't move at all. The widget prefers
+# XWayland (xcb) when the session offers it; these pin that seam.
+def _wayland_session(monkeypatch, *, x_display=":0"):
+    monkeypatch.setattr(qt_app.osplatform, "IS_LINUX", True)
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    if x_display is None:
+        monkeypatch.delenv("DISPLAY", raising=False)
+    else:
+        monkeypatch.setenv("DISPLAY", x_display)
+
+
+def test_wayland_session_with_x_prefers_xcb_with_fallback(monkeypatch):
+    _wayland_session(monkeypatch)
+    qt_app._prefer_xcb_on_wayland()
+    assert os.environ["QT_QPA_PLATFORM"] == "xcb;wayland"
+
+
+def test_an_explicit_platform_choice_always_wins(monkeypatch):
+    _wayland_session(monkeypatch)
+    monkeypatch.setenv("QT_QPA_PLATFORM", "wayland")
+    qt_app._prefer_xcb_on_wayland()
+    assert os.environ["QT_QPA_PLATFORM"] == "wayland"
+
+
+def test_a_wayland_only_session_stays_native(monkeypatch):
+    _wayland_session(monkeypatch, x_display=None)
+    qt_app._prefer_xcb_on_wayland()
+    assert "QT_QPA_PLATFORM" not in os.environ
+
+
+def test_other_platforms_are_left_alone(monkeypatch):
+    _wayland_session(monkeypatch)
+    monkeypatch.setattr(qt_app.osplatform, "IS_LINUX", False)
+    qt_app._prefer_xcb_on_wayland()
+    assert "QT_QPA_PLATFORM" not in os.environ

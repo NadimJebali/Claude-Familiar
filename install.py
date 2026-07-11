@@ -6,6 +6,12 @@ installs the Claude Code hooks, creates application-menu + desktop shortcuts (so
 you can launch it like any other application), then opens the settings panel.
 
     python install.py
+
+Everything the installer writes records the interpreter it ran under, so the
+bootstrap first proves that interpreter can actually import the app — on
+externally-managed distros (PEP 668) it provisions the project ``.venv`` and
+the install re-runs itself under it. Launchers are only ever written for a
+Python the app is known to run on.
 """
 from __future__ import annotations
 
@@ -13,16 +19,24 @@ import subprocess
 import sys
 from pathlib import Path
 
+from mascot import bootstrap
+
 ROOT = Path(__file__).resolve().parent
 
 _IS_WINDOWS = sys.platform == "win32"
 _MENU = "Start menu" if _IS_WINDOWS else "application menu"
 
 
-def main() -> None:
+def main() -> int:
     print("Installing runtime dependencies (PySide6, tray, notifications)...")
-    subprocess.run([sys.executable, "-m", "pip", "install", "-r",
-                    str(ROOT / "requirements.txt")], cwd=str(ROOT), check=False)
+    python = bootstrap.ensure_runtime(sys.executable, ROOT)
+    if python is None:
+        print(bootstrap.dependency_help())
+        return 1
+    if not bootstrap.same_python(python, sys.executable):
+        print(f"\nContinuing the install with the project venv: {python}")
+        return subprocess.run([python, str(ROOT / "install.py")],
+                              cwd=str(ROOT), check=False).returncode
 
     print("Generating the mascot app icon...")
     subprocess.run([sys.executable, "-c",
@@ -48,7 +62,8 @@ def main() -> None:
     print(f"\nClaude Familiar is installed. Look for it in the {_MENU} / on your desktop.")
     print("Opening the settings panel...")
     subprocess.run([sys.executable, "-m", "mascot.qt_control_panel"], cwd=str(ROOT), check=False)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

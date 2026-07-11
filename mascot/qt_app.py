@@ -21,6 +21,7 @@ cutover (#63) makes Qt the only entry point.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
@@ -33,6 +34,7 @@ from PySide6.QtWidgets import QApplication
 from . import (
     config,
     notifier,
+    osplatform,
     pet_actions,
     pet_service,
     roster,
@@ -505,12 +507,30 @@ class QtMascotApp(QObject):
         return self._cards
 
 
+def _prefer_xcb_on_wayland() -> None:
+    """Run the widget on XWayland (xcb) in a Wayland session, if one is there.
+
+    Dragging a card, the bottom-right stack, the attention shake and the popup
+    anchoring all move windows to global coordinates — semantics Wayland's
+    xdg-shell deliberately withholds from clients, so on the native backend the
+    cards appear wherever the compositor likes and can never move. XWayland
+    offers all of them, and every desktop we target ships it. The trailing
+    "wayland" keeps a box whose xcb plugin can't load working (unpositioned
+    beats invisible). An explicit QT_QPA_PLATFORM always wins — that's how
+    users pin a choice and the offscreen tests stay offscreen."""
+    if not osplatform.IS_LINUX or "QT_QPA_PLATFORM" in os.environ:
+        return
+    if os.environ.get("WAYLAND_DISPLAY") and os.environ.get("DISPLAY"):
+        os.environ["QT_QPA_PLATFORM"] = "xcb;wayland"
+
+
 def main() -> None:
     # One widget at a time — a second would draw a duplicate card per session.
     guard = single_instance.acquire()
     if guard is None:
         print("[mascot] another Claude Familiar widget is already running; exiting.")
         return
+    _prefer_xcb_on_wayland()
     app = QApplication(sys.argv)
     mascot = QtMascotApp()
     mascot.start()
