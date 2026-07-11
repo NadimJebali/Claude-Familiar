@@ -78,12 +78,12 @@ baby / teen / adult) in **Settings → Appearance → Mascot Look**.
   clockwise as the session's **context window** fills (read by tailing the
   session transcript — works in the VS Code extension too), turning amber at 70%
   and red at 90%: compaction is coming. It appears once the session has its first
-  assistant turn. The window size is inferred from the evidence: 200k until a
-  session's tokens prove a **1M** window, then the gauge snaps (and sticks) to 1M
-  for that session. Inference has a blind spot — a `[1m]` session *below* 200k
-  reads against 200k (nothing Claude Code writes exposes the real window) — so
-  **Settings → Context gauge** can pin the window to **200k** or **1M** outright;
-  a Save corrects the ring live.
+  assistant turn. The gauge ships measuring against the **1M** window of current
+  Claude Code plans; **Settings → Context gauge** can pin it to **200k** instead,
+  or set it to **auto** — infer the window from the evidence (200k until a
+  session's tokens prove 1M, then snap and stick to 1M). Auto's blind spot is why
+  it isn't the default: a `[1m]` session *below* 200k reads against 200k (nothing
+  Claude Code writes exposes the real window). A Save corrects the ring live.
 - **Expressive faces.** While working, the eyes match the tool — reading
   (Read/Grep), editing (Edit/Write), running commands (Bash, gritted teeth), or
   browsing the web. In **plan mode** it wears a pondering *planning…* face. When
