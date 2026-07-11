@@ -158,6 +158,21 @@ def test_dot_color_waiting_and_dead_win_then_effort_then_state(monkeypatch):
 
 
 # --- the window -------------------------------------------------------------------
+def test_compact_geometry_follows_the_widget_size(app, monkeypatch):
+    # #93: the compact panel scales with Settings' widget size like the card —
+    # window + panel sized by UI_SCALE, painting through one uniform transform.
+    monkeypatch.setattr(config, "UI_SCALE", 1.4)
+    win = qt_compact.CompactWindow()
+    win.set_sessions({"a": _state("a"), "b": _state("b", "working")})
+    logical_h = qt_compact.PAD * 2 + 2 * qt_compact.ROW_H + qt_compact.USAGE_BLOCK_H
+    assert win._panel.width() == round(qt_compact.PANEL_W * 1.4)
+    assert win._panel.height() == round(logical_h * 1.4)
+    assert win.width() == round(qt_compact.PANEL_W * 1.4) + 2 * qt_compact.SHADOW_PAD
+    win.repaint()                                       # the paint smoke, at scale
+    win.grab()
+    win.close()
+
+
 def test_window_height_follows_the_session_count(app):
     win = qt_compact.CompactWindow()
     win.set_sessions({})

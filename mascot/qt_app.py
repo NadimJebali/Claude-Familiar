@@ -130,6 +130,9 @@ class QtMascotApp(QObject):
         # before the tray: its ctor consumes self._theme, and its best-effort
         # except would silently eat the AttributeError (#80).
         self._theme: str = config.THEME
+        # The widget-size seam (#94): the equality gate the settings watcher
+        # dispatches against, like the theme's.
+        self._widget_size: str = settings.valid_size(config.WIDGET_SIZE)
         self._compact: CompactWindow | None = None
         if self._theme == "compact":
             self._build_compact()
@@ -263,18 +266,33 @@ class QtMascotApp(QObject):
             settings.save_settings({"theme": theme})
         except OSError as exc:
             print("[mascot] could not persist the theme setting:", exc)
+        self._rebuild_presentation()
+        if self._tray is not None:
+            self._tray.set_theme(theme)
 
-        for card in list(self._cards.values()):   # tear down the old presentation
+    def _set_widget_size(self, size: str) -> None:
+        """A panel Save changed the widget size (#94): adopt it into config — the
+        module attributes are the seam every view reads at construction — and
+        rebuild, since fixed window sizes are set in the constructors. No
+        persistence here: unlike the theme (also a tray callback), this change
+        only ever arrives FROM settings.json, the panel already wrote it."""
+        self._widget_size = size
+        config.WIDGET_SIZE = size
+        config.UI_SCALE = config.UI_SCALE_BY_SIZE.get(size, 1.0)
+        self._rebuild_presentation()
+
+    def _rebuild_presentation(self) -> None:
+        """Tear down the cards/compact panel and rebuild them from the current
+        snapshot — all state lives in the files, so this is exactly the startup
+        path. The pet window, tray and pollers are untouched."""
+        for card in list(self._cards.values()):
             card.close()
         self._cards.clear()
         if self._compact is not None:
             self._compact.close()
             self._compact = None
-
-        if theme == "compact":
+        if self._theme == "compact":
             self._build_compact()
-        if self._tray is not None:
-            self._tray.set_theme(theme)
         self._ingest.read_now()                   # rebuild from the current snapshot
 
     # --- live settings-apply (#81) ------------------------------------------
@@ -303,17 +321,26 @@ class QtMascotApp(QObject):
         self._apply_settings_change()
 
     def _apply_settings_change(self) -> None:
-        """Adopt the live-appliable keys from a settings.json change (#81) —
-        theme and the notifications mute, each through its normal setter behind
-        an equality gate. The setters persist as a side effect; the gate absorbs
-        that echo. A torn/corrupt read applies nothing (``None`` from the
-        reader); the completed write fires its own event."""
+        """Adopt the live-appliable keys from a settings.json change (#81, #94) —
+        the notifications mute, the mascot look, the widget size and the theme,
+        each behind an equality gate. The setters that persist as a side effect
+        are absorbed by their gate. A torn/corrupt read applies nothing (``None``
+        from the reader); the completed write fires its own event. The look needs
+        no rebuild (the card reads config at render time); size and theme rebuild
+        — size before theme, so a combined save rebuilds at the new scale either
+        way."""
         snap = settings.read_settings_or_none()
         if snap is None:
             return
         notif = bool(snap["native_notifications"])
         if notif != self._notifications_on:
             self._set_notifications(notif)
+        stage = settings.valid_stage(snap["simple_stage"])
+        if stage != config.SIMPLE_STAGE:
+            config.SIMPLE_STAGE = stage           # next frame re-dresses the mascot
+        size = settings.valid_size(snap["widget_size"])
+        if size != self._widget_size:
+            self._set_widget_size(size)
         theme = settings.valid_theme(snap["theme"])
         if theme != self._theme:
             self._set_theme(theme)

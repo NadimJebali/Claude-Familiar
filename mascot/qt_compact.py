@@ -195,16 +195,28 @@ class _CompactPanel(QWidget):
     a translucent TOP-LEVEL renders once into its cache and then ignores
     ``update()`` on real compositors (#88 — the frozen-rainbow bug). Same rule
     ``qt_card._CardPanel`` documents. Dumb by design — the window computes the
-    frame and pushes it in via :meth:`show_frame`."""
+    frame and pushes it in via :meth:`show_frame`.
 
-    def __init__(self, parent: QWidget) -> None:
+    The widget-size setting (#93) is one uniform scale ``k``, like the card's
+    panel: rows stay authored at the small size and paint through a single
+    ``p.scale(k, k)`` transform, the panel sized to match."""
+
+    def __init__(self, parent: QWidget, k: float = 1.0) -> None:
         super().__init__(parent)
+        self._k = k
+        self._logical_h = 0                # the authored (pre-scale) panel height
         self._frame: tuple | None = None
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(24)
         shadow.setOffset(0, 6)
         shadow.setColor(QColor(0, 0, 0, 160))
         self.setGraphicsEffect(shadow)
+
+    def set_scaled_size(self, logical_h: int) -> None:
+        """Size the panel to the authored height times the widget-size scale;
+        the logical height is kept so paintEvent works in authored coordinates."""
+        self._logical_h = logical_h
+        self.setFixedSize(round(PANEL_W * self._k), round(logical_h * self._k))
 
     def show_frame(self, frame: tuple) -> None:
         """Adopt a computed frame; repaint only when it really changed."""
@@ -220,7 +232,8 @@ class _CompactPanel(QWidget):
         p = QPainter(self)
         try:
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
-            panel = QRectF(0.5, 0.5, PANEL_W - 1, self.height() - 1)
+            p.scale(self._k, self._k)      # the widget-size transform (#93)
+            panel = QRectF(0.5, 0.5, PANEL_W - 1, self._logical_h - 1)
             path = QPainterPath()
             path.addRoundedRect(panel, PANEL_RADIUS, PANEL_RADIUS)
             p.fillPath(path, QColor(PANEL_FILL))
@@ -265,7 +278,10 @@ class CompactWindow(QWidget):
         self._drag_offset: QPoint | None = None
         self._anim_t0 = time.time()
 
-        self._panel = _CompactPanel(self)
+        # The widget-size scale (#93), snapshotted per window like the card's;
+        # a live size change rebuilds the presentation (qt_app).
+        self._k = float(config.UI_SCALE)
+        self._panel = _CompactPanel(self, self._k)
         self._panel.move(SHADOW_PAD, SHADOW_PAD)
 
         self._resize_to(0)
@@ -300,8 +316,9 @@ class CompactWindow(QWidget):
     def _resize_to(self, rows: int) -> None:
         body_rows = max(1, rows)                 # an empty panel keeps one text row
         h = PAD + body_rows * ROW_H + USAGE_BLOCK_H + PAD
-        self.setFixedSize(PANEL_W + 2 * SHADOW_PAD, h + 2 * SHADOW_PAD)
-        self._panel.setFixedSize(PANEL_W, h)
+        self._panel.set_scaled_size(h)           # rounds once; the window follows it
+        self.setFixedSize(self._panel.width() + 2 * SHADOW_PAD,
+                          self._panel.height() + 2 * SHADOW_PAD)
 
     def _place(self) -> None:
         """Anchor to the bottom-right of the home monitor's work area (the same

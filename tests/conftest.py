@@ -22,3 +22,6 @@ def _default_config(monkeypatch):
     monkeypatch.setattr(config, "TAMAGOTCHI_ENABLED", False)
     monkeypatch.setattr(config, "NATIVE_NOTIFICATIONS_ENABLED", False)
     monkeypatch.setattr(config, "USAGE_API_ENABLED", False)
+    monkeypatch.setattr(config, "WIDGET_SIZE", "small")
+    monkeypatch.setattr(config, "UI_SCALE", 1.0)
+    monkeypatch.setattr(config, "SIMPLE_STAGE", "baby")

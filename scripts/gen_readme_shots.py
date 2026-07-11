@@ -108,9 +108,11 @@ def _compact(app: QApplication) -> QImage:
 def main() -> None:
     # Neutralize THIS machine's account-level effort signal: rows without a
     # per-session effort fall back to it (by design), but the staged scene must
-    # render as a no-signal machine would — the idle row stays plain.
-    from mascot import effort
+    # render as a no-signal machine would — the idle row stays plain. Pin the
+    # widget-size scale too (#93): the shots are authored at "small".
+    from mascot import config, effort
     effort.settings_effort = lambda: ""
+    config.UI_SCALE = 1.0
 
     app = QApplication.instance() or QApplication(sys.argv)
     OUT_DIR.mkdir(parents=True, exist_ok=True)

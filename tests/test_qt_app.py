@@ -344,6 +344,102 @@ def test_settings_echo_does_not_rebuild(app, tmp_path, monkeypatch):
     mgr._quit()
 
 
+# --- live settings-apply: widget size + mascot look (#94) -------------------------
+def test_valid_size_and_stage_clamp_garbage():
+    from mascot import settings as settings_mod
+    assert settings_mod.valid_size("medium") == "medium"
+    assert settings_mod.valid_size("cosmic") == "small"
+    assert settings_mod.valid_stage("adult") == "adult"
+    assert settings_mod.valid_stage(None) == "baby"
+
+
+def test_panel_widget_size_save_applies_live(app, tmp_path, monkeypatch):
+    from mascot import settings as settings_mod
+    sp = tmp_path / "settings.json"
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", sp)
+    _write_settings(sp)                               # widget_size: small on disk
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    _write(state_dir, "s1", ts=time.time(), state="working")
+
+    mgr = qt_app.QtMascotApp(state_dir)
+    mgr._on_sessions({"s1": _state("s1", "working")})
+    small_w = mgr.cards["s1"].width()
+
+    _write_settings(sp, widget_size="large")          # the panel hits Save
+    mgr._apply_settings_change()
+    assert set(mgr.cards) == {"s1"}                   # rebuilt from the snapshot
+    assert mgr.cards["s1"].width() == (round(qt_card.CARD_W * 1.8)
+                                       + 2 * qt_card.SHADOW_PAD)
+    assert mgr.cards["s1"].width() > small_w
+    mgr._quit()
+
+
+def test_widget_size_save_rebuilds_the_compact_panel_too(app, tmp_path, monkeypatch):
+    from mascot import qt_compact
+    from mascot import settings as settings_mod
+    sp = tmp_path / "settings.json"
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", sp)
+    _write_settings(sp, theme="compact")
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    monkeypatch.setattr(config, "THEME", "compact")
+
+    mgr = qt_app.QtMascotApp(state_dir)
+    assert mgr._compact is not None
+    assert mgr._compact.width() == qt_compact.PANEL_W + 2 * qt_compact.SHADOW_PAD
+
+    _write_settings(sp, theme="compact", widget_size="medium")
+    mgr._apply_settings_change()
+    assert mgr._compact is not None
+    assert mgr._compact.width() == (round(qt_compact.PANEL_W * 1.4)
+                                    + 2 * qt_compact.SHADOW_PAD)
+    mgr._quit()
+
+
+def test_panel_mascot_look_save_applies_live_without_a_rebuild(app, tmp_path,
+                                                               monkeypatch):
+    from mascot import settings as settings_mod
+    sp = tmp_path / "settings.json"
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", sp)
+    _write_settings(sp)                               # simple_stage: baby on disk
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    _write(state_dir, "s1", ts=time.time())
+
+    mgr = qt_app.QtMascotApp(state_dir)
+    mgr._on_sessions({"s1": _state("s1", "idle")})
+    card = mgr.cards["s1"]
+    assert card._effective_pet_view().stage == "baby"
+
+    _write_settings(sp, simple_stage="adult")         # the panel hits Save
+    mgr._apply_settings_change()
+    assert config.SIMPLE_STAGE == "adult"
+    assert mgr.cards["s1"] is card                    # no rebuild — read at render
+    assert card._effective_pet_view().stage == "adult"
+    mgr._quit()
+
+
+def test_garbage_size_and_stage_apply_nothing(app, tmp_path, monkeypatch):
+    from mascot import settings as settings_mod
+    sp = tmp_path / "settings.json"
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", sp)
+    _write_settings(sp)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    _write(state_dir, "s1", ts=time.time())
+
+    mgr = qt_app.QtMascotApp(state_dir)
+    mgr._on_sessions({"s1": _state("s1", "idle")})
+    card = mgr.cards["s1"]
+
+    _write_settings(sp, widget_size="cosmic", simple_stage="elder")
+    mgr._apply_settings_change()                      # clamps to small/baby = no-ops
+    assert mgr.cards["s1"] is card                    # no spurious rebuild
+    assert config.SIMPLE_STAGE == "baby"
+    mgr._quit()
+
+
 # --- the file · model info line (#85) -------------------------------------------
 def test_info_line_joins_file_basename_and_model_tag():
     assert qt_card.info_line(r"C:\repo\mascot\qt_app.py",
@@ -370,6 +466,58 @@ def test_card_tombstones_when_usage_is_exhausted_and_revives(app):
                                              "resets_at": now - 60}})
     card._render(time.time())                        # the reset passed: auto-revive
     assert card._draw_raw == "working"
+    card.close()
+
+
+# --- widget_size scales the card (#93) -------------------------------------------
+def test_ui_scale_factors_are_pixel_friendly():
+    # The creature's 5px sprite cells must land on whole device pixels under the
+    # paint transform (5 -> 7 / 9), or the scaled pixel art goes ragged — which
+    # is why medium/large are 1.4/1.8, not the Tk card's 1.3/1.6.
+    assert config.UI_SCALE_BY_SIZE == {"small": 1.0, "medium": 1.4, "large": 1.8}
+
+
+def test_card_geometry_follows_the_widget_size(app, monkeypatch):
+    # #93: nothing consumed UI_SCALE since the Qt cutover — Settings' small/
+    # medium/large changed nothing. The card sizes its window + panel by the
+    # scale; the panel paints through one uniform transform.
+    monkeypatch.setattr(config, "UI_SCALE", 1.4)
+    card = qt_card.QtCard("s", _state("s", "working"), 0, QtPixmapRenderer())
+    assert card._panel.width() == round(qt_card.CARD_W * 1.4)
+    assert card._panel.height() == round(qt_card.CARD_H * 1.4)
+    assert card.width() == round(qt_card.CARD_W * 1.4) + 2 * qt_card.SHADOW_PAD
+    assert card.height() == round(qt_card.CARD_H * 1.4) + 2 * qt_card.SHADOW_PAD
+    card.close()
+
+
+def test_scaled_card_paints_clean_and_anchors_popups_to_the_scaled_panel(
+        app, monkeypatch):
+    # The paint smoke covers every scaled element (creature, caption, info,
+    # badges, bars, ring); popups must anchor to the panel's real size — the
+    # small-size constants would park the bubble over the middle of a large card.
+    monkeypatch.setattr(config, "UI_SCALE", 1.8)
+    now = time.time()
+    st = _state("s", "working")
+    st.update(tool="Edit", effort="max", file="C:/x/a.py", model="claude-fable-5",
+              subagents=[{"id": "x", "type": "t", "description": ""}])
+    card = qt_card.QtCard("s", st, 0, QtPixmapRenderer(), pet_enabled=True)
+    card.set_usage({"ts": now, "five_hour": {"used_percentage": 76,
+                                             "resets_at": now + 999}})
+    card.set_context(64.0)
+    card._render(now)
+    card._panel.grab()                                  # the paint smoke, at scale
+    _px, _py, pw, ph = card._panel_global()
+    assert (pw, ph) == (card._panel.width(), card._panel.height())
+    card.close()
+
+
+def test_paw_button_scales_with_the_widget_size(app, monkeypatch):
+    monkeypatch.setattr(config, "UI_SCALE", 1.8)
+    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer(),
+                          pet_enabled=True)
+    paw_px = max(1, round(qt_card.PAW_PX * 1.8))        # integer cells stay crisp
+    assert card._paw is not None
+    assert card._paw.iconSize().width() == paw_px * 12  # the paw grid is 12 cells
     card.close()
 
 

@@ -98,7 +98,9 @@ baby / teen / adult) in **Settings → Appearance → Mascot Look**.
 - **Sleeping.** After a stretch of idle (90s by default, configurable) the mascot
   dozes off (💤) — and blinks now and then until it does.
 - **Resizable.** Pick **small / medium / large** in the settings panel — the whole
-  card (creature, text, badges) scales uniformly.
+  card (creature, text, badges) and the Compact panel scale uniformly, live on
+  **Save**. One paint transform does it, with scale factors chosen so the sprite's
+  pixel cells stay whole device pixels (crisp at every size).
 - **Mascot app icon.** Windows shortcuts and the running app use an icon rendered
   straight from the pixel mascot, so the taskbar matches the card on screen.
 - **Two themes, switchable live.** **Classic** is the mascot card described here.
@@ -111,7 +113,7 @@ baby / teen / adult) in **Settings → Appearance → Mascot Look**.
   caption. Switch from the tray's **Theme** submenu or the
   Settings dropdown — both apply instantly, no restart (the widget watches
   `settings.json`, so a panel **Save** lands live; same for the Notifications
-  checkbox).
+  checkbox, the widget size and the mascot look).
 - **System tray (Windows / Linux / macOS).** A `QSystemTrayIcon` sits in the
   notification area; its menu has *Pet…*, *Show / hide cards*, *Settings…*, a
   checkable *Notifications* mute, a *Theme* submenu, and *Quit*. On Windows a
