@@ -746,6 +746,13 @@ class QtCard(QWidget):
         # face and shake off this promoted raw. Recomputed every frame because a
         # pending permission prompt sends no new hook state to cross the threshold on.
         draw_raw = self._overlay.promote(self._raw, now, ts=ts, tool=self._state.get("tool"))
+        # Account-level death (#91): the usage feed is the reliable limit signal
+        # (real StopFailure payloads carry no usable error_type; VS Code emits no
+        # limit Notification) — a full window tombstones every session until its
+        # reset, and a passed reset revives automatically.
+        self._dead_until = usage.exhausted_until(self._usage, now)
+        if self._dead_until is not None:
+            draw_raw = "dead"
         self._draw_raw = draw_raw
         self._overlay.note_raw(draw_raw, now)
         view = self._effective_pet_view()
@@ -755,15 +762,17 @@ class QtCard(QWidget):
         self._face = face
         # The drawn sprite depends on the face AND the pet's look, so re-render the
         # pixmap when either changes (a re-dress or evolution, not just a new face).
-        key = (face, view)
+        key = (face, view, draw_raw == "dead")
         if key != self._pixmap_key:
             self._pixmap_key = key
-            self._adopt_pixmap(self._pixmap_for(face, view), view.stage, now)
+            self._adopt_pixmap(
+                self._pixmap_for(face, view, dead=draw_raw == "dead"),
+                view.stage, now)
 
         # Sub-pixel bob (float), the face crossfade, and the evolution scale-up.
         if eff == "happy":                      # an excited celebrate hop, not the idle bob
             bob = -abs(math.sin((now - self._anim_t0) * 9.0)) * BOB_AMPLITUDE * 2.0
-        elif eff == "sleeping" or self._raw == "dead":
+        elif eff == "sleeping" or draw_raw == "dead":
             bob = 0.0                           # a sleeper / gravestone sits still
         else:
             bob = BOB_AMPLITUDE * math.sin((now - self._anim_t0) * 2 * math.pi / BOB_PERIOD_S)
@@ -778,7 +787,7 @@ class QtCard(QWidget):
         # two animated levels (xhigh/max), a live accent border — except while waiting,
         # where the default edge leaves the attention shake/glare uncontested.
         t = now - self._anim_t0
-        dead = self._raw == "dead"
+        dead = draw_raw == "dead"
         level = "" if dead else self._effort_display
         # Quiet levels tint the whole panel a static color; max/xhigh keep the dark base
         # and animate a pixel background over it (a rainbow wash / rings from the mascot).
@@ -798,15 +807,16 @@ class QtCard(QWidget):
                      for b in usage.usage_view(self._usage, now))
         ring = (None if self._context_pct is None else
                 (self._context_pct, _hex(usage.bar_color(self._context_pct))))
+        info = info_line(self._state.get("file"), self._state.get("model"))
+        if self._dead_until is not None:     # the reset time replaces file · model
+            info = "resets " + time.strftime("%H:%M", time.localtime(self._dead_until))
 
         self._panel.show_art(self._pixmap, _CAPTIONS.get(face, self._raw), bob,
                              prev=self._prev_pixmap, fade=fade, scale=self._scale_now(now),
                              badge=badge, badge_count=count,
                              panel_fill=panel_fill, border=border, bars=bars,
                              usage_stale=usage.is_stale(self._usage, now),
-                             ring=ring, panel_bg=panel_bg,
-                             info=info_line(self._state.get("file"),
-                                            self._state.get("model")))
+                             ring=ring, panel_bg=panel_bg, info=info)
 
     def _adopt_pixmap(self, pixmap: QPixmap, stage: str, now: float) -> None:
         """Swap in a new creature pixmap with the right transition: a stage change
@@ -850,8 +860,8 @@ class QtCard(QWidget):
         return self._renderer.creature(
             SpriteSpec(stage="baby", state="working", accent=accent), BADGE_MINI_PX)
 
-    def _pixmap_for(self, face: str, view: PetView) -> QPixmap:
-        if self._raw == "dead":
+    def _pixmap_for(self, face: str, view: PetView, *, dead: bool = False) -> QPixmap:
+        if dead or self._raw == "dead":
             return self._renderer.gravestone(CREATURE_PX)
         accent = _hex(config.STATE_COLORS.get(face, config.STATE_COLORS["idle"]))
         return self._renderer.creature(

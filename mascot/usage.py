@@ -53,6 +53,30 @@ def _decayed_pct(window: Any, now: float) -> float | None:
     return float(pct) if now < reset else 0.0
 
 
+def exhausted_until(snapshot: Any, now: float) -> float | None:
+    """The epoch when usage returns, when the account is out — any window at
+    ≥100% whose ``resets_at`` is still ahead. Both exhausted → the later reset
+    (the account stays capped until the last window frees); a passed reset →
+    ``None``, so revival is automatic even off a stale snapshot.
+
+    This is the widget's reliable death signal (#91): the hook paths proved
+    unusable in practice (real ``StopFailure`` payloads carry no ``error_type``,
+    VS Code emits no limit ``Notification``), but the statusline/poller feed
+    always knows — and a subscription limit is account-wide anyway."""
+    if not isinstance(snapshot, dict):
+        return None
+    until: float | None = None
+    for key, _label in _WINDOWS:
+        window = snapshot.get(key)
+        if not isinstance(window, dict):
+            continue
+        pct, reset = window.get("used_percentage"), window.get("resets_at")
+        if (isinstance(pct, (int, float)) and isinstance(reset, (int, float))
+                and float(pct) >= 100.0 and float(reset) > now):
+            until = float(reset) if until is None else max(until, float(reset))
+    return until
+
+
 def usage_view(snapshot: dict[str, Any] | None, now: float) -> list[UsageBar]:
     """The bars to draw, in order (5h then 7d). Windows absent from the snapshot
     are omitted (API-key users have none); a window past its reset reads 0.

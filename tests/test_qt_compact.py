@@ -79,6 +79,21 @@ def test_shadow_lives_on_a_child_panel_not_the_translucent_top_level(app):
     w.close()
 
 
+def test_rows_read_out_of_usage_when_the_account_is_exhausted():
+    # #91: the usage feed is the reliable death signal (hook payloads carry no
+    # usable limit fields) — a full window tombstones every row until its reset.
+    now = time.time()
+    st = _state(st="working", tool="Edit", file="C:/x/a.py", effort="max")
+    until = now + 3600
+    assert qt_compact.row_text(st, now, dead_until=until).startswith(
+        "out of usage · resets ")
+    assert qt_compact.dot_color(st, now, dead_until=until) == qt_compact._hex(
+        config.STATE_COLORS["dead"])
+    assert qt_compact.row_dim(st, now, dead_until=until) is False
+    assert qt_compact.row_backdrop(st, now, 1.0, dead_until=until) is None
+    assert qt_compact.row_bg(st, now, 1.0, dead_until=until) == ("solid",)
+
+
 def test_row_bg_markers_follow_the_effort_level():
     # #86: the card's panel_bg split at row scale — the animated levels get a
     # marker for the pixel wash/ripple; everything else stays a solid panel.

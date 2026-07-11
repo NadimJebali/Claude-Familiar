@@ -456,6 +456,20 @@ def test_emit_restamps_a_dead_owner_pid(tmp_path, monkeypatch):
     assert st["owner_pid"] == 222            # dead stamp: healed
 
 
+def test_debug_log_dumps_rare_events_whole(tmp_path, monkeypatch):
+    # #91: StopFailure arrived with fields outside the whitelist ({} logged twice
+    # on the very machine whose tombstone never fired) — rare events now log the
+    # full payload so the real schema can be learned; routine events stay lean.
+    monkeypatch.setattr(emit, "STATE_DIR", tmp_path / "state")
+    monkeypatch.setenv("CLAUDE_MASCOT_DEBUG", "1")
+    emit._debug_log("StopFailure", {"surprise_key": "usage_limit_reached"})
+    emit._debug_log("PreToolUse", {"tool_name": "Read",
+                                   "tool_input": {"file_path": "x"}})
+    text = (tmp_path / "debug.log").read_text(encoding="utf-8")
+    assert "surprise_key" in text
+    assert "tool_input" not in text          # routine events stay filtered
+
+
 def test_file_field_is_sticky_per_turn():
     # #85: the working file survives PostToolUse (individual edits finish in
     # milliseconds — it must stay readable), is replaced by the next

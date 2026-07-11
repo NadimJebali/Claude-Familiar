@@ -126,9 +126,11 @@ baby / teen / adult) in **Settings → Appearance → Mascot Look**.
 - **Impatient shake.** If a permission/attention prompt goes unanswered for 30s,
   the card starts to shake — and the longer you ignore it, the more frantic it
   gets, until you respond.
-- **Gravestone.** When the session runs out of usage (a usage- or session-limit
-  notification), the mascot becomes a 🪦 and keeps the message so you can read the
-  reset time. It revives on your next prompt.
+- **Gravestone.** When usage runs out, every mascot becomes a 🪦 with the reset
+  time under it. Driven by the **usage feed** reading 100% (the statusline or
+  the opt-in poller) — a subscription limit is account-wide, and this signal
+  works everywhere, including the VS Code extension where limit hooks never
+  fire. It revives on its own once the window resets.
 - **Shake-to-dizzy.** Grab a card and shake it — the mascot gets dizzy (😵‍💫).
 - **Self-cleaning.** A card stays as long as its Claude process is alive — even
   idle or asleep — and vanishes the moment that process exits. A session whose
