@@ -30,7 +30,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from . import config, effective_state, usage
+from . import config, effective_state, effort, usage
 from .overlay import Overlay, OverlayConfig
 
 # --- overlay timing (authored once here; the card + compact both read these) ---
@@ -95,6 +95,33 @@ def file_basename(path: object) -> str:
     return path.replace("\\", "/").rsplit("/", 1)[-1]
 
 
+def _hex(rgb: tuple[int, int, int]) -> str:
+    """An ``#rrggbb`` string for an (r, g, b) triple. Clamps + rounds so a lerped
+    (float) color hexes cleanly too."""
+    r, g, b = (max(0, min(255, round(c))) for c in rgb)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _accent_for(face: str) -> str:
+    """The sprite accent for a displayed face — the per-state color, falling back
+    to the idle accent for any face without its own (so a new face can't crash)."""
+    return _hex(config.STATE_COLORS.get(face, config.STATE_COLORS["idle"]))
+
+
+def _dot_color(draw_raw: str, is_dead: bool, effort_level: str) -> str:
+    """The Compact activity dot, by precedence: an attention state (tombstoned or
+    waiting — real or pending-promoted) wears its own accent; else the resolved
+    effort tint; else the state accent (an unknown state reads as idle grey). Only
+    the dot carries effort — the sprite accent never does."""
+    if is_dead:
+        return _hex(config.STATE_COLORS["dead"])
+    if draw_raw == "waiting":
+        return _hex(config.STATE_COLORS["waiting"])
+    if effort_level:
+        return _hex(effort.TINTS[effort_level])
+    return _hex(config.STATE_COLORS.get(draw_raw, config.STATE_COLORS["idle"]))
+
+
 @dataclass(frozen=True)
 class SessionView:
     """The immutable facts a theme renders for one session at one instant.
@@ -108,8 +135,9 @@ class SessionView:
     (``reset_at``), the pending attention message, the active tool, and the
     working file's display name.
 
-    Later tickets add accent, effort chrome, usage bars, and the context ring to
-    this same view — for the walking skeleton it carries the state text.
+    Later tickets add effort chrome, usage bars, and the context ring to this same
+    view; #101 carried the state text, #102 adds the visual-identity trio (accent,
+    dot color, dim).
     """
     effective: str
     face: str
@@ -120,6 +148,12 @@ class SessionView:
     notify_message: str | None
     tool: str | None
     file_name: str
+    # Visual identity (#102). ``accent`` is the sprite tint the Classic card paints;
+    # ``dot_color`` is the Compact activity dot (attention > effort > state); ``dim``
+    # is whether a Compact row reads quiet (effectively idle, never a tombstone).
+    accent: str
+    dot_color: str
+    dim: bool
 
 
 class SessionPresenter:
@@ -183,12 +217,15 @@ class SessionPresenter:
         return self._overlay.waiting_elapsed(now)
 
     # --- the single read --------------------------------------------------
-    def view(self, now: float, *, mood: str = "content") -> SessionView:
+    def view(self, now: float, *, mood: str = "content",
+             effort_level: str = "") -> SessionView:
         """The facts to render this frame. Composes, in the order the Classic card
         established: promote a long-pending tool, override to ``dead`` when usage
         is exhausted, run the raw clocks, layer the ladder, then pick the display
         face and caption. ``mood`` tints the idle face (the pet's mood, ``content``
-        when there's no pet)."""
+        when there's no pet); ``effort_level`` is the session's resolved reasoning
+        effort (the adapter reads it, since resolving it touches settings), used to
+        tint the Compact dot."""
         state = self._state
         ts = state.get("ts")
         # Promote a pending permission prompt off the *original* raw, then let a
@@ -208,16 +245,20 @@ class SessionPresenter:
             stumbled_recent=stumbled_recent)
         notify = state.get("notify")
         notify_message = notify.get("message") if isinstance(notify, dict) else None
+        is_dead = draw_raw == "dead"
         return SessionView(
             effective=effective,
             face=face,
             draw_raw=draw_raw,
             caption=_CAPTIONS.get(face, self._raw),
-            is_dead=draw_raw == "dead",
+            is_dead=is_dead,
             reset_at=reset_at,
             notify_message=notify_message if isinstance(notify_message, str) else None,
             tool=state.get("tool"),
             file_name=file_basename(state.get("file")),
+            accent=_accent_for(face),
+            dot_color=_dot_color(draw_raw, is_dead, effort_level),
+            dim=not is_dead and draw_raw == "idle",
         )
 
 

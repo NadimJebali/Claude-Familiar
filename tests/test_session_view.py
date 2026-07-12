@@ -13,8 +13,10 @@ qt_compact ``row_text`` unit tests migrated onto.
 """
 from __future__ import annotations
 
-from mascot import presenter
+from mascot import config, effort, presenter
 from mascot.overlay import OverlayConfig
+
+_hex = presenter._hex
 
 # A known threshold set so the time-based ladder is deterministic regardless of
 # the machine's settings.json (mirrors the effective_state suite's explicit args).
@@ -199,6 +201,48 @@ def test_waiting_elapsed_tracks_the_attention_clock():
     p.adopt_state(_state("waiting"), T0)
     p.view(T0)                                   # note_raw starts the waiting clock
     assert p.waiting_elapsed(T0 + 5) == 5
+
+
+# --- visual identity: accent, dot color, idle dimming (#102) --------------------
+def test_accent_is_the_face_state_color():
+    # The Classic sprite tint is the displayed face's accent — per-tool working
+    # faces share the working green; plan mode is the scholarly teal.
+    assert _present("working", tool="Edit").view(T0).accent == \
+        _hex(config.STATE_COLORS["working_edit"])
+    assert _present("idle").view(T0).accent == _hex(config.STATE_COLORS["idle"])
+    assert _present("thinking", permission_mode="plan").view(T0).accent == \
+        _hex(config.STATE_COLORS["planning"])
+
+
+def test_effort_never_touches_the_sprite_accent():
+    # Effort colors the Compact dot, never the creature — the face owns the accent.
+    assert _present("working").view(T0, effort_level="max").accent == \
+        _hex(config.STATE_COLORS["working"])
+
+
+def test_dot_color_precedence_attention_then_effort_then_state():
+    # Waiting / tombstoned accents win.
+    assert _present("waiting").view(T0).dot_color == _hex(config.STATE_COLORS["waiting"])
+    assert _present("dead").view(T0).dot_color == _hex(config.STATE_COLORS["dead"])
+    # A pending-promoted tool wears the waiting accent too.
+    pending = _present("working", tool="Bash", ts=T0 - _CFG.permission_wait_s - 5)
+    assert pending.view(T0).dot_color == _hex(config.STATE_COLORS["waiting"])
+    # Then the effort tint; without an effort, the state accent (unknown -> idle grey).
+    assert _present("working").view(T0, effort_level="high").dot_color == \
+        _hex(effort.TINTS["high"])
+    assert _present("working").view(T0, effort_level="").dot_color == \
+        _hex(config.STATE_COLORS["working"])
+
+
+def test_dim_only_when_effectively_idle():
+    assert _present("idle").view(T0).dim is True
+    for st in ("working", "thinking", "waiting", "compacting"):
+        assert _present(st).view(T0).dim is False
+    # The tombstone must never whisper.
+    assert _present("dead").view(T0).dim is False
+    # A long-idle (dozing) session still dims.
+    p = _present("idle", now=T0)
+    assert p.view(T0 + _CFG.sleep_after_idle_s + 1).dim is True
 
 
 # --- status_line: the Compact row's rich text (composed from the view) ----------

@@ -81,6 +81,7 @@ from .presenter import (
     PERMISSION_WAIT_S,
     WORKING_STALL_S,
     SessionPresenter,
+    _hex,
     file_basename,
 )
 from .qt_popups import QtBubble, QtStatsTooltip
@@ -240,11 +241,6 @@ def _particle_cells(name: str, color: tuple[int, int, int] | None
     if name == "zzz":
         return sprite_pixel._ZED, {"Z": hexed}
     return sprite_pixel._HEART, {"O": hexed}
-
-def _hex(rgb: tuple[int, int, int]) -> str:
-    # Clamp + round so a faded particle color (lerped floats) hexes cleanly too.
-    r, g, b = (max(0, min(255, round(c))) for c in rgb)
-    return f"#{r:02x}{g:02x}{b:02x}"
 
 
 def _ease_out_cubic(t: float) -> float:
@@ -748,7 +744,7 @@ class QtCard(QWidget):
         if key != self._pixmap_key:
             self._pixmap_key = key
             self._adopt_pixmap(
-                self._pixmap_for(face, pet_look, dead=draw_raw == "dead"),
+                self._pixmap_for(face, pet_look, sv.accent, dead=draw_raw == "dead"),
                 pet_look.stage, now)
 
         # Sub-pixel bob (float), the face crossfade, and the evolution scale-up.
@@ -833,10 +829,10 @@ class QtCard(QWidget):
         return self._renderer.creature(
             SpriteSpec(stage="baby", state="working", accent=accent), BADGE_MINI_PX)
 
-    def _pixmap_for(self, face: str, view: PetView, *, dead: bool = False) -> QPixmap:
+    def _pixmap_for(self, face: str, view: PetView, accent: str, *,
+                    dead: bool = False) -> QPixmap:
         if dead or self._raw == "dead":
             return self._renderer.gravestone(CREATURE_PX)
-        accent = _hex(config.STATE_COLORS.get(face, config.STATE_COLORS["idle"]))
         return self._renderer.creature(
             SpriteSpec(stage=view.stage, state=face, accent=accent,
                        hat=view.hat, flourish=view.flourish),

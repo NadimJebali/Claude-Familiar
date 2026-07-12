@@ -100,29 +100,9 @@ def _draw_raw(state: dict[str, Any], now: float) -> str:
 # later tickets move each onto the view.
 
 
-def row_dim(state: dict[str, Any], now: float,
-            dead_until: float | None = None) -> bool:
-    """Idle rows dim (the Rust widget's trick); every active state reads full —
-    and so does the tombstone (#91), which must not whisper."""
-    if dead_until is not None:
-        return False
-    return _draw_raw(state, now) == "idle"
-
-
-def dot_color(state: dict[str, Any], now: float,
-              dead_until: float | None = None) -> str:
-    """The activity dot: attention states win (waiting — real or promoted — and
-    dead wear their accents), then the resolved effort tint, then the state
-    accent (unknown states read as idle grey)."""
-    if dead_until is not None:
-        return _hex(config.STATE_COLORS["dead"])
-    raw = _draw_raw(state, now)
-    if raw in ("waiting", "dead"):
-        return _hex(config.STATE_COLORS[raw])
-    level = effort.resolve(state.get("effort", ""), effort.settings_effort())
-    if level:
-        return _hex(effort.TINTS[level])
-    return _hex(config.STATE_COLORS.get(raw, config.STATE_COLORS["idle"]))
+# The dot color and idle-dimming decisions moved onto the SessionView (#102) —
+# see mascot.presenter (_dot_color + the ``dim`` field). The effort backdrops
+# below still read the raw dict; their view migration is #103.
 
 
 def row_backdrop(state: dict[str, Any], now: float, t: float,
@@ -340,32 +320,40 @@ class CompactWindow(QWidget):
         self.move(*_anchor_xy(area, self.width(), self.height(), 0))
 
     # --- animation: repaint only when the frame really changed --------------------
-    def _row_text(self, sid: str, state: dict[str, Any], now: float) -> str:
-        """The row's state text from the session's presenter (#101). Robust against
-        a usage/context push landing before the first set_sessions: a missing
-        presenter is created on the spot (it just hasn't adopted its full state yet)."""
-        return status_line(self._presenter_for(sid, state, now).view(now),
-                           notify_max_chars=NOTIFY_MAX_CHARS)
+    def _session_view(self, sid: str, state: dict[str, Any], now: float):
+        """The session's SessionView, with its resolved effort level fed in (the
+        adapter resolves it — that touches settings — and the view tints the dot
+        with it). Robust against a usage/context push landing before the first
+        set_sessions: a missing presenter is created on the spot."""
+        level = effort.resolve(state.get("effort", ""), effort.settings_effort())
+        return self._presenter_for(sid, state, now).view(now, effort_level=level)
 
     def _tick(self) -> None:
         now = time.time()
-        # Account-level death (#91): a full usage window tombstones every row. The
-        # row text gets the override through its presenter; the other row helpers
-        # still take dead_until directly (their view migration is a later ticket).
+        t = now - self._anim_t0
+        # The row's text, dot color and dim all come from the presenter's view now
+        # (#101, #102); the effort backdrops still take dead_until directly (their
+        # view migration is #103). Account-level death (#91) tombstones every row.
         dead_until = usage.exhausted_until(self._usage, now)
-        rows = tuple(
-            (sid, self._row_text(sid, st, now), dot_color(st, now, dead_until),
-             row_dim(st, now, dead_until),
-             row_backdrop(st, now, now - self._anim_t0, dead_until),
-             row_bg(st, now, now - self._anim_t0, dead_until),
-             model_label(st.get("model")),
-             len(st.get("subagents") or []),
-             self._context.get(sid))
-            for sid, st in self.sessions.items()
-        )
+        rows = tuple(self._row(sid, st, now, t, dead_until)
+                     for sid, st in self.sessions.items())
         bars = tuple((b.label, b.pct, _hex(usage.bar_color(b.pct)))
                      for b in usage.usage_view(self._usage, now))
         self._panel.show_frame((rows, bars, usage.is_stale(self._usage, now)))
+
+    def _row(self, sid: str, st: dict[str, Any], now: float, t: float,
+             dead_until: float | None) -> tuple:
+        """One row's paint tuple: state text, dot and dim from the session view;
+        the effort backdrops (still dict-derived) and the model / sub-agent / ring
+        trimmings alongside."""
+        view = self._session_view(sid, st, now)
+        return (sid, status_line(view, notify_max_chars=NOTIFY_MAX_CHARS),
+                view.dot_color, view.dim,
+                row_backdrop(st, now, t, dead_until),
+                row_bg(st, now, t, dead_until),
+                model_label(st.get("model")),
+                len(st.get("subagents") or []),
+                self._context.get(sid))
 
     # --- drag anywhere ---------------------------------------------------------------
     def mousePressEvent(self, event: QMouseEvent) -> None:
