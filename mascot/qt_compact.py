@@ -20,11 +20,11 @@ the Classic card's caption reads, so a row and a card can never disagree. The ro
 therefore inherit the whole ladder now (the #52 pending-permission promotion, but
 also the stall watchdog and dozing), not just the promotion they used to.
 
-The rest of the row (dim, dot color, effort backdrops) is decided by pure helpers
-(:func:`row_dim`, :func:`dot_color`, :func:`model_label`) so it is tested without
-painting; the window itself paints directly (no child widgets) behind a
-repaint-guard frame like the card's panel, animating only while an animated
-effort level is on screen. A drag anywhere moves the panel; the tray's
+Every other row fact — the dim flag, the dot color, and the effort chrome (flat
+tint + animated marker) — is a :class:`~mascot.presenter.SessionView` fact too, so
+it is tested at that seam without painting; only :func:`~mascot.qt_card.model_label`
+remains a local helper. The window itself paints directly (no child widgets) behind
+a repaint-guard frame like the card's panel. A drag anywhere moves the panel; the tray's
 show/hide and Quit cover it (wired in ``qt_app``). The pet layer is
 orthogonal: PetService keeps earning and the tray "Pet…" window works — only
 the card-side pet expressions have no home here.
@@ -87,14 +87,6 @@ _EMPTY_TEXT = "no sessions"
 # marker (``effort_bg_kind``), with the waiting/dead-uncontested rule applied once for
 # both themes (#103). The window builds each row from that view in :meth:`_row`; the
 # painters below still own the pixel geometry (cell size, the ripple's origin dot).
-
-
-def _has_animated(sessions: dict[str, dict[str, Any]]) -> bool:
-    """Whether any row wears an animated effort level (xhigh/max) — if not, the
-    frame signature drops the clock and the panel repaints only on data changes."""
-    fallback = effort.settings_effort()
-    return any(effort.resolve(st.get("effort", ""), fallback) in ("xhigh", "max")
-               for st in sessions.values())
 
 
 # --- the panel (the child that actually paints) --------------------------------------
@@ -275,12 +267,13 @@ class CompactWindow(QWidget):
 
     # --- animation: repaint only when the frame really changed --------------------
     def _session_view(self, sid: str, state: dict[str, Any], now: float):
-        """The session's SessionView, with its resolved effort level fed in (the
-        adapter resolves it — that touches settings — and the view tints the dot
-        with it). Robust against a usage/context push landing before the first
-        set_sessions: a missing presenter is created on the spot."""
-        level = effort.resolve(state.get("effort", ""), effort.settings_effort())
-        return self._presenter_for(sid, state, now).view(now, effort_level=level)
+        """The session's SessionView. The card feeds the presenter the global effort
+        fallback (reading it touches settings, so it stays adapter-side); the view
+        resolves the session's level over it and drives the dot + effort chrome.
+        Robust against a usage/context push landing before the first set_sessions:
+        a missing presenter is created on the spot."""
+        return self._presenter_for(sid, state, now).view(
+            now, effort_fallback=effort.settings_effort())
 
     def _tick(self) -> None:
         now = time.time()

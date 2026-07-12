@@ -607,11 +607,10 @@ class QtCard(QWidget):
         # frame in _render, since a pending permission prompt sends no new state). The
         # shake gate and tap gate read this so a heuristic "needs you" shakes/glares.
         self._draw_raw = self._raw
-        # Effort-reactive background: the resolved level (per-session state -> global
-        # settings fallback) drives the panel tint each render (xhigh/max animate).
         # The account-global usage snapshot (pushed by the manager, like the pet)
-        # drives the two bottom bars; None until the first push -> an empty row.
-        self._effort_display = self._resolve_effort()
+        # drives the two bottom bars; None until the first push -> an empty row. The
+        # effort-reactive chrome is resolved by the presenter from the session's own
+        # effort and the global settings fallback the card feeds it each render.
         self._usage: dict | None = None
         # Per-session context-window fill % (#72), pushed by the manager from the
         # transcript tailer. None until the first result; drives the ring gauge.
@@ -657,7 +656,6 @@ class QtCard(QWidget):
         # note_raw (inside view()) starts the waiting clock even between hook
         # states, so the pending-permission heuristic still engages.
         self._presenter.adopt_state(state, now)
-        self._effort_display = self._resolve_effort()
         self._render(now)
         self._sync_bubble(state.get("notify"))
 
@@ -685,11 +683,6 @@ class QtCard(QWidget):
         ring gauge; like the pet/usage pushes, an unchanged value repaints nothing."""
         self._context_pct = pct
         self._render(time.time())
-
-    def _resolve_effort(self) -> str:
-        """The effort level to display: the session's per-turn level (from the state
-        file) wins, falling back to Claude's global ``effortLevel`` setting."""
-        return effort.resolve(self._state.get("effort", ""), effort.settings_effort())
 
     def _effective_pet_view(self) -> PetView:
         """The look to draw, mirroring the Tk card's two edge cases: simple mode (pet
@@ -734,7 +727,7 @@ class QtCard(QWidget):
         # the mood that tints the idle face.
         pet_look = self._effective_pet_view()
         sv = self._presenter.view(now, mood=pet_look.mood,
-                                  effort_level=self._effort_display)
+                                  effort_fallback=effort.settings_effort())
         draw_raw = sv.draw_raw
         self._draw_raw = draw_raw
         self._dead_until = sv.reset_at

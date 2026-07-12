@@ -216,7 +216,7 @@ def test_accent_is_the_face_state_color():
 
 def test_effort_never_touches_the_sprite_accent():
     # Effort colors the Compact dot, never the creature — the face owns the accent.
-    assert _present("working").view(T0, effort_level="max").accent == \
+    assert _present("working").view(T0, effort_fallback="max").accent == \
         _hex(config.STATE_COLORS["working"])
 
 
@@ -227,11 +227,22 @@ def test_dot_color_precedence_attention_then_effort_then_state():
     # A pending-promoted tool wears the waiting accent too.
     pending = _present("working", tool="Bash", ts=T0 - _CFG.permission_wait_s - 5)
     assert pending.view(T0).dot_color == _hex(config.STATE_COLORS["waiting"])
-    # Then the effort tint; without an effort, the state accent (unknown -> idle grey).
-    assert _present("working").view(T0, effort_level="high").dot_color == \
+    # Then the effort tint; without an effort, the state accent.
+    assert _present("working").view(T0, effort_fallback="high").dot_color == \
         _hex(effort.TINTS["high"])
-    assert _present("working").view(T0, effort_level="").dot_color == \
+    assert _present("working").view(T0, effort_fallback="").dot_color == \
         _hex(config.STATE_COLORS["working"])
+    # An unrecognized raw state reads as idle grey (a newer writer can't break it).
+    assert _present("frobnicate").view(T0).dot_color == \
+        _hex(config.STATE_COLORS["idle"])
+
+
+def test_effort_is_resolved_from_the_session_over_the_fallback():
+    # view() does the resolve pairing now: the session's own per-turn effort wins,
+    # the account-wide fallback fills in when the session carries none.
+    assert _present("working", effort="max").view(
+        T0, effort_fallback="low").chrome_level == "max"
+    assert _present("working").view(T0, effort_fallback="low").chrome_level == "low"
 
 
 def test_dim_only_when_effectively_idle():
@@ -247,31 +258,31 @@ def test_dim_only_when_effectively_idle():
 
 # --- effort chrome (#103) -------------------------------------------------------
 def test_chrome_level_is_the_resolved_effort_but_uncontested():
-    assert _present("working").view(T0, effort_level="high").chrome_level == "high"
+    assert _present("working").view(T0, effort_fallback="high").chrome_level == "high"
     # Waiting and tombstoned sessions stay uncontested — no effort decoration.
-    assert _present("waiting").view(T0, effort_level="max").chrome_level == ""
-    assert _present("dead").view(T0, effort_level="max").chrome_level == ""
+    assert _present("waiting").view(T0, effort_fallback="max").chrome_level == ""
+    assert _present("dead").view(T0, effort_fallback="max").chrome_level == ""
 
 
 def test_effort_fill_is_the_quiet_tint_only():
     for level in ("low", "medium", "high"):
-        v = _present("working").view(T0, effort_level=level)
+        v = _present("working").view(T0, effort_fallback=level)
         assert v.effort_fill == _hex(
             effort.panel_fill(level, presenter._PANEL_FILL_RGB, 0.0))
     # Animated levels paint their own background, so they carry no flat tint.
-    assert _present("working").view(T0, effort_level="max").effort_fill is None
-    assert _present("working").view(T0, effort_level="xhigh").effort_fill is None
+    assert _present("working").view(T0, effort_fallback="max").effort_fill is None
+    assert _present("working").view(T0, effort_fallback="xhigh").effort_fill is None
     # No effort, or a contested (waiting) session -> no tint.
-    assert _present("working").view(T0, effort_level="").effort_fill is None
-    assert _present("waiting").view(T0, effort_level="high").effort_fill is None
+    assert _present("working").view(T0, effort_fallback="").effort_fill is None
+    assert _present("waiting").view(T0, effort_fallback="high").effort_fill is None
 
 
 def test_effort_bg_kind_marks_the_animated_levels_uncontested():
-    assert _present("working").view(T0, effort_level="max").effort_bg_kind == "rainbow"
-    assert _present("working").view(T0, effort_level="xhigh").effort_bg_kind == "ripple"
-    assert _present("working").view(T0, effort_level="high").effort_bg_kind == "solid"
-    assert _present("waiting").view(T0, effort_level="max").effort_bg_kind == "solid"
-    assert _present("dead").view(T0, effort_level="max").effort_bg_kind == "solid"
+    assert _present("working").view(T0, effort_fallback="max").effort_bg_kind == "rainbow"
+    assert _present("working").view(T0, effort_fallback="xhigh").effort_bg_kind == "ripple"
+    assert _present("working").view(T0, effort_fallback="high").effort_bg_kind == "solid"
+    assert _present("waiting").view(T0, effort_fallback="max").effort_bg_kind == "solid"
+    assert _present("dead").view(T0, effort_fallback="max").effort_bg_kind == "solid"
 
 
 def test_bg_marker_carries_the_clock_only_when_animated():

@@ -91,9 +91,6 @@ _WAITING_FACES = frozenset({"waiting", "waiting_angry"})
 # once; the adapters import it for the per-cell pixel animation they still paint.
 _PANEL_FILL_RGB = (29, 31, 41)
 
-# The quiet (static-tint) effort levels; xhigh/max animate a painted background.
-_QUIET_LEVELS = frozenset({"low", "medium", "high"})
-
 
 def file_basename(path: object) -> str:
     """The display name of a stamped working file — the final path segment
@@ -148,13 +145,18 @@ def _effort_chrome(effort_level: str, *, contested: bool
     (``rainbow``/``ripple``) the adapter animates; the marker's ``bg_kind`` and the
     ``chrome_level`` (for the adapter's animated border color) are the decision."""
     chrome_level = "" if contested else effort_level
-    if chrome_level in _QUIET_LEVELS:
+    if chrome_level and not effort.is_animated(chrome_level):
+        # A quiet, known level: its flat tint is static (t-free), so bake it here.
+        # panel_fill is guaranteed non-None for a known level (the None-guard is for
+        # mypy, not a reachable case in this branch).
         fill_rgb = effort.panel_fill(chrome_level, _PANEL_FILL_RGB, 0.0)
         effort_fill = _hex(fill_rgb) if fill_rgb is not None else None
     else:
         effort_fill = None
-    bg_kind = ("rainbow" if chrome_level == "max"
-               else "ripple" if chrome_level == "xhigh" else "solid")
+    if effort.is_animated(chrome_level):
+        bg_kind = "rainbow" if chrome_level == "max" else "ripple"
+    else:
+        bg_kind = "solid"
     return chrome_level, effort_fill, bg_kind
 
 
@@ -171,9 +173,9 @@ class SessionView:
     (``reset_at``), the pending attention message, the active tool, and the
     working file's display name.
 
-    Later tickets add effort chrome, usage bars, and the context ring to this same
-    view; #101 carried the state text, #102 adds the visual-identity trio (accent,
-    dot color, dim).
+    The view has grown a fact group per ticket: #101 the state text, #102 the
+    visual-identity trio (accent, dot color, dim), #103 the effort chrome. Usage
+    bars, the context ring and the info line are added by later tickets.
     """
     effective: str
     face: str
@@ -262,14 +264,19 @@ class SessionPresenter:
 
     # --- the single read --------------------------------------------------
     def view(self, now: float, *, mood: str = "content",
-             effort_level: str = "") -> SessionView:
+             effort_fallback: str = "") -> SessionView:
         """The facts to render this frame. Composes, in the order the Classic card
         established: promote a long-pending tool, override to ``dead`` when usage
         is exhausted, run the raw clocks, layer the ladder, then pick the display
         face and caption. ``mood`` tints the idle face (the pet's mood, ``content``
-        when there's no pet); ``effort_level`` is the session's resolved reasoning
-        effort (the adapter reads it, since resolving it touches settings), used to
-        tint the Compact dot."""
+        when there's no pet).
+
+        The session's reasoning effort is resolved here — its own per-turn level
+        (from the state) over the account-wide ``effort_fallback`` the adapter
+        supplies. Reading that fallback is I/O (Claude's settings.json), so it stays
+        adapter-side; the resolve pairing and everything it drives — the Compact
+        dot tint and the effort chrome — live on this pure seam so both themes get
+        one answer."""
         state = self._state
         ts = state.get("ts")
         # Promote a pending permission prompt off the *original* raw, then let a
@@ -289,6 +296,7 @@ class SessionPresenter:
             stumbled_recent=stumbled_recent)
         notify = state.get("notify")
         notify_message = notify.get("message") if isinstance(notify, dict) else None
+        effort_level = effort.resolve(state.get("effort", ""), effort_fallback)
         is_dead = draw_raw == "dead"
         contested = is_dead or draw_raw == "waiting"
         chrome_level, effort_fill, effort_bg_kind = _effort_chrome(

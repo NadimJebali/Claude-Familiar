@@ -1159,11 +1159,15 @@ def test_dead_suppresses_the_effort_tint(app, monkeypatch):
     card.close()
 
 
-def test_resolve_effort_prefers_state_over_settings(app, monkeypatch):
+def test_effort_prefers_the_session_level_over_the_settings_fallback(app, monkeypatch):
+    # The card feeds the settings fallback to the presenter, which resolves the
+    # session's own level over it (the resolve now lives on the view — see
+    # tests/test_session_view.py). Observable end: max (state) wins low (settings),
+    # so the panel wears max's rainbow marker.
     monkeypatch.setattr(qt_card.effort, "settings_effort", lambda *a, **k: "low")
-    st = {**_state("s", "working"), "effort": "max"}
+    st = {**_state("s", "working"), "effort": "max", "ts": time.time()}
     card = qt_card.QtCard("s", st, 0, QtPixmapRenderer())
-    assert card._effort_display == "max"          # the per-turn state level wins the fallback
+    assert card._panel._panel_bg[0] == "rainbow"
     card.close()
 
 
