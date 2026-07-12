@@ -58,35 +58,10 @@ def test_shadow_lives_on_a_child_panel_not_the_translucent_top_level(app):
     w.close()
 
 
-def test_rows_read_out_of_usage_when_the_account_is_exhausted():
-    # #91: the usage feed is the reliable death signal (hook payloads carry no
-    # usable limit fields) — a full window tombstones every row until its reset.
-    now = time.time()
-    st = _state(st="working", tool="Edit", file="C:/x/a.py", effort="max")
-    until = now + 3600
-    # dot color + dim now live on the SessionView (see test_session_view.py); the
-    # effort backdrops stay dict-derived until #103.
-    assert qt_compact.row_backdrop(st, now, 1.0, dead_until=until) is None
-    assert qt_compact.row_bg(st, now, 1.0, dead_until=until) == ("solid",)
-
-
-def test_row_bg_markers_follow_the_effort_level():
-    # #86: the card's panel_bg split at row scale — the animated levels get a
-    # marker for the pixel wash/ripple; everything else stays a solid panel.
-    now = time.time()
-    assert qt_compact.row_bg(_state(st="working", effort="max"), now, 1.234) == ("rainbow", 1.234)
-    assert qt_compact.row_bg(_state(st="working", effort="xhigh"), now, 2.0) == ("ripple", 2.0)
-    assert qt_compact.row_bg(_state(st="working", effort="high"), now, 2.0) == ("solid",)
-    assert qt_compact.row_bg(_state(st="waiting", effort="max"), now, 2.0) == ("solid",)
-
-
-def test_row_backdrop_cedes_animated_levels_to_row_bg():
-    # #86: xhigh/max rows keep the plain base (the overlay owns them); the
-    # static levels keep their flat tint.
-    now = time.time()
-    assert qt_compact.row_backdrop(_state(st="working", effort="max"), now, 1.0) is None
-    assert qt_compact.row_backdrop(_state(st="working", effort="xhigh"), now, 1.0) is None
-    assert qt_compact.row_backdrop(_state(st="working", effort="high"), now, 1.0) is not None
+# The effort chrome (flat quiet tint + the rainbow/ripple markers) and its
+# waiting/dead-uncontested rule now live on the SessionView — covered at that seam
+# in tests/test_session_view.py. The window smoke test below still paints a max /
+# xhigh / waiting / dead spread to prove the panel renders them clean.
 
 
 # --- the window -------------------------------------------------------------------

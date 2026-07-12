@@ -86,6 +86,14 @@ WORKING_FACES = frozenset(
 # The waiting-family faces the Compact row inlines its notify message onto.
 _WAITING_FACES = frozenset({"waiting", "waiting_angry"})
 
+# The dark panel base the effort tints blend over (PANEL_FILL "#1d1f29" as RGB).
+# Lives here so the chrome decision — quiet tint vs animated marker — is computed
+# once; the adapters import it for the per-cell pixel animation they still paint.
+_PANEL_FILL_RGB = (29, 31, 41)
+
+# The quiet (static-tint) effort levels; xhigh/max animate a painted background.
+_QUIET_LEVELS = frozenset({"low", "medium", "high"})
+
 
 def file_basename(path: object) -> str:
     """The display name of a stamped working file — the final path segment
@@ -108,6 +116,13 @@ def _accent_for(face: str) -> str:
     return _hex(config.STATE_COLORS.get(face, config.STATE_COLORS["idle"]))
 
 
+def bg_marker(kind: str, t: float) -> tuple:
+    """The animated-background marker an adapter paints: ``(kind, rounded t)`` for
+    the animated kinds, or the clock-free ``("solid",)`` — so a non-animating frame
+    keeps a stable signature and the repaint guard skips it."""
+    return ("solid",) if kind == "solid" else (kind, round(t, 3))
+
+
 def _dot_color(draw_raw: str, is_dead: bool, effort_level: str) -> str:
     """The Compact activity dot, by precedence: an attention state (tombstoned or
     waiting — real or pending-promoted) wears its own accent; else the resolved
@@ -120,6 +135,27 @@ def _dot_color(draw_raw: str, is_dead: bool, effort_level: str) -> str:
     if effort_level:
         return _hex(effort.TINTS[effort_level])
     return _hex(config.STATE_COLORS.get(draw_raw, config.STATE_COLORS["idle"]))
+
+
+def _effort_chrome(effort_level: str, *, contested: bool
+                   ) -> tuple[str, str | None, str]:
+    """The effort chrome decision: ``(chrome_level, effort_fill, bg_kind)``.
+
+    A contested session — tombstoned, or demanding attention (waiting) — stays
+    uncontested: no effort decoration competes with the attention state, in either
+    theme. Otherwise the quiet levels get a flat tint (``effort_fill``, static, so
+    it's baked here) and the two animated levels get a background marker
+    (``rainbow``/``ripple``) the adapter animates; the marker's ``bg_kind`` and the
+    ``chrome_level`` (for the adapter's animated border color) are the decision."""
+    chrome_level = "" if contested else effort_level
+    if chrome_level in _QUIET_LEVELS:
+        fill_rgb = effort.panel_fill(chrome_level, _PANEL_FILL_RGB, 0.0)
+        effort_fill = _hex(fill_rgb) if fill_rgb is not None else None
+    else:
+        effort_fill = None
+    bg_kind = ("rainbow" if chrome_level == "max"
+               else "ripple" if chrome_level == "xhigh" else "solid")
+    return chrome_level, effort_fill, bg_kind
 
 
 @dataclass(frozen=True)
@@ -154,6 +190,14 @@ class SessionView:
     accent: str
     dot_color: str
     dim: bool
+    # Effort chrome (#103), the uncontested decision — the adapter supplies the clock
+    # and paints the pixels. ``chrome_level`` is the effort level driving chrome ("" when
+    # a waiting/dead state contests it, so the animated border color the adapter derives
+    # from it goes quiet); ``effort_fill`` is the quiet levels' flat panel tint (None for
+    # the animated levels / no effort); ``effort_bg_kind`` is "rainbow"/"ripple"/"solid".
+    chrome_level: str
+    effort_fill: str | None
+    effort_bg_kind: str
 
 
 class SessionPresenter:
@@ -246,6 +290,9 @@ class SessionPresenter:
         notify = state.get("notify")
         notify_message = notify.get("message") if isinstance(notify, dict) else None
         is_dead = draw_raw == "dead"
+        contested = is_dead or draw_raw == "waiting"
+        chrome_level, effort_fill, effort_bg_kind = _effort_chrome(
+            effort_level, contested=contested)
         return SessionView(
             effective=effective,
             face=face,
@@ -259,6 +306,9 @@ class SessionPresenter:
             accent=_accent_for(face),
             dot_color=_dot_color(draw_raw, is_dead, effort_level),
             dim=not is_dead and draw_raw == "idle",
+            chrome_level=chrome_level,
+            effort_fill=effort_fill,
+            effort_bg_kind=effort_bg_kind,
         )
 
 

@@ -77,11 +77,13 @@ from . import (
 from .pet_view import PetView, pet_view
 from .pixel_grid import grid_cells
 from .presenter import (
+    _PANEL_FILL_RGB,
     BLINK_DURATION_S,
     PERMISSION_WAIT_S,
     WORKING_STALL_S,
     SessionPresenter,
     _hex,
+    bg_marker,
     file_basename,
 )
 from .qt_popups import QtBubble, QtStatsTooltip
@@ -203,7 +205,8 @@ _SHAKE_CONFIG = shake.ShakeConfig(
 # is hungry/tired. The shared lifetime/position/fade math is the pure particles core;
 # here we register the kinds (no Tk draw callback — the panel paints the cells the
 # field returns) and paint them via the same pixel grids the Tk card uses.
-_PANEL_FILL_RGB = (29, 31, 41)   # PANEL_FILL as RGB — the color a fading emote lerps to
+# _PANEL_FILL_RGB (PANEL_FILL as RGB — the base a fading emote / effort wash lerps
+# to) is imported from the presenter, which owns the effort-chrome decision (#103).
 HEART_PX = 2
 HEART_RISE_PX = 34
 HEART_LIFETIME_S = 0.85
@@ -730,7 +733,8 @@ class QtCard(QWidget):
         # each onto the view.) The pet look is card-side: the sprite's stage/hat and
         # the mood that tints the idle face.
         pet_look = self._effective_pet_view()
-        sv = self._presenter.view(now, mood=pet_look.mood)
+        sv = self._presenter.view(now, mood=pet_look.mood,
+                                  effort_level=self._effort_display)
         draw_raw = sv.draw_raw
         self._draw_raw = draw_raw
         self._dead_until = sv.reset_at
@@ -761,26 +765,16 @@ class QtCard(QWidget):
         count = min(len(self._state.get("subagents") or []), MAX_BADGES)
         badge = self._badge_pixmap() if count else None
 
-        # Effort-reactive chrome: the panel tint (a gravestone stays sombre) and, for the
-        # two animated levels (xhigh/max), a live accent border — except while waiting,
-        # where the default edge leaves the attention shake/glare uncontested.
+        # Effort-reactive chrome: the presenter decides the level (uncontested — a
+        # waiting/dead panel stays sombre so it doesn't fight the attention shake or
+        # the gravestone), the quiet tint, and the animated marker; the card supplies
+        # the clock and paints. The border color is per-frame animation, so it's
+        # derived here from the (already uncontested) chrome level.
         t = now - self._anim_t0
-        dead = draw_raw == "dead"
-        level = "" if dead else self._effort_display
-        # Quiet levels tint the whole panel a static color; max/xhigh keep the dark base
-        # and animate a pixel background over it (a rainbow wash / rings from the mascot).
-        if level in ("max", "xhigh"):
-            panel_fill = PANEL_FILL
-            panel_bg: tuple = ("rainbow" if level == "max" else "ripple", round(t, 3))
-        else:
-            fill_rgb = effort.panel_fill(level, _PANEL_FILL_RGB, t)
-            panel_fill = _hex(fill_rgb) if fill_rgb is not None else PANEL_FILL
-            panel_bg = ("solid",)
-        border = PANEL_EDGE
-        if not dead and draw_raw != "waiting":
-            accent = effort.border_accent(self._effort_display, t)
-            if accent is not None:
-                border = _hex(accent)
+        panel_fill = sv.effort_fill or PANEL_FILL
+        panel_bg: tuple = bg_marker(sv.effort_bg_kind, t)
+        accent = effort.border_accent(sv.chrome_level, t)
+        border = _hex(accent) if accent is not None else PANEL_EDGE
         bars = tuple((b.label, b.pct, _hex(usage.bar_color(b.pct)))
                      for b in usage.usage_view(self._usage, now))
         ring = (None if self._context_pct is None else

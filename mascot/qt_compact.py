@@ -39,12 +39,11 @@ from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QMouseEvent, QPainter, QPainterPath
 from PySide6.QtWidgets import QGraphicsDropShadowEffect, QWidget
 
-from . import config, effective_state, effort, qt_screens, usage
-from .presenter import SessionPresenter, status_line
+from . import config, effort, qt_screens, usage
+from .presenter import _PANEL_FILL_RGB, SessionPresenter, bg_marker, status_line
 from .qt_card import (
     PANEL_EDGE,
     PANEL_FILL,
-    PERMISSION_WAIT_S,
     RAINBOW_WAVELENGTH_PX,
     RING_STROKE,
     RING_TRACK,
@@ -53,7 +52,6 @@ from .qt_card import (
     USAGE_LABEL_FG,
     USAGE_PCT_FG,
     USAGE_TRACK,
-    WORKING_STALL_S,
     _anchor_xy,
     _hex,
     model_label,
@@ -73,66 +71,22 @@ USAGE_BLOCK_H = 40       # the bottom bars block (two thin bars + labels)
 BAR_H = 5
 
 NOTIFY_MAX_CHARS = 34    # inline notify text budget before the ellipsis
-_ROW_TINT_STRENGTH = 0.18   # quiet-level backdrop blend (the CLI's own 18%)
 ANIM_MS = 33             # ~30fps tick; the repaint guard skips unchanged frames
 
-_PANEL_FILL_RGB = (29, 31, 41)      # PANEL_FILL as RGB, for the effort blends
+# _PANEL_FILL_RGB (the base the row effort wash lerps over) is imported from the
+# presenter, which owns the effort-chrome decision (#103).
 _TEXT_FG = "#e8e6ef"
 _MUTED_FG = "#8b8fa3"
 _EMPTY_TEXT = "no sessions"
 
 
 # --- pure row content -----------------------------------------------------------
-def _draw_raw(state: dict[str, Any], now: float) -> str:
-    """The raw to display, with the #52 pending-permission promotion applied —
-    the same pure core the Classic card runs each frame."""
-    ts = state.get("ts")
-    return effective_state.promote_pending_tool(
-        str(state.get("state", "idle")), state.get("tool"),
-        ts if isinstance(ts, (int, float)) else None, now,
-        permission_wait_s=PERMISSION_WAIT_S, working_stall_s=WORKING_STALL_S)
-
-
-# The row's state text is now the presenter's ``status_line`` over the session's
-# SessionView (#101) — the same decision the Classic card's caption reads, so a
-# row and a card can never disagree about what a session is doing. The remaining
-# row helpers below (dim, dot color, effort backdrops) still read the raw dict;
-# later tickets move each onto the view.
-
-
-# The dot color and idle-dimming decisions moved onto the SessionView (#102) —
-# see mascot.presenter (_dot_color + the ``dim`` field). The effort backdrops
-# below still read the raw dict; their view migration is #103.
-
-
-def row_backdrop(state: dict[str, Any], now: float, t: float,
-                 dead_until: float | None = None) -> str | None:
-    """The row's flat effort tint, or ``None`` for the plain panel: the pure
-    ``effort.panel_fill`` static 18% tint for low/medium/high. The two animated
-    levels (xhigh/max) return ``None`` here — :func:`row_bg` owns them with the
-    card's pixel animations (#86). Waiting/dead stay uncontested."""
-    if dead_until is not None or _draw_raw(state, now) in ("waiting", "dead"):
-        return None
-    level = effort.resolve(state.get("effort", ""), effort.settings_effort())
-    if level in ("xhigh", "max"):
-        return None
-    rgb = effort.panel_fill(level, _PANEL_FILL_RGB, t)
-    return None if rgb is None else _hex(rgb)
-
-
-def row_bg(state: dict[str, Any], now: float, t: float,
-           dead_until: float | None = None) -> tuple:
-    """The row's animated-background marker — the card's ``panel_bg`` split at
-    row scale (#86): ``("rainbow", t)`` for max, ``("ripple", t)`` for xhigh,
-    ``("solid",)`` otherwise (waiting/dead stay uncontested, like the tint)."""
-    if dead_until is not None or _draw_raw(state, now) in ("waiting", "dead"):
-        return ("solid",)
-    level = effort.resolve(state.get("effort", ""), effort.settings_effort())
-    if level == "max":
-        return ("rainbow", round(t, 3))
-    if level == "xhigh":
-        return ("ripple", round(t, 3))
-    return ("solid",)
+# Every per-row decision now comes from the session's SessionView (mascot.presenter):
+# the state text (status_line, #101), the dot color and idle dimming (#102), and the
+# effort chrome — the flat quiet tint (``effort_fill``) and the animated background
+# marker (``effort_bg_kind``), with the waiting/dead-uncontested rule applied once for
+# both themes (#103). The window builds each row from that view in :meth:`_row`; the
+# painters below still own the pixel geometry (cell size, the ripple's origin dot).
 
 
 def _has_animated(sessions: dict[str, dict[str, Any]]) -> bool:
@@ -331,26 +285,24 @@ class CompactWindow(QWidget):
     def _tick(self) -> None:
         now = time.time()
         t = now - self._anim_t0
-        # The row's text, dot color and dim all come from the presenter's view now
-        # (#101, #102); the effort backdrops still take dead_until directly (their
-        # view migration is #103). Account-level death (#91) tombstones every row.
-        dead_until = usage.exhausted_until(self._usage, now)
-        rows = tuple(self._row(sid, st, now, t, dead_until)
-                     for sid, st in self.sessions.items())
+        # Every row fact — text, dot, dim, and the effort chrome — comes from the
+        # session view now (#101-#103); account-level death (#91) is baked in through
+        # the presenter's usage-death override, so no dead_until is threaded here.
+        rows = tuple(self._row(sid, st, now, t) for sid, st in self.sessions.items())
         bars = tuple((b.label, b.pct, _hex(usage.bar_color(b.pct)))
                      for b in usage.usage_view(self._usage, now))
         self._panel.show_frame((rows, bars, usage.is_stale(self._usage, now)))
 
-    def _row(self, sid: str, st: dict[str, Any], now: float, t: float,
-             dead_until: float | None) -> tuple:
-        """One row's paint tuple: state text, dot and dim from the session view;
-        the effort backdrops (still dict-derived) and the model / sub-agent / ring
-        trimmings alongside."""
+    def _row(self, sid: str, st: dict[str, Any], now: float, t: float) -> tuple:
+        """One row's paint tuple, all from the session view: state text, dot color,
+        dim, the effort backdrop (flat quiet tint) and animated marker, plus the
+        model / sub-agent / ring trimmings. ``t`` is this panel's animation clock,
+        supplied to the marker (the presenter owns the decision, not the phase)."""
         view = self._session_view(sid, st, now)
         return (sid, status_line(view, notify_max_chars=NOTIFY_MAX_CHARS),
                 view.dot_color, view.dim,
-                row_backdrop(st, now, t, dead_until),
-                row_bg(st, now, t, dead_until),
+                view.effort_fill,
+                bg_marker(view.effort_bg_kind, t),
                 model_label(st.get("model")),
                 len(st.get("subagents") or []),
                 self._context.get(sid))

@@ -245,6 +245,43 @@ def test_dim_only_when_effectively_idle():
     assert p.view(T0 + _CFG.sleep_after_idle_s + 1).dim is True
 
 
+# --- effort chrome (#103) -------------------------------------------------------
+def test_chrome_level_is_the_resolved_effort_but_uncontested():
+    assert _present("working").view(T0, effort_level="high").chrome_level == "high"
+    # Waiting and tombstoned sessions stay uncontested — no effort decoration.
+    assert _present("waiting").view(T0, effort_level="max").chrome_level == ""
+    assert _present("dead").view(T0, effort_level="max").chrome_level == ""
+
+
+def test_effort_fill_is_the_quiet_tint_only():
+    for level in ("low", "medium", "high"):
+        v = _present("working").view(T0, effort_level=level)
+        assert v.effort_fill == _hex(
+            effort.panel_fill(level, presenter._PANEL_FILL_RGB, 0.0))
+    # Animated levels paint their own background, so they carry no flat tint.
+    assert _present("working").view(T0, effort_level="max").effort_fill is None
+    assert _present("working").view(T0, effort_level="xhigh").effort_fill is None
+    # No effort, or a contested (waiting) session -> no tint.
+    assert _present("working").view(T0, effort_level="").effort_fill is None
+    assert _present("waiting").view(T0, effort_level="high").effort_fill is None
+
+
+def test_effort_bg_kind_marks_the_animated_levels_uncontested():
+    assert _present("working").view(T0, effort_level="max").effort_bg_kind == "rainbow"
+    assert _present("working").view(T0, effort_level="xhigh").effort_bg_kind == "ripple"
+    assert _present("working").view(T0, effort_level="high").effort_bg_kind == "solid"
+    assert _present("waiting").view(T0, effort_level="max").effort_bg_kind == "solid"
+    assert _present("dead").view(T0, effort_level="max").effort_bg_kind == "solid"
+
+
+def test_bg_marker_carries_the_clock_only_when_animated():
+    # A solid marker drops the clock so the repaint guard stays stable frame to
+    # frame; the animated markers carry the (rounded) clock for the pixel phase.
+    assert presenter.bg_marker("rainbow", 1.2345) == ("rainbow", 1.234)
+    assert presenter.bg_marker("ripple", 2.0) == ("ripple", 2.0)
+    assert presenter.bg_marker("solid", 9.9) == ("solid",)
+
+
 # --- status_line: the Compact row's rich text (composed from the view) ----------
 def _status(st="idle", *, now=T0, chars=34, mood="content", **over):
     return presenter.status_line(_present(st, now=now, **over).view(now, mood=mood),
