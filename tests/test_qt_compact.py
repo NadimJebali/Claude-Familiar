@@ -22,7 +22,6 @@ from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
 
 from mascot import config, effort, qt_compact
-from mascot.qt_card import PERMISSION_WAIT_S, _hex
 
 
 @pytest.fixture(scope="module")
@@ -37,17 +36,9 @@ def _state(sid="s", st="idle", **over):
     return base
 
 
-# --- model_label ---------------------------------------------------------------
-def test_model_label_strips_prefix_and_date():
-    assert qt_compact.model_label("claude-opus-4-8") == "opus-4-8"
-    assert qt_compact.model_label("claude-haiku-4-5-20251001") == "haiku-4-5"
-    assert qt_compact.model_label("") == ""
-    assert qt_compact.model_label("weird") == "weird"
-
-
-# The row's state text (row_text) moved onto the presenter as status_line — its
-# behaviour is covered at that seam in tests/test_session_view.py. What remains
-# here is the row chrome the compact panel still decides from the raw dict.
+# The row content — state text, dot, dim, effort chrome, model tag, sub-agent
+# count, context ring — is all SessionView facts now, covered at that seam in
+# tests/test_session_view.py. What remains here exercises the window itself.
 def test_shadow_lives_on_a_child_panel_not_the_translucent_top_level(app):
     # #88: a QGraphicsDropShadowEffect on a translucent TOP-LEVEL renders once
     # into its cache and then ignores update() on real compositors — the frozen
@@ -59,61 +50,10 @@ def test_shadow_lives_on_a_child_panel_not_the_translucent_top_level(app):
     w.close()
 
 
-def test_rows_read_out_of_usage_when_the_account_is_exhausted():
-    # #91: the usage feed is the reliable death signal (hook payloads carry no
-    # usable limit fields) — a full window tombstones every row until its reset.
-    now = time.time()
-    st = _state(st="working", tool="Edit", file="C:/x/a.py", effort="max")
-    until = now + 3600
-    assert qt_compact.dot_color(st, now, dead_until=until) == qt_compact._hex(
-        config.STATE_COLORS["dead"])
-    assert qt_compact.row_dim(st, now, dead_until=until) is False
-    assert qt_compact.row_backdrop(st, now, 1.0, dead_until=until) is None
-    assert qt_compact.row_bg(st, now, 1.0, dead_until=until) == ("solid",)
-
-
-def test_row_bg_markers_follow_the_effort_level():
-    # #86: the card's panel_bg split at row scale — the animated levels get a
-    # marker for the pixel wash/ripple; everything else stays a solid panel.
-    now = time.time()
-    assert qt_compact.row_bg(_state(st="working", effort="max"), now, 1.234) == ("rainbow", 1.234)
-    assert qt_compact.row_bg(_state(st="working", effort="xhigh"), now, 2.0) == ("ripple", 2.0)
-    assert qt_compact.row_bg(_state(st="working", effort="high"), now, 2.0) == ("solid",)
-    assert qt_compact.row_bg(_state(st="waiting", effort="max"), now, 2.0) == ("solid",)
-
-
-def test_row_backdrop_cedes_animated_levels_to_row_bg():
-    # #86: xhigh/max rows keep the plain base (the overlay owns them); the
-    # static levels keep their flat tint.
-    now = time.time()
-    assert qt_compact.row_backdrop(_state(st="working", effort="max"), now, 1.0) is None
-    assert qt_compact.row_backdrop(_state(st="working", effort="xhigh"), now, 1.0) is None
-    assert qt_compact.row_backdrop(_state(st="working", effort="high"), now, 1.0) is not None
-
-
-# --- row_dim + dot_color ----------------------------------------------------------
-def test_row_dim_only_for_idle():
-    now = time.time()
-    assert qt_compact.row_dim(_state(st="idle"), now) is True
-    for st in ("working", "thinking", "waiting", "dead", "compacting"):
-        assert qt_compact.row_dim(_state(st=st), now) is False
-
-
-def test_dot_color_waiting_and_dead_win_then_effort_then_state(monkeypatch):
-    monkeypatch.setattr(effort, "settings_effort", lambda *a, **k: "")
-    now = time.time()
-    assert qt_compact.dot_color(_state(st="waiting"), now) == \
-        _hex(config.STATE_COLORS["waiting"])
-    assert qt_compact.dot_color(_state(st="dead"), now) == \
-        _hex(config.STATE_COLORS["dead"])
-    # A pending-promoted tool wears the waiting accent too.
-    pending = _state(st="working", tool="Bash", ts=now - PERMISSION_WAIT_S - 5)
-    assert qt_compact.dot_color(pending, now) == _hex(config.STATE_COLORS["waiting"])
-    # Busy with an effort -> the effort tint; without -> the state accent.
-    assert qt_compact.dot_color(_state(st="working", effort="high"), now) == \
-        _hex(effort.TINTS["high"])
-    assert qt_compact.dot_color(_state(st="working"), now) == \
-        _hex(config.STATE_COLORS["working"])
+# The effort chrome (flat quiet tint + the rainbow/ripple markers) and its
+# waiting/dead-uncontested rule now live on the SessionView — covered at that seam
+# in tests/test_session_view.py. The window smoke test below still paints a max /
+# xhigh / waiting / dead spread to prove the panel renders them clean.
 
 
 # --- the window -------------------------------------------------------------------

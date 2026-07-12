@@ -187,6 +187,14 @@ def ripple_color(base: RGB, phase: float) -> RGB:
 _ANIMATED = frozenset({"xhigh", "max"})
 
 
+def is_animated(level: str | None) -> bool:
+    """Whether an effort level animates its background (the ``xhigh`` shimmer /
+    ``max`` rainbow) rather than wearing a static tint. Unknown/blank levels are
+    not animated. The single source of the animated-vs-quiet partition, so callers
+    don't restate the taxonomy."""
+    return normalize(level) in _ANIMATED
+
+
 def border_accent(effort: str | None, t: float) -> RGB | None:
     """A full-strength moving border color for the animated levels (``xhigh``/
     ``max``), or ``None`` for every other level. The card draws it only when the

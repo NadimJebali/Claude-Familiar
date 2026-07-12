@@ -20,11 +20,11 @@ the Classic card's caption reads, so a row and a card can never disagree. The ro
 therefore inherit the whole ladder now (the #52 pending-permission promotion, but
 also the stall watchdog and dozing), not just the promotion they used to.
 
-The rest of the row (dim, dot color, effort backdrops) is decided by pure helpers
-(:func:`row_dim`, :func:`dot_color`, :func:`model_label`) so it is tested without
-painting; the window itself paints directly (no child widgets) behind a
-repaint-guard frame like the card's panel, animating only while an animated
-effort level is on screen. A drag anywhere moves the panel; the tray's
+Every other row fact — the dim flag, the dot color, the effort chrome (flat tint +
+animated marker), the model tag, the sub-agent count, and the context ring — is a
+:class:`~mascot.presenter.SessionView` fact too, so it is tested at that seam without
+painting. The window itself paints directly (no child widgets) behind a repaint-guard
+frame like the card's panel. A drag anywhere moves the panel; the tray's
 show/hide and Quit cover it (wired in ``qt_app``). The pet layer is
 orthogonal: PetService keeps earning and the tray "Pet…" window works — only
 the card-side pet expressions have no home here.
@@ -39,12 +39,17 @@ from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QMouseEvent, QPainter, QPainterPath
 from PySide6.QtWidgets import QGraphicsDropShadowEffect, QWidget
 
-from . import config, effective_state, effort, qt_screens, usage
-from .presenter import SessionPresenter, status_line
+from . import config, effort, qt_screens, usage
+from .presenter import (
+    _PANEL_FILL_RGB,
+    SessionPresenter,
+    bg_marker,
+    status_line,
+    usage_bars,
+)
 from .qt_card import (
     PANEL_EDGE,
     PANEL_FILL,
-    PERMISSION_WAIT_S,
     RAINBOW_WAVELENGTH_PX,
     RING_STROKE,
     RING_TRACK,
@@ -53,10 +58,7 @@ from .qt_card import (
     USAGE_LABEL_FG,
     USAGE_PCT_FG,
     USAGE_TRACK,
-    WORKING_STALL_S,
     _anchor_xy,
-    _hex,
-    model_label,
 )
 
 # --- geometry -----------------------------------------------------------------
@@ -73,94 +75,22 @@ USAGE_BLOCK_H = 40       # the bottom bars block (two thin bars + labels)
 BAR_H = 5
 
 NOTIFY_MAX_CHARS = 34    # inline notify text budget before the ellipsis
-_ROW_TINT_STRENGTH = 0.18   # quiet-level backdrop blend (the CLI's own 18%)
 ANIM_MS = 33             # ~30fps tick; the repaint guard skips unchanged frames
 
-_PANEL_FILL_RGB = (29, 31, 41)      # PANEL_FILL as RGB, for the effort blends
+# _PANEL_FILL_RGB (the base the row effort wash lerps over) is imported from the
+# presenter, which owns the effort-chrome decision (#103).
 _TEXT_FG = "#e8e6ef"
 _MUTED_FG = "#8b8fa3"
 _EMPTY_TEXT = "no sessions"
 
 
 # --- pure row content -----------------------------------------------------------
-def _draw_raw(state: dict[str, Any], now: float) -> str:
-    """The raw to display, with the #52 pending-permission promotion applied —
-    the same pure core the Classic card runs each frame."""
-    ts = state.get("ts")
-    return effective_state.promote_pending_tool(
-        str(state.get("state", "idle")), state.get("tool"),
-        ts if isinstance(ts, (int, float)) else None, now,
-        permission_wait_s=PERMISSION_WAIT_S, working_stall_s=WORKING_STALL_S)
-
-
-# The row's state text is now the presenter's ``status_line`` over the session's
-# SessionView (#101) — the same decision the Classic card's caption reads, so a
-# row and a card can never disagree about what a session is doing. The remaining
-# row helpers below (dim, dot color, effort backdrops) still read the raw dict;
-# later tickets move each onto the view.
-
-
-def row_dim(state: dict[str, Any], now: float,
-            dead_until: float | None = None) -> bool:
-    """Idle rows dim (the Rust widget's trick); every active state reads full —
-    and so does the tombstone (#91), which must not whisper."""
-    if dead_until is not None:
-        return False
-    return _draw_raw(state, now) == "idle"
-
-
-def dot_color(state: dict[str, Any], now: float,
-              dead_until: float | None = None) -> str:
-    """The activity dot: attention states win (waiting — real or promoted — and
-    dead wear their accents), then the resolved effort tint, then the state
-    accent (unknown states read as idle grey)."""
-    if dead_until is not None:
-        return _hex(config.STATE_COLORS["dead"])
-    raw = _draw_raw(state, now)
-    if raw in ("waiting", "dead"):
-        return _hex(config.STATE_COLORS[raw])
-    level = effort.resolve(state.get("effort", ""), effort.settings_effort())
-    if level:
-        return _hex(effort.TINTS[level])
-    return _hex(config.STATE_COLORS.get(raw, config.STATE_COLORS["idle"]))
-
-
-def row_backdrop(state: dict[str, Any], now: float, t: float,
-                 dead_until: float | None = None) -> str | None:
-    """The row's flat effort tint, or ``None`` for the plain panel: the pure
-    ``effort.panel_fill`` static 18% tint for low/medium/high. The two animated
-    levels (xhigh/max) return ``None`` here — :func:`row_bg` owns them with the
-    card's pixel animations (#86). Waiting/dead stay uncontested."""
-    if dead_until is not None or _draw_raw(state, now) in ("waiting", "dead"):
-        return None
-    level = effort.resolve(state.get("effort", ""), effort.settings_effort())
-    if level in ("xhigh", "max"):
-        return None
-    rgb = effort.panel_fill(level, _PANEL_FILL_RGB, t)
-    return None if rgb is None else _hex(rgb)
-
-
-def row_bg(state: dict[str, Any], now: float, t: float,
-           dead_until: float | None = None) -> tuple:
-    """The row's animated-background marker — the card's ``panel_bg`` split at
-    row scale (#86): ``("rainbow", t)`` for max, ``("ripple", t)`` for xhigh,
-    ``("solid",)`` otherwise (waiting/dead stay uncontested, like the tint)."""
-    if dead_until is not None or _draw_raw(state, now) in ("waiting", "dead"):
-        return ("solid",)
-    level = effort.resolve(state.get("effort", ""), effort.settings_effort())
-    if level == "max":
-        return ("rainbow", round(t, 3))
-    if level == "xhigh":
-        return ("ripple", round(t, 3))
-    return ("solid",)
-
-
-def _has_animated(sessions: dict[str, dict[str, Any]]) -> bool:
-    """Whether any row wears an animated effort level (xhigh/max) — if not, the
-    frame signature drops the clock and the panel repaints only on data changes."""
-    fallback = effort.settings_effort()
-    return any(effort.resolve(st.get("effort", ""), fallback) in ("xhigh", "max")
-               for st in sessions.values())
+# Every per-row decision now comes from the session's SessionView (mascot.presenter):
+# the state text (status_line, #101), the dot color and idle dimming (#102), and the
+# effort chrome — the flat quiet tint (``effort_fill``) and the animated background
+# marker (``effort_bg_kind``), with the waiting/dead-uncontested rule applied once for
+# both themes (#103). The window builds each row from that view in :meth:`_row`; the
+# painters below still own the pixel geometry (cell size, the ripple's origin dot).
 
 
 # --- the panel (the child that actually paints) --------------------------------------
@@ -222,9 +152,9 @@ class _CompactPanel(QWidget):
                 p.drawText(QRectF(panel.x(), top, PANEL_W, ROW_H),
                            Qt.AlignmentFlag.AlignCenter, _EMPTY_TEXT)
                 top += ROW_H
-            for _sid, text, dot, dim, backdrop, bg, model, subs, ctx in rows:
+            for _sid, text, dot, dim, backdrop, bg, model, subs, ring in rows:
                 _paint_row(p, panel.x(), top, text, dot, dim, backdrop, bg,
-                           model, subs, ctx)
+                           model, subs, ring)
                 top += ROW_H
             _paint_usage(p, panel.x(), top, bars, stale)
         finally:
@@ -293,6 +223,7 @@ class CompactWindow(QWidget):
             presenter = SessionPresenter(
                 raw=str(state.get("state", "idle")), now=now, celebrates=False)
             presenter.adopt_usage(self._usage)
+            presenter.adopt_context(self._context.get(sid))
             self._presenters[sid] = presenter
         return presenter
 
@@ -315,8 +246,11 @@ class CompactWindow(QWidget):
         self._tick()
 
     def set_context(self, results: dict[str, float]) -> None:
-        """Adopt the per-session context percentages for the row rings."""
+        """Adopt the per-session context percentages; each presenter owns its own
+        ring gauge fact, so feed them (a session with no result yet gets None)."""
         self._context = dict(results)
+        for sid, presenter in self._presenters.items():
+            presenter.adopt_context(results.get(sid))
         self._tick()
 
     # --- geometry ----------------------------------------------------------------
@@ -340,32 +274,40 @@ class CompactWindow(QWidget):
         self.move(*_anchor_xy(area, self.width(), self.height(), 0))
 
     # --- animation: repaint only when the frame really changed --------------------
-    def _row_text(self, sid: str, state: dict[str, Any], now: float) -> str:
-        """The row's state text from the session's presenter (#101). Robust against
-        a usage/context push landing before the first set_sessions: a missing
-        presenter is created on the spot (it just hasn't adopted its full state yet)."""
-        return status_line(self._presenter_for(sid, state, now).view(now),
-                           notify_max_chars=NOTIFY_MAX_CHARS)
+    def _session_view(self, sid: str, state: dict[str, Any], now: float):
+        """The session's SessionView. The card feeds the presenter the global effort
+        fallback (reading it touches settings, so it stays adapter-side); the view
+        resolves the session's level over it and drives the dot + effort chrome.
+        Robust against a usage/context push landing before the first set_sessions:
+        a missing presenter is created on the spot."""
+        return self._presenter_for(sid, state, now).view(
+            now, effort_fallback=effort.settings_effort())
 
     def _tick(self) -> None:
         now = time.time()
-        # Account-level death (#91): a full usage window tombstones every row. The
-        # row text gets the override through its presenter; the other row helpers
-        # still take dead_until directly (their view migration is a later ticket).
-        dead_until = usage.exhausted_until(self._usage, now)
-        rows = tuple(
-            (sid, self._row_text(sid, st, now), dot_color(st, now, dead_until),
-             row_dim(st, now, dead_until),
-             row_backdrop(st, now, now - self._anim_t0, dead_until),
-             row_bg(st, now, now - self._anim_t0, dead_until),
-             model_label(st.get("model")),
-             len(st.get("subagents") or []),
-             self._context.get(sid))
-            for sid, st in self.sessions.items()
-        )
-        bars = tuple((b.label, b.pct, _hex(usage.bar_color(b.pct)))
-                     for b in usage.usage_view(self._usage, now))
+        t = now - self._anim_t0
+        # Every row fact — text, dot, dim, and the effort chrome — comes from the
+        # session view now (#101-#103); account-level death (#91) is baked in through
+        # the presenter's usage-death override, so no dead_until is threaded here.
+        rows = tuple(self._row(sid, st, now, t) for sid, st in self.sessions.items())
+        # The bottom bars are account-global (drawn once, not per-row), so they use
+        # the shared usage_bars derivation directly rather than any one row's view.
+        bars = usage_bars(self._usage, now)
         self._panel.show_frame((rows, bars, usage.is_stale(self._usage, now)))
+
+    def _row(self, sid: str, st: dict[str, Any], now: float, t: float) -> tuple:
+        """One row's paint tuple, all from the session view: state text, dot color,
+        dim, the effort backdrop (flat quiet tint) and animated marker, the context
+        ring, plus the model / sub-agent trimmings. ``t`` is this panel's animation
+        clock, supplied to the marker (the presenter owns the decision, not the phase)."""
+        view = self._session_view(sid, st, now)
+        return (sid, status_line(view, notify_max_chars=NOTIFY_MAX_CHARS),
+                view.dot_color, view.dim,
+                view.effort_fill,
+                bg_marker(view.effort_bg_kind, t),
+                view.model_tag,
+                view.subagent_count,
+                view.ring)
 
     # --- drag anywhere ---------------------------------------------------------------
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -389,7 +331,7 @@ class CompactWindow(QWidget):
 # --- pure painters (called by _CompactPanel with panel-local coordinates) ----------
 def _paint_row(p: QPainter, px: float, top: float, text: str, dot: str,
                dim: bool, backdrop: str | None, bg: tuple, model: str, subs: int,
-               ctx: float | None) -> None:
+               ring: tuple[float, str] | None) -> None:
     row = QRectF(px + 6, top + 2, PANEL_W - 12, ROW_H - 4)
     if backdrop is not None:
         bpath = QPainterPath()
@@ -412,19 +354,20 @@ def _paint_row(p: QPainter, px: float, top: float, text: str, dot: str,
     p.setBrush(Qt.BrushStyle.NoBrush)
 
     right = row.right() - 8
-    if ctx is not None:                       # the small per-row context ring
-        ring = QRectF(right - RING_D, cy - RING_D / 2, RING_D, RING_D)
+    if ring is not None:                      # the small per-row context ring
+        pct, color = ring
+        ring_rect = QRectF(right - RING_D, cy - RING_D / 2, RING_D, RING_D)
         pen = p.pen()
         pen.setStyle(Qt.PenStyle.SolidLine)
         pen.setWidth(RING_STROKE - 1)
         pen.setColor(QColor(RING_TRACK))
         p.setPen(pen)
-        p.drawEllipse(ring)
-        span = round(max(0.0, min(100.0, ctx)) / 100.0 * 360.0 * 16)
+        p.drawEllipse(ring_rect)
+        span = round(max(0.0, min(100.0, pct)) / 100.0 * 360.0 * 16)
         if span > 0:
-            pen.setColor(QColor(_hex(usage.bar_color(ctx))))
+            pen.setColor(QColor(color))
             p.setPen(pen)
-            p.drawArc(ring, 90 * 16, -span)
+            p.drawArc(ring_rect, 90 * 16, -span)
         right -= RING_D + 8
 
     p.setPen(QColor(_MUTED_FG))
