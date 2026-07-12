@@ -1,0 +1,244 @@
+"""Tests for the session presenter — the one place that decides what a session
+shows (issue #101).
+
+The presenter owns the effective-state ladder (the overlay is its implementation
+detail) and composes, in order, the pending-tool promotion, the usage-death
+override, the raw clocks, the ladder, the display face, and the caption. Both
+themes render their state text from the resulting ``SessionView``; the Classic
+card reads ``view.caption`` and the Compact row builds ``status_line(view)``.
+
+Pure and clock-injected: every case here runs with synthetic state dicts and an
+explicit ``now`` — no QApplication, no widget. This is the seam the old
+qt_compact ``row_text`` unit tests migrated onto.
+"""
+from __future__ import annotations
+
+from mascot import presenter
+from mascot.overlay import OverlayConfig
+
+# A known threshold set so the time-based ladder is deterministic regardless of
+# the machine's settings.json (mirrors the effective_state suite's explicit args).
+_CFG = OverlayConfig(
+    dizzy_duration_s=2.0,
+    celebrate_duration_s=1.5,
+    blink_duration_s=0.12,
+    sleep_after_idle_s=90.0,
+    shake_after_s=30.0,
+    permission_wait_s=45.0,
+    thinking_stall_s=180.0,
+    working_stall_s=270.0,
+)
+
+T0 = 1_000_000.0
+
+
+def _state(st="idle", **over):
+    base = {"session_id": "s", "state": st, "ts": T0,
+            "subagents": [], "schema_version": 1}
+    base.update(over)
+    return base
+
+
+def _present(st="idle", *, now=T0, celebrates=True, **over):
+    """A presenter that has adopted one state at ``now`` (the common setup)."""
+    p = presenter.SessionPresenter(_CFG, raw=st, now=now, celebrates=celebrates)
+    p.adopt_state(_state(st, **over), now)
+    return p
+
+
+# --- caption: the canonical short word per face (what the Classic card shows) --
+def test_caption_names_the_state():
+    assert _present("idle").view(T0).caption == "idle"
+    assert _present("thinking").view(T0).caption == "thinking…"
+    assert _present("working").view(T0).caption == "working…"
+    assert _present("compacting").view(T0).caption == "tidying memories…"
+    assert _present("waiting").view(T0).caption == "needs you!"
+    assert _present("dead").view(T0).caption == "out of usage"
+
+
+def test_caption_for_working_is_stable_across_tools():
+    # The per-tool face changes; the caption does not (the tool shows on the
+    # dim info line / the compact status, not the caption).
+    for tool in ("Read", "Edit", "Bash", "WebFetch"):
+        assert _present("working", tool=tool).view(T0).caption == "working…"
+
+
+def test_caption_is_planning_while_busy_in_plan_mode():
+    assert _present("thinking", permission_mode="plan").view(T0).caption == "planning…"
+    assert _present(
+        "working", tool="Read", permission_mode="plan").view(T0).caption == "planning…"
+
+
+# --- the display face -----------------------------------------------------------
+def test_face_varies_working_by_tool():
+    assert _present("working", tool="Read").view(T0).face == "working_read"
+    assert _present("working", tool="Edit").view(T0).face == "working_edit"
+    assert _present("working", tool="Bash").view(T0).face == "working_run"
+    assert _present("working", tool=None).view(T0).face == "working"
+
+
+def test_face_shows_stumble_over_the_idle_family():
+    p = _present("idle", stumbled=True)
+    assert p.view(T0).face == "stumble"
+    # Past the stumble window it settles to the idle family again.
+    assert p.view(T0 + presenter.STUMBLE_FACE_S + 1).face == "idle"
+
+
+def test_idle_face_reflects_the_pet_mood():
+    assert _present("idle").view(T0, mood="hungry").face == "idle_hungry"
+    assert _present("idle").view(T0, mood="happy").face == "idle_happy"
+    assert _present("idle").view(T0, mood="hungry").caption == "idle"   # caption unchanged
+
+
+# --- composition order: the usage-death override outranks everything ------------
+def test_usage_exhaustion_tombstones_and_carries_the_reset():
+    reset = T0 + 3600
+    p = _present("working", tool="Edit")
+    p.adopt_usage({"ts": T0, "five_hour": {"used_percentage": 100.0,
+                                            "resets_at": reset}})
+    view = p.view(T0)
+    assert view.is_dead is True
+    assert view.draw_raw == "dead"
+    assert view.reset_at == reset
+    assert view.caption == "out of usage"
+
+
+def test_a_passed_reset_auto_revives():
+    p = _present("working")
+    p.adopt_usage({"ts": T0, "five_hour": {"used_percentage": 100.0,
+                                           "resets_at": T0 - 60}})
+    view = p.view(T0)
+    assert view.is_dead is False
+    assert view.draw_raw == "working"
+
+
+def test_hook_death_tombstones_without_a_reset_time():
+    # A StopFailure-driven "dead" with no usage exhaustion: dead, but no reset.
+    view = _present("dead").view(T0)
+    assert view.is_dead is True
+    assert view.reset_at is None
+    assert view.caption == "out of usage"
+
+
+# --- composition order: the pending-permission promotion ------------------------
+def test_a_long_pending_tool_promotes_to_waiting():
+    p = _present("working", tool="Bash", ts=T0 - _CFG.permission_wait_s - 5)
+    view = p.view(T0)
+    assert view.draw_raw == "waiting"
+    assert view.face == "waiting"
+    assert view.caption == "needs you!"
+
+
+def test_a_fresh_tool_is_left_working():
+    view = _present("working", tool="Bash", ts=T0).view(T0)
+    assert view.draw_raw == "working"
+    assert view.face == "working_run"
+
+
+# --- composition order: the stall watchdog (the shipped Compact drift fix) ------
+def test_a_wedged_working_turn_falls_back_to_idle():
+    # A busy turn with no closing hook, gone stale past the working grace, must
+    # read idle — not "working…" forever. Both themes inherit this now.
+    p = _present("working", ts=T0)
+    view = p.view(T0 + _CFG.working_stall_s + 1)
+    assert view.effective == "idle"
+    assert view.caption == "idle"
+
+
+def test_a_wedged_thinking_turn_falls_back_to_idle():
+    # thinking gets the shorter grace; past it, the same idle fallback.
+    p = _present("thinking", ts=T0)
+    assert p.view(T0 + _CFG.thinking_stall_s + 1).caption == "idle"
+
+
+def test_a_wedged_compacting_turn_falls_back_to_idle():
+    # compaction may emit no closing hook of its own, so it takes the thinking
+    # grace and falls to idle the same way (rather than freezing on "tidying…").
+    p = _present("compacting", ts=T0)
+    assert p.view(T0 + _CFG.thinking_stall_s + 1).caption == "idle"
+
+
+def test_a_long_idle_session_sleeps():
+    p = _present("idle", now=T0)
+    view = p.view(T0 + _CFG.sleep_after_idle_s + 1)
+    assert view.effective == "sleeping"
+    assert view.caption == "sleeping…"
+
+
+# --- gestures: celebrate / dizzy / blink flow through the presenter -------------
+def test_finishing_a_turn_celebrates_when_enabled():
+    p = presenter.SessionPresenter(_CFG, raw="working", now=T0, celebrates=True)
+    p.adopt_state(_state("idle"), T0)
+    assert p.view(T0).effective == "happy"
+
+
+def test_finishing_a_turn_does_not_celebrate_when_disabled():
+    # The Compact rows construct with celebrates=False, so they stay still.
+    p = presenter.SessionPresenter(_CFG, raw="working", now=T0, celebrates=False)
+    p.adopt_state(_state("idle"), T0)
+    assert p.view(T0).effective != "happy"
+
+
+def test_note_dizzy_shows_the_dizzy_face_until_it_expires():
+    p = _present("idle")
+    p.note_dizzy(T0)
+    assert p.is_dizzy(T0) is True
+    assert p.view(T0).effective == "dizzy"
+    assert p.view(T0 + _CFG.dizzy_duration_s + 0.1).effective != "dizzy"
+
+
+def test_note_blink_shows_a_blink_while_idle():
+    p = _present("idle")
+    p.note_blink(T0)
+    assert p.view(T0).face == "idle_blink"
+
+
+def test_waiting_elapsed_tracks_the_attention_clock():
+    p = _present("idle")
+    assert p.waiting_elapsed(T0) is None
+    p.adopt_state(_state("waiting"), T0)
+    p.view(T0)                                   # note_raw starts the waiting clock
+    assert p.waiting_elapsed(T0 + 5) == 5
+
+
+# --- status_line: the Compact row's rich text (composed from the view) ----------
+def _status(st="idle", *, now=T0, chars=34, mood="content", **over):
+    return presenter.status_line(_present(st, now=now, **over).view(now, mood=mood),
+                                 notify_max_chars=chars)
+
+
+def test_status_line_names_the_state_and_tool():
+    assert _status("working", tool="Edit") == "working · Edit"
+    assert _status("working", tool=None) == "working…"
+    assert _status("thinking") == "thinking…"
+    assert _status("thinking", permission_mode="plan") == "planning…"
+    assert _status("compacting") == "tidying memories…"
+    assert _status("idle") == "idle"
+
+
+def test_status_line_carries_the_working_file():
+    assert _status("working", tool="Edit",
+                   file=r"C:\repo\mascot\qt_app.py") == "working · Edit · qt_app.py"
+    assert _status("working", tool=None,
+                   file=r"C:\repo\mascot\qt_app.py") == "working · qt_app.py"
+
+
+def test_status_line_waiting_carries_the_notify_inline_truncated():
+    text = _status("waiting", notify={"message": "Allow this Bash command?" * 3,
+                                       "type": "permission"})
+    assert text.startswith("needs you! · Allow this Bash command")
+    assert len(text) <= len("needs you! · ") + 34 + 1     # +ellipsis
+
+
+def test_status_line_out_of_usage_with_and_without_a_reset():
+    p = _present("working")
+    p.adopt_usage({"ts": T0, "five_hour": {"used_percentage": 100.0,
+                                           "resets_at": T0 + 3600}})
+    assert presenter.status_line(p.view(T0), notify_max_chars=34).startswith(
+        "out of usage · resets ")
+    assert _status("dead") == "out of usage"     # hook death, no reset
+
+
+def test_status_line_promotes_a_long_pending_tool():
+    assert _status("working", tool="Bash",
+                   ts=T0 - _CFG.permission_wait_s - 5) == "needs you!"

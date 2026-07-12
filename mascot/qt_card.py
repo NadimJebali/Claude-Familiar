@@ -4,11 +4,12 @@ One frameless, per-pixel-translucent, always-on-top window per live Claude
 session. Real ``WA_TranslucentBackground`` alpha gives a rounded panel with a
 painted drop shadow on Windows **and** composited Linux, with no chroma-key hack.
 
-The displayed face is computed by reusing the pure cores the Tk card uses — so
-the port inherits their tested behaviour rather than re-deriving it:
-``Overlay`` + ``effective_state`` layer dozing, the idle blink, the celebrate
-hop, dizzy, the waiting glare, per-tool working faces, plan-mode and the stumble
-over the raw hook state. The face is a cached (integer-scaled, crisp) pixmap from the
+What the card shows is decided by the :class:`~mascot.presenter.SessionPresenter`
+(issue #101): it owns the effective-state ladder — dozing, the idle blink, the
+celebrate hop, dizzy, the waiting glare, per-tool working faces, plan-mode and the
+stumble, plus the usage-death override — and hands back a ``SessionView`` the card
+paints. The Compact rows read the same seam, so both themes agree by construction.
+The face is a cached (integer-scaled, crisp) pixmap from the
 ``SpriteRenderer`` seam, re-rendered only when the face (or the pet's look) changes;
 a ~60fps timer drives sub-pixel motion, faces **crossfade** rather than snap, and an
 evolution **scales** the creature up — all transform-based over the cached pixmaps
@@ -64,7 +65,6 @@ from PySide6.QtWidgets import (
 
 from . import (
     config,
-    effective_state,
     effort,
     osplatform,
     particles,
@@ -74,11 +74,22 @@ from . import (
     sprite_pixel,
     usage,
 )
-from .overlay import Overlay, OverlayConfig
 from .pet_view import PetView, pet_view
 from .pixel_grid import grid_cells
+from .presenter import (
+    BLINK_DURATION_S,
+    PERMISSION_WAIT_S,
+    WORKING_STALL_S,
+    SessionPresenter,
+    file_basename,
+)
 from .qt_popups import QtBubble, QtStatsTooltip
 from .sprite_qt import SpriteRenderer, SpriteSpec
+
+# ``PERMISSION_WAIT_S`` / ``WORKING_STALL_S`` / ``file_basename`` are re-exported
+# from the presenter here so the Compact theme and the tests can keep importing
+# them from ``qt_card`` while the decision itself now lives in ``mascot.presenter``.
+__all__ = ["PERMISSION_WAIT_S", "WORKING_STALL_S", "QtCard", "file_basename"]
 
 # --- card geometry (mirrors the Tk card's authored "small" size) ------------
 CARD_W = 158
@@ -153,20 +164,13 @@ BOB_PERIOD_S = 2.0
 CROSSFADE_S = 0.18      # fast enough to never mask a real state change
 STAGE_SCALE_S = 0.6     # a stage change grows the creature over this
 STAGE_SCALE_START = 0.5  # ... from half size up to full
-BLINK_DURATION_S = 0.12
+# The blink cadence: ``BLINK_DURATION_S`` (the overlay window, imported from the
+# presenter) plus a random gap. Scheduling the blink is a card-only rhythm — the
+# presenter is only ever told a blink happened (``note_blink``), so a Compact row
+# never blinks. The dizzy/celebrate/stumble/stall/permission thresholds moved onto
+# the presenter with the ladder it now owns.
 BLINK_MIN_GAP_S = 4.0
 BLINK_MAX_GAP_S = 7.0
-DIZZY_DURATION_S = 2.0
-CELEBRATE_DURATION_S = 1.5
-STUMBLE_FACE_S = 8.0
-THINKING_STALL_S = 180.0
-WORKING_STALL_S = 270.0
-# A main-thread tool left pending this long with no closing PostToolUse is most
-# likely blocked on a permission prompt ("allow this command?"), which the VS Code
-# extension emits no hook for — so the card reads it as "needs you". A heuristic:
-# a genuinely long tool (a big build) trips it too. First-pass magnitude, tunable;
-# kept well under WORKING_STALL_S so a truly wedged turn still falls to idle.
-PERMISSION_WAIT_S = 45.0
 PET_TAP_MAX_DIST = 5    # a press+release moving <= this (px) is a pet tap, not a drag
 
 # Shake-to-dizzy easter egg: enough rapid drag reversals within the window make the
@@ -174,17 +178,6 @@ PET_TAP_MAX_DIST = 5    # a press+release moving <= this (px) is a pet tap, not 
 SHAKE_MIN_DIST = 7      # a drag sample must move at least this (px) to count
 SHAKE_WINDOW_S = 0.7    # reversals must fall within this window
 SHAKE_REVERSALS = 4     # this many rapid reversals -> dizzy
-
-_OVERLAY_CONFIG = OverlayConfig(
-    dizzy_duration_s=DIZZY_DURATION_S,
-    celebrate_duration_s=CELEBRATE_DURATION_S,
-    blink_duration_s=BLINK_DURATION_S,
-    sleep_after_idle_s=config.SLEEP_AFTER_IDLE_S,
-    shake_after_s=config.SHAKE_AFTER_S,
-    permission_wait_s=PERMISSION_WAIT_S,
-    thinking_stall_s=THINKING_STALL_S,
-    working_stall_s=WORKING_STALL_S,
-)
 
 # Attention shake: while an attention/permission prompt sits unanswered, the whole
 # card jostles after the grace window, growing steadily more frantic the longer it's
@@ -248,20 +241,6 @@ def _particle_cells(name: str, color: tuple[int, int, int] | None
         return sprite_pixel._ZED, {"Z": hexed}
     return sprite_pixel._HEART, {"O": hexed}
 
-# Caption per displayed face (mirrors the Tk STATE_CAPTIONS); unknown -> the raw.
-_CAPTIONS = {
-    "idle": "idle", "idle_blink": "idle", "idle_happy": "idle", "idle_hungry": "idle",
-    "idle_sad": "idle", "idle_tired": "idle",
-    "thinking": "thinking…",
-    "working": "working…", "working_read": "working…", "working_edit": "working…",
-    "working_run": "working…", "working_web": "working…",
-    "planning": "planning…", "stumble": "oops…", "compacting": "tidying memories…",
-    "waiting": "needs you!", "waiting_angry": "needs you!",
-    "sleeping": "sleeping…", "dizzy": "whoa…", "happy": "yay!",
-    "dead": "out of usage",
-}
-
-
 def _hex(rgb: tuple[int, int, int]) -> str:
     # Clamp + round so a faded particle color (lerped floats) hexes cleanly too.
     r, g, b = (max(0, min(255, round(c))) for c in rgb)
@@ -301,14 +280,6 @@ def _paw_pixmap(px: int) -> QPixmap:
 # working file, the model tag alone otherwise.
 INFO_FG = "#9aa0ba"
 INFO_Y = 149                        # below the caption (132+text), above the badges (176)
-
-
-def file_basename(path: object) -> str:
-    """The display name of a stamped working file — the final path segment
-    (both separators handled; hooks write native paths)."""
-    if not isinstance(path, str) or not path:
-        return ""
-    return path.replace("\\", "/").rsplit("/", 1)[-1]
 
 
 def model_label(model: str | None) -> str:
@@ -598,7 +569,12 @@ class QtCard(QWidget):
         now = time.time()
         self._state = dict(state)
         self._raw = str(state.get("state", "idle"))
-        self._overlay = Overlay(_OVERLAY_CONFIG, raw=self._raw, now=now)
+        # The session presenter owns the effective-state ladder (and the overlay
+        # timers behind it); the card reads its SessionView each render. A Classic
+        # card celebrates a finished turn — the Compact rows don't (they build
+        # their presenter with celebrates=False).
+        self._presenter = SessionPresenter(raw=self._raw, now=now, celebrates=True)
+        self._presenter.adopt_state(state, now)
         self._anim_t0 = now
         self._next_blink = now + random.uniform(BLINK_MIN_GAP_S, BLINK_MAX_GAP_S)
         self._face: str | None = None
@@ -676,15 +652,13 @@ class QtCard(QWidget):
     def set_state(self, state: dict) -> None:
         """Adopt a fresh hook state, celebrating a just-finished turn."""
         now = time.time()
-        prev_raw = self._raw
         self._state = dict(state)
-        raw = str(state.get("state", "idle"))
-        if effective_state.should_celebrate(prev_raw, raw, bool(state.get("stumbled"))):
-            self._overlay.note_celebrate(now)
-        self._raw = raw
+        self._raw = str(state.get("state", "idle"))
+        # The presenter detects the clean finish and notes the celebrate; its
+        # note_raw (inside view()) starts the waiting clock even between hook
+        # states, so the pending-permission heuristic still engages.
+        self._presenter.adopt_state(state, now)
         self._effort_display = self._resolve_effort()
-        # note_raw runs inside _render off the *promoted* raw (below), so the pending
-        # permission heuristic starts the waiting clock even between hook states.
         self._render(now)
         self._sync_bubble(state.get("notify"))
 
@@ -703,6 +677,7 @@ class QtCard(QWidget):
         repaints if they changed. Independent of the pet toggle — usage is Claude status,
         so simple-mode cards show it too. Cheap; only stores the data."""
         self._usage = snapshot
+        self._presenter.adopt_usage(snapshot)   # drives the death override
         self._render(time.time())
 
     def set_context(self, pct: float | None) -> None:
@@ -731,14 +706,14 @@ class QtCard(QWidget):
         """Play the happy hop + hearts — the host calls this when the pet is cared for
         (fed or played with in the Pet window), so care reads the same as an on-card pet."""
         now = time.time()
-        self._overlay.note_celebrate(now)
+        self._presenter.note_celebrate(now)
         self._emit_hearts(now)
         self._render(now)
 
     def _tick(self) -> None:
         now = time.time()
         if self._raw == "idle" and now >= self._next_blink:
-            self._overlay.note_blink(now)
+            self._presenter.note_blink(now)
             self._next_blink = (now + BLINK_DURATION_S
                                 + random.uniform(BLINK_MIN_GAP_S, BLINK_MAX_GAP_S))
         self._render(now)
@@ -752,33 +727,29 @@ class QtCard(QWidget):
             self._reposition_tooltip()
 
     def _render(self, now: float) -> None:
-        ts = self._state.get("ts")
-        # Apply the pending-tool -> waiting heuristic, then drive the waiting clock,
-        # face and shake off this promoted raw. Recomputed every frame because a
-        # pending permission prompt sends no new hook state to cross the threshold on.
-        draw_raw = self._overlay.promote(self._raw, now, ts=ts, tool=self._state.get("tool"))
-        # Account-level death (#91): the usage feed is the reliable limit signal
-        # (real StopFailure payloads carry no usable error_type; VS Code emits no
-        # limit Notification) — a full window tombstones every session until its
-        # reset, and a passed reset revives automatically.
-        self._dead_until = usage.exhausted_until(self._usage, now)
-        if self._dead_until is not None:
-            draw_raw = "dead"
+        # The presenter owns the whole decision now: the pending-tool promotion, the
+        # usage-death override, the raw clocks, the ladder, and the display face +
+        # caption. The card reads its SessionView and paints. (Accent, effort chrome,
+        # usage bars and the ring still compute inline below — later tickets move
+        # each onto the view.) The pet look is card-side: the sprite's stage/hat and
+        # the mood that tints the idle face.
+        pet_look = self._effective_pet_view()
+        sv = self._presenter.view(now, mood=pet_look.mood)
+        draw_raw = sv.draw_raw
         self._draw_raw = draw_raw
-        self._overlay.note_raw(draw_raw, now)
-        view = self._effective_pet_view()
-        eff = self._overlay.effective(draw_raw, now, ts=ts, mood=view.mood)
+        self._dead_until = sv.reset_at
+        eff = sv.effective
         self._eff = eff
-        face = self._display_face(eff, now)
+        face = sv.face
         self._face = face
         # The drawn sprite depends on the face AND the pet's look, so re-render the
         # pixmap when either changes (a re-dress or evolution, not just a new face).
-        key = (face, view, draw_raw == "dead")
+        key = (face, pet_look, draw_raw == "dead")
         if key != self._pixmap_key:
             self._pixmap_key = key
             self._adopt_pixmap(
-                self._pixmap_for(face, view, dead=draw_raw == "dead"),
-                view.stage, now)
+                self._pixmap_for(face, pet_look, dead=draw_raw == "dead"),
+                pet_look.stage, now)
 
         # Sub-pixel bob (float), the face crossfade, and the evolution scale-up.
         if eff == "happy":                      # an excited celebrate hop, not the idle bob
@@ -822,7 +793,7 @@ class QtCard(QWidget):
         if self._dead_until is not None:     # the reset time replaces file · model
             info = "resets " + time.strftime("%H:%M", time.localtime(self._dead_until))
 
-        self._panel.show_art(self._pixmap, _CAPTIONS.get(face, self._raw), bob,
+        self._panel.show_art(self._pixmap, sv.caption, bob,
                              prev=self._prev_pixmap, fade=fade, scale=self._scale_now(now),
                              badge=badge, badge_count=count,
                              panel_fill=panel_fill, border=border, bars=bars,
@@ -854,15 +825,6 @@ class QtCard(QWidget):
             self._scale_start = None
             return 1.0
         return STAGE_SCALE_START + (1.0 - STAGE_SCALE_START) * _ease_out_cubic(t)
-
-    def _display_face(self, eff: str, now: float) -> str:
-        ts = self._state.get("ts")
-        stumbled_recent = (bool(self._state.get("stumbled"))
-                           and ts is not None and (now - float(ts)) < STUMBLE_FACE_S)
-        return effective_state.display_face(
-            eff, tool=self._state.get("tool"),
-            permission_mode=str(self._state.get("permission_mode", "")),
-            stumbled_recent=stumbled_recent)
 
     def _badge_pixmap(self) -> QPixmap:
         """The shared sub-agent mini-mascot: a small ``working`` creature in the
@@ -930,9 +892,9 @@ class QtCard(QWidget):
             # mode (a read-only indicator), and never while dizzy, or while the card is
             # waiting/dead (don't cheer over a "needs you" or a gravestone).
             if (self._pet_enabled and moved <= PET_TAP_MAX_DIST
-                    and not self._overlay.is_dizzy(now)
+                    and not self._presenter.is_dizzy(now)
                     and self._draw_raw not in ("waiting", "dead")):
-                self._overlay.note_celebrate(now)   # a happy hop
+                self._presenter.note_celebrate(now)   # a happy hop
                 self._emit_hearts(now)              # rising pixel hearts
                 self.petted.emit(self.session_id)
                 self._render(now)
@@ -964,7 +926,7 @@ class QtCard(QWidget):
         self._last_move = (dx, dy)
 
     def _trigger_dizzy(self, now: float) -> None:
-        self._overlay.note_dizzy(now)
+        self._presenter.note_dizzy(now)
         self._render(now)
 
     # --- satellite popups (speech bubble + hover tooltip) -----------------
@@ -1108,7 +1070,7 @@ class QtCard(QWidget):
         to the pure Shake seam; here we only gate it and push the geometry."""
         if self._drag_offset is not None:
             return  # the user is holding it; don't fight the drag
-        elapsed = self._overlay.waiting_elapsed(now)
+        elapsed = self._presenter.waiting_elapsed(now)
         if self._draw_raw != "waiting" or elapsed is None or elapsed < config.SHAKE_AFTER_S:
             self._reset_shake_offset()   # not waiting, or still within the grace window
             return
