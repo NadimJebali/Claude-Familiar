@@ -618,7 +618,7 @@ def test_vigorous_shaking_makes_the_card_dizzy(app):
         card._track_shake(x, 100)
         x -= 20
         card._track_shake(x, 100)
-    assert card._overlay.is_dizzy(time.time())
+    assert card._presenter.is_dizzy(time.time())
     card.close()
 
 
@@ -626,7 +626,7 @@ def test_a_gentle_drag_does_not_make_the_card_dizzy(app):
     card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer())
     for x in range(100, 200, 10):            # a straight, one-direction drag
         card._track_shake(x, 100)
-    assert not card._overlay.is_dizzy(time.time())
+    assert not card._presenter.is_dizzy(time.time())
     card.close()
 
 

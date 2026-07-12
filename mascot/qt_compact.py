@@ -14,14 +14,16 @@ a static tint for the quiet levels, the purple shimmer for xhigh and the
 rainbow cycle for max. The account-global usage bars (with the #69 stale
 label) draw once at the bottom.
 
-Rows inherit the #52 pending-permission heuristic through the same pure core
-the card uses (:func:`mascot.effective_state.promote_pending_tool`): a
-main-thread tool stuck past the permission wait reads "needs you!".
+Each row's state text is its session's :class:`~mascot.presenter.SessionPresenter`
+view rendered by :func:`~mascot.presenter.status_line` (#101) — the same decision
+the Classic card's caption reads, so a row and a card can never disagree. The rows
+therefore inherit the whole ladder now (the #52 pending-permission promotion, but
+also the stall watchdog and dozing), not just the promotion they used to.
 
-The row content is decided by pure helpers (:func:`row_text`,
-:func:`row_dim`, :func:`dot_color`, :func:`model_label`) so it is tested
-without painting; the window itself paints directly (no child widgets) behind
-a repaint-guard frame like the card's panel, animating only while an animated
+The rest of the row (dim, dot color, effort backdrops) is decided by pure helpers
+(:func:`row_dim`, :func:`dot_color`, :func:`model_label`) so it is tested without
+painting; the window itself paints directly (no child widgets) behind a
+repaint-guard frame like the card's panel, animating only while an animated
 effort level is on screen. A drag anywhere moves the panel; the tray's
 show/hide and Quit cover it (wired in ``qt_app``). The pet layer is
 orthogonal: PetService keeps earning and the tray "Pet…" window works — only
@@ -38,6 +40,7 @@ from PySide6.QtGui import QColor, QFont, QGuiApplication, QMouseEvent, QPainter,
 from PySide6.QtWidgets import QGraphicsDropShadowEffect, QWidget
 
 from . import config, effective_state, effort, qt_screens, usage
+from .presenter import SessionPresenter, status_line
 from .qt_card import (
     PANEL_EDGE,
     PANEL_FILL,
@@ -53,7 +56,6 @@ from .qt_card import (
     WORKING_STALL_S,
     _anchor_xy,
     _hex,
-    file_basename,
     model_label,
 )
 
@@ -91,38 +93,11 @@ def _draw_raw(state: dict[str, Any], now: float) -> str:
         permission_wait_s=PERMISSION_WAIT_S, working_stall_s=WORKING_STALL_S)
 
 
-def row_text(state: dict[str, Any], now: float,
-             dead_until: float | None = None) -> str:
-    """The row's state text. Waiting (real or promoted) carries the notify
-    message inline, truncated — compact has no popup bubbles. An exhausted
-    account (#91) overrides everything with the reset time."""
-    if dead_until is not None:
-        return "out of usage · resets " + time.strftime(
-            "%H:%M", time.localtime(dead_until))
-    raw = _draw_raw(state, now)
-    if raw == "dead":
-        return "out of usage"
-    if raw == "waiting":
-        notify = state.get("notify")
-        message = notify.get("message", "") if isinstance(notify, dict) else ""
-        if message:
-            if len(message) > NOTIFY_MAX_CHARS:
-                message = message[:NOTIFY_MAX_CHARS] + "…"
-            return f"needs you! · {message}"
-        return "needs you!"
-    if raw == "compacting":
-        return "tidying memories…"
-    if raw in ("thinking", "working") and state.get("permission_mode") == "plan":
-        return "planning…"
-    if raw == "thinking":
-        return "thinking…"
-    if raw == "working":
-        tool = state.get("tool")
-        # The sticky-per-turn file (#85) rides along — with the tool while one
-        # runs, alone between tools (it outlives each millisecond PostToolUse).
-        parts = [p for p in (tool, file_basename(state.get("file"))) if p]
-        return "working · " + " · ".join(parts) if parts else "working…"
-    return str(raw)
+# The row's state text is now the presenter's ``status_line`` over the session's
+# SessionView (#101) — the same decision the Classic card's caption reads, so a
+# row and a card can never disagree about what a session is doing. The remaining
+# row helpers below (dim, dot color, effort backdrops) still read the raw dict;
+# later tickets move each onto the view.
 
 
 def row_dim(state: dict[str, Any], now: float,
@@ -273,6 +248,11 @@ class CompactWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         self.sessions: dict[str, dict[str, Any]] = {}
+        # One presenter per session (#101): the row's state text is its
+        # status_line, so a row reads the same decision a Classic card does.
+        # Rows never hop/blink, so each presenter is built with celebrates=False
+        # and is never sent a dizzy/blink note.
+        self._presenters: dict[str, SessionPresenter] = {}
         self._usage: dict[str, Any] | None = None
         self._context: dict[str, float] = {}
         self._drag_offset: QPoint | None = None
@@ -298,13 +278,40 @@ class CompactWindow(QWidget):
         """Adopt this poll's live snapshots; the panel grows/shrinks to fit."""
         count_changed = len(live) != len(self.sessions)
         self.sessions = dict(live)
+        self._reconcile_presenters(live, time.time())
         if count_changed:
             self._resize_to(len(live))
         self._tick()
 
+    def _presenter_for(self, sid: str, state: dict[str, Any],
+                       now: float) -> SessionPresenter:
+        """The session's presenter, created + usage-seeded on first sight (so a
+        first tick already has the death override). The caller adopts the poll's
+        state — a freshly created one holds only its raw until then."""
+        presenter = self._presenters.get(sid)
+        if presenter is None:
+            presenter = SessionPresenter(
+                raw=str(state.get("state", "idle")), now=now, celebrates=False)
+            presenter.adopt_usage(self._usage)
+            self._presenters[sid] = presenter
+        return presenter
+
+    def _reconcile_presenters(self, live: dict[str, dict[str, Any]],
+                              now: float) -> None:
+        """Keep exactly one presenter per live session: drop the gone, create the
+        new, and adopt this poll's state onto each."""
+        for sid in list(self._presenters):
+            if sid not in live:
+                del self._presenters[sid]
+        for sid, state in live.items():
+            self._presenter_for(sid, state, now).adopt_state(state, now)
+
     def set_usage(self, snapshot: dict[str, Any] | None) -> None:
-        """Adopt the account-global usage snapshot for the bottom bars."""
+        """Adopt the account-global usage snapshot for the bottom bars, and feed
+        every presenter so the rows tombstone in step with the bars."""
         self._usage = snapshot
+        for presenter in self._presenters.values():
+            presenter.adopt_usage(snapshot)
         self._tick()
 
     def set_context(self, results: dict[str, float]) -> None:
@@ -333,12 +340,21 @@ class CompactWindow(QWidget):
         self.move(*_anchor_xy(area, self.width(), self.height(), 0))
 
     # --- animation: repaint only when the frame really changed --------------------
+    def _row_text(self, sid: str, state: dict[str, Any], now: float) -> str:
+        """The row's state text from the session's presenter (#101). Robust against
+        a usage/context push landing before the first set_sessions: a missing
+        presenter is created on the spot (it just hasn't adopted its full state yet)."""
+        return status_line(self._presenter_for(sid, state, now).view(now),
+                           notify_max_chars=NOTIFY_MAX_CHARS)
+
     def _tick(self) -> None:
         now = time.time()
-        # Account-level death (#91): a full usage window tombstones every row.
+        # Account-level death (#91): a full usage window tombstones every row. The
+        # row text gets the override through its presenter; the other row helpers
+        # still take dead_until directly (their view migration is a later ticket).
         dead_until = usage.exhausted_until(self._usage, now)
         rows = tuple(
-            (sid, row_text(st, now, dead_until), dot_color(st, now, dead_until),
+            (sid, self._row_text(sid, st, now), dot_color(st, now, dead_until),
              row_dim(st, now, dead_until),
              row_backdrop(st, now, now - self._anim_t0, dead_until),
              row_bg(st, now, now - self._anim_t0, dead_until),

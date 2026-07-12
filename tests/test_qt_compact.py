@@ -45,29 +45,9 @@ def test_model_label_strips_prefix_and_date():
     assert qt_compact.model_label("weird") == "weird"
 
 
-# --- row_text -------------------------------------------------------------------
-def test_row_text_names_the_state_and_tool():
-    now = time.time()
-    assert qt_compact.row_text(_state(st="working", tool="Edit"), now) == "working · Edit"
-    assert qt_compact.row_text(_state(st="working", tool=None), now) == "working…"
-    assert qt_compact.row_text(_state(st="thinking"), now) == "thinking…"
-    assert qt_compact.row_text(
-        _state(st="thinking", permission_mode="plan"), now) == "planning…"
-    assert qt_compact.row_text(_state(st="compacting"), now) == "tidying memories…"
-    assert qt_compact.row_text(_state(st="dead"), now) == "out of usage"
-    assert qt_compact.row_text(_state(st="idle"), now) == "idle"
-
-
-def test_row_text_carries_the_working_file():
-    # #85: the sticky-per-turn file joins the row — with the tool while one runs,
-    # alone between tools (the file outlives each millisecond-fast PostToolUse).
-    now = time.time()
-    st = _state(st="working", tool="Edit", file=r"C:\repo\mascot\qt_app.py")
-    assert qt_compact.row_text(st, now) == "working · Edit · qt_app.py"
-    st["tool"] = None
-    assert qt_compact.row_text(st, now) == "working · qt_app.py"
-
-
+# The row's state text (row_text) moved onto the presenter as status_line — its
+# behaviour is covered at that seam in tests/test_session_view.py. What remains
+# here is the row chrome the compact panel still decides from the raw dict.
 def test_shadow_lives_on_a_child_panel_not_the_translucent_top_level(app):
     # #88: a QGraphicsDropShadowEffect on a translucent TOP-LEVEL renders once
     # into its cache and then ignores update() on real compositors — the frozen
@@ -85,8 +65,6 @@ def test_rows_read_out_of_usage_when_the_account_is_exhausted():
     now = time.time()
     st = _state(st="working", tool="Edit", file="C:/x/a.py", effort="max")
     until = now + 3600
-    assert qt_compact.row_text(st, now, dead_until=until).startswith(
-        "out of usage · resets ")
     assert qt_compact.dot_color(st, now, dead_until=until) == qt_compact._hex(
         config.STATE_COLORS["dead"])
     assert qt_compact.row_dim(st, now, dead_until=until) is False
@@ -111,25 +89,6 @@ def test_row_backdrop_cedes_animated_levels_to_row_bg():
     assert qt_compact.row_backdrop(_state(st="working", effort="max"), now, 1.0) is None
     assert qt_compact.row_backdrop(_state(st="working", effort="xhigh"), now, 1.0) is None
     assert qt_compact.row_backdrop(_state(st="working", effort="high"), now, 1.0) is not None
-
-
-def test_row_text_waiting_carries_the_notify_inline_truncated():
-    st = _state(st="waiting",
-                notify={"message": "Allow this Bash command to run tests?" * 3,
-                        "type": "permission"})
-    text = qt_compact.row_text(st, time.time())
-    assert text.startswith("needs you! · Allow this Bash command")
-    assert len(text) <= len("needs you! · ") + qt_compact.NOTIFY_MAX_CHARS + 1  # +ellipsis
-
-
-def test_row_text_promotes_a_long_pending_tool_to_needs_you():
-    # The #52 heuristic, inherited by the rows: a main-thread tool with no closing
-    # PostToolUse past the permission wait reads as "needs you!".
-    ts = time.time() - PERMISSION_WAIT_S - 5
-    st = _state(st="working", tool="Bash", ts=ts)
-    assert qt_compact.row_text(st, time.time()) == "needs you!"
-    fresh = _state(st="working", tool="Bash", ts=time.time())
-    assert qt_compact.row_text(fresh, time.time()) == "working · Bash"
 
 
 # --- row_dim + dot_color ----------------------------------------------------------
