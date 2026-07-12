@@ -40,7 +40,13 @@ from PySide6.QtGui import QColor, QFont, QGuiApplication, QMouseEvent, QPainter,
 from PySide6.QtWidgets import QGraphicsDropShadowEffect, QWidget
 
 from . import config, effort, qt_screens, usage
-from .presenter import _PANEL_FILL_RGB, SessionPresenter, bg_marker, status_line
+from .presenter import (
+    _PANEL_FILL_RGB,
+    SessionPresenter,
+    bg_marker,
+    status_line,
+    usage_bars,
+)
 from .qt_card import (
     PANEL_EDGE,
     PANEL_FILL,
@@ -53,7 +59,6 @@ from .qt_card import (
     USAGE_PCT_FG,
     USAGE_TRACK,
     _anchor_xy,
-    _hex,
     model_label,
 )
 
@@ -148,9 +153,9 @@ class _CompactPanel(QWidget):
                 p.drawText(QRectF(panel.x(), top, PANEL_W, ROW_H),
                            Qt.AlignmentFlag.AlignCenter, _EMPTY_TEXT)
                 top += ROW_H
-            for _sid, text, dot, dim, backdrop, bg, model, subs, ctx in rows:
+            for _sid, text, dot, dim, backdrop, bg, model, subs, ring in rows:
                 _paint_row(p, panel.x(), top, text, dot, dim, backdrop, bg,
-                           model, subs, ctx)
+                           model, subs, ring)
                 top += ROW_H
             _paint_usage(p, panel.x(), top, bars, stale)
         finally:
@@ -219,6 +224,7 @@ class CompactWindow(QWidget):
             presenter = SessionPresenter(
                 raw=str(state.get("state", "idle")), now=now, celebrates=False)
             presenter.adopt_usage(self._usage)
+            presenter.adopt_context(self._context.get(sid))
             self._presenters[sid] = presenter
         return presenter
 
@@ -241,8 +247,11 @@ class CompactWindow(QWidget):
         self._tick()
 
     def set_context(self, results: dict[str, float]) -> None:
-        """Adopt the per-session context percentages for the row rings."""
+        """Adopt the per-session context percentages; each presenter owns its own
+        ring gauge fact, so feed them (a session with no result yet gets None)."""
         self._context = dict(results)
+        for sid, presenter in self._presenters.items():
+            presenter.adopt_context(results.get(sid))
         self._tick()
 
     # --- geometry ----------------------------------------------------------------
@@ -282,15 +291,16 @@ class CompactWindow(QWidget):
         # session view now (#101-#103); account-level death (#91) is baked in through
         # the presenter's usage-death override, so no dead_until is threaded here.
         rows = tuple(self._row(sid, st, now, t) for sid, st in self.sessions.items())
-        bars = tuple((b.label, b.pct, _hex(usage.bar_color(b.pct)))
-                     for b in usage.usage_view(self._usage, now))
+        # The bottom bars are account-global (drawn once, not per-row), so they use
+        # the shared usage_bars derivation directly rather than any one row's view.
+        bars = usage_bars(self._usage, now)
         self._panel.show_frame((rows, bars, usage.is_stale(self._usage, now)))
 
     def _row(self, sid: str, st: dict[str, Any], now: float, t: float) -> tuple:
         """One row's paint tuple, all from the session view: state text, dot color,
-        dim, the effort backdrop (flat quiet tint) and animated marker, plus the
-        model / sub-agent / ring trimmings. ``t`` is this panel's animation clock,
-        supplied to the marker (the presenter owns the decision, not the phase)."""
+        dim, the effort backdrop (flat quiet tint) and animated marker, the context
+        ring, plus the model / sub-agent trimmings. ``t`` is this panel's animation
+        clock, supplied to the marker (the presenter owns the decision, not the phase)."""
         view = self._session_view(sid, st, now)
         return (sid, status_line(view, notify_max_chars=NOTIFY_MAX_CHARS),
                 view.dot_color, view.dim,
@@ -298,7 +308,7 @@ class CompactWindow(QWidget):
                 bg_marker(view.effort_bg_kind, t),
                 model_label(st.get("model")),
                 len(st.get("subagents") or []),
-                self._context.get(sid))
+                view.ring)
 
     # --- drag anywhere ---------------------------------------------------------------
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -322,7 +332,7 @@ class CompactWindow(QWidget):
 # --- pure painters (called by _CompactPanel with panel-local coordinates) ----------
 def _paint_row(p: QPainter, px: float, top: float, text: str, dot: str,
                dim: bool, backdrop: str | None, bg: tuple, model: str, subs: int,
-               ctx: float | None) -> None:
+               ring: tuple[float, str] | None) -> None:
     row = QRectF(px + 6, top + 2, PANEL_W - 12, ROW_H - 4)
     if backdrop is not None:
         bpath = QPainterPath()
@@ -345,19 +355,20 @@ def _paint_row(p: QPainter, px: float, top: float, text: str, dot: str,
     p.setBrush(Qt.BrushStyle.NoBrush)
 
     right = row.right() - 8
-    if ctx is not None:                       # the small per-row context ring
-        ring = QRectF(right - RING_D, cy - RING_D / 2, RING_D, RING_D)
+    if ring is not None:                      # the small per-row context ring
+        pct, color = ring
+        ring_rect = QRectF(right - RING_D, cy - RING_D / 2, RING_D, RING_D)
         pen = p.pen()
         pen.setStyle(Qt.PenStyle.SolidLine)
         pen.setWidth(RING_STROKE - 1)
         pen.setColor(QColor(RING_TRACK))
         p.setPen(pen)
-        p.drawEllipse(ring)
-        span = round(max(0.0, min(100.0, ctx)) / 100.0 * 360.0 * 16)
+        p.drawEllipse(ring_rect)
+        span = round(max(0.0, min(100.0, pct)) / 100.0 * 360.0 * 16)
         if span > 0:
-            pen.setColor(QColor(_hex(usage.bar_color(ctx))))
+            pen.setColor(QColor(color))
             p.setPen(pen)
-            p.drawArc(ring, 90 * 16, -span)
+            p.drawArc(ring_rect, 90 * 16, -span)
         right -= RING_D + 8
 
     p.setPen(QColor(_MUTED_FG))

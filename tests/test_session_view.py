@@ -13,7 +13,7 @@ qt_compact ``row_text`` unit tests migrated onto.
 """
 from __future__ import annotations
 
-from mascot import config, effort, presenter
+from mascot import config, effort, presenter, usage
 from mascot.overlay import OverlayConfig
 
 _hex = presenter._hex
@@ -291,6 +291,41 @@ def test_bg_marker_carries_the_clock_only_when_animated():
     assert presenter.bg_marker("rainbow", 1.2345) == ("rainbow", 1.234)
     assert presenter.bg_marker("ripple", 2.0) == ("ripple", 2.0)
     assert presenter.bg_marker("solid", 9.9) == ("solid",)
+
+
+# --- usage bars, staleness, context ring (#104) ---------------------------------
+def test_usage_bars_derives_label_percent_and_traffic_light_color():
+    # The one bars derivation both themes share (a card per-card, compact once).
+    now = T0
+    snap = {"ts": now, "five_hour": {"used_percentage": 76.0, "resets_at": now + 999},
+            "seven_day": {"used_percentage": 93.0, "resets_at": now + 999}}
+    bars = presenter.usage_bars(snap, now)
+    assert bars == (("5h", 76.0, _hex(usage.bar_color(76.0))),
+                    ("7d", 93.0, _hex(usage.bar_color(93.0))))
+    assert presenter.usage_bars(None, now) == ()   # no snapshot -> no bars
+
+
+def test_view_carries_the_bars_and_staleness():
+    now = T0
+    p = _present("working")
+    p.adopt_usage({"ts": now, "five_hour": {"used_percentage": 40.0,
+                                            "resets_at": now + 999}})
+    view = p.view(now)
+    assert view.bars == (("5h", 40.0, _hex(usage.bar_color(40.0))),)
+    assert view.usage_stale is False
+    # An aged snapshot reads stale.
+    p.adopt_usage({"ts": now - 3600, "five_hour": {"used_percentage": 40.0,
+                                                   "resets_at": now + 999}})
+    assert p.view(now).usage_stale is True
+
+
+def test_view_ring_is_the_per_session_context_gauge():
+    p = _present("working")
+    assert p.view(T0).ring is None            # absent until the first tailer result
+    p.adopt_context(64.0)
+    assert p.view(T0).ring == (64.0, _hex(usage.bar_color(64.0)))
+    p.adopt_context(None)
+    assert p.view(T0).ring is None
 
 
 # --- status_line: the Compact row's rich text (composed from the view) ----------

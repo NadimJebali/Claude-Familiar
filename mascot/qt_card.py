@@ -72,7 +72,6 @@ from . import (
     qt_screens,
     shake,
     sprite_pixel,
-    usage,
 )
 from .pet_view import PetView, pet_view
 from .pixel_grid import grid_cells
@@ -613,8 +612,8 @@ class QtCard(QWidget):
         # effort and the global settings fallback the card feeds it each render.
         self._usage: dict | None = None
         # Per-session context-window fill % (#72), pushed by the manager from the
-        # transcript tailer. None until the first result; drives the ring gauge.
-        self._context_pct: float | None = None
+        # transcript tailer, is adopted straight into the presenter (it owns the ring
+        # gauge fact now); the card only forwards it.
         # Satellite popups: the speech bubble (while notify present) and the pet hover
         # tooltip (pet-enabled only). Both follow the card and are dismissed on hide.
         self._bubble: QtBubble | None = None
@@ -681,7 +680,7 @@ class QtCard(QWidget):
         """Adopt this session's context-window fill % (#72), pushed by the manager
         from the transcript tailer. ``None`` = not known yet (no gauge). Drives the
         ring gauge; like the pet/usage pushes, an unchanged value repaints nothing."""
-        self._context_pct = pct
+        self._presenter.adopt_context(pct)
         self._render(time.time())
 
     def _effective_pet_view(self) -> PetView:
@@ -720,11 +719,11 @@ class QtCard(QWidget):
 
     def _render(self, now: float) -> None:
         # The presenter owns the whole decision now: the pending-tool promotion, the
-        # usage-death override, the raw clocks, the ladder, and the display face +
-        # caption. The card reads its SessionView and paints. (Accent, effort chrome,
-        # usage bars and the ring still compute inline below — later tickets move
-        # each onto the view.) The pet look is card-side: the sprite's stage/hat and
-        # the mood that tints the idle face.
+        # usage-death override, the raw clocks, the ladder, the display face + caption,
+        # the accent, the effort chrome, the usage bars and the context ring. The card
+        # reads its SessionView and paints. (Only the dim info line still composes
+        # inline below — #105 moves it onto the view.) The pet look is card-side: the
+        # sprite's stage/hat and the mood that tints the idle face.
         pet_look = self._effective_pet_view()
         sv = self._presenter.view(now, mood=pet_look.mood,
                                   effort_fallback=effort.settings_effort())
@@ -768,10 +767,6 @@ class QtCard(QWidget):
         panel_bg: tuple = bg_marker(sv.effort_bg_kind, t)
         accent = effort.border_accent(sv.chrome_level, t)
         border = _hex(accent) if accent is not None else PANEL_EDGE
-        bars = tuple((b.label, b.pct, _hex(usage.bar_color(b.pct)))
-                     for b in usage.usage_view(self._usage, now))
-        ring = (None if self._context_pct is None else
-                (self._context_pct, _hex(usage.bar_color(self._context_pct))))
         info = info_line(self._state.get("file"), self._state.get("model"))
         if self._dead_until is not None:     # the reset time replaces file · model
             info = "resets " + time.strftime("%H:%M", time.localtime(self._dead_until))
@@ -779,9 +774,9 @@ class QtCard(QWidget):
         self._panel.show_art(self._pixmap, sv.caption, bob,
                              prev=self._prev_pixmap, fade=fade, scale=self._scale_now(now),
                              badge=badge, badge_count=count,
-                             panel_fill=panel_fill, border=border, bars=bars,
-                             usage_stale=usage.is_stale(self._usage, now),
-                             ring=ring, panel_bg=panel_bg, info=info)
+                             panel_fill=panel_fill, border=border, bars=sv.bars,
+                             usage_stale=sv.usage_stale,
+                             ring=sv.ring, panel_bg=panel_bg, info=info)
 
     def _adopt_pixmap(self, pixmap: QPixmap, stage: str, now: float) -> None:
         """Swap in a new creature pixmap with the right transition: a stage change

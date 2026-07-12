@@ -187,7 +187,8 @@ def test_manager_polls_context_off_thread_and_pushes_to_cards(app, tmp_path):
     QThreadPool.globalInstance().waitForDone(3000)
     app.processEvents()                               # deliver the queued results
     assert mgr._context.get("s1") == 50.0
-    assert mgr.cards["s1"]._context_pct == 50.0
+    # The card forwards it into its presenter, which surfaces it as the ring gauge.
+    assert mgr.cards["s1"]._presenter.view(time.time()).ring[0] == 50.0
     mgr._on_sessions({})                              # tidy up
 
 

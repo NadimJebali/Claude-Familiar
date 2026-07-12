@@ -113,6 +113,23 @@ def _accent_for(face: str) -> str:
     return _hex(config.STATE_COLORS.get(face, config.STATE_COLORS["idle"]))
 
 
+def usage_bars(snapshot: Any, now: float) -> tuple[tuple[str, float, str], ...]:
+    """The account-usage bars to draw — ``(label, percent, traffic-light color)``,
+    in order (5h then 7d), the percentage already reset-decayed by ``usage``. The
+    one bars derivation both themes share: a Classic card draws it per-card, the
+    Compact panel once at its foot (the bars are account-global, not per-session)."""
+    return tuple((bar.label, bar.pct, _hex(usage.bar_color(bar.pct)))
+                 for bar in usage.usage_view(snapshot, now))
+
+
+def _ring(context_pct: float | None) -> tuple[float, str] | None:
+    """The per-session context gauge: ``(percent, traffic-light color)`` or ``None``
+    until the transcript tailer has a first result for the session."""
+    if context_pct is None:
+        return None
+    return context_pct, _hex(usage.bar_color(context_pct))
+
+
 def bg_marker(kind: str, t: float) -> tuple:
     """The animated-background marker an adapter paints: ``(kind, rounded t)`` for
     the animated kinds, or the clock-free ``("solid",)`` — so a non-animating frame
@@ -174,8 +191,8 @@ class SessionView:
     working file's display name.
 
     The view has grown a fact group per ticket: #101 the state text, #102 the
-    visual-identity trio (accent, dot color, dim), #103 the effort chrome. Usage
-    bars, the context ring and the info line are added by later tickets.
+    visual-identity trio (accent, dot color, dim), #103 the effort chrome, #104 the
+    usage bars + staleness + context ring. The info line is added by a later ticket.
     """
     effective: str
     face: str
@@ -200,6 +217,13 @@ class SessionView:
     chrome_level: str
     effort_fill: str | None
     effort_bg_kind: str
+    # Usage instrumentation (#104). ``bars`` is the account-global 5h/7d usage bars
+    # (label, percent, color) — same for every session, drawn per-card / once in
+    # compact; ``usage_stale`` labels an aged snapshot; ``ring`` is this session's
+    # own context-window gauge (percent, color) or None until the first tailer result.
+    bars: tuple[tuple[str, float, str], ...]
+    usage_stale: bool
+    ring: tuple[float, str] | None
 
 
 class SessionPresenter:
@@ -221,6 +245,7 @@ class SessionPresenter:
         self._celebrates = celebrates
         self._state: dict[str, Any] = {"state": raw}
         self._usage: Any = None
+        self._context_pct: float | None = None
 
     # --- inputs pushed in -------------------------------------------------
     def adopt_state(self, state: dict[str, Any], now: float) -> None:
@@ -239,8 +264,14 @@ class SessionPresenter:
     def adopt_usage(self, snapshot: Any) -> None:
         """Adopt the latest account-global usage snapshot; the next :meth:`view`
         applies the death override from it (a full window tombstones the session
-        until its reset), reading the clock at :meth:`view` time."""
+        until its reset), reading the clock at :meth:`view` time, and derives the
+        usage bars + staleness."""
         self._usage = snapshot
+
+    def adopt_context(self, pct: float | None) -> None:
+        """Adopt this session's context-window fill % (from the transcript tailer);
+        ``None`` = not known yet (no ring). Drives the view's context gauge."""
+        self._context_pct = pct
 
     # --- gesture intent notes (card-only sources leave a compact row still) ---
     def note_dizzy(self, now: float) -> None:
@@ -317,6 +348,9 @@ class SessionPresenter:
             chrome_level=chrome_level,
             effort_fill=effort_fill,
             effort_bg_kind=effort_bg_kind,
+            bars=usage_bars(self._usage, now),
+            usage_stale=usage.is_stale(self._usage, now),
+            ring=_ring(self._context_pct),
         )
 
 
