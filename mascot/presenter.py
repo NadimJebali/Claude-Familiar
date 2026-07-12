@@ -100,6 +100,25 @@ def file_basename(path: object) -> str:
     return path.replace("\\", "/").rsplit("/", 1)[-1]
 
 
+def model_label(model: str | None) -> str:
+    """A short model tag: the ``claude-`` prefix and a trailing ``-YYYYMMDD`` date
+    stamp dropped, budgeted to 14 chars. Both themes tag the model with this."""
+    text = model or ""
+    if text.startswith("claude-"):
+        text = text[len("claude-"):]
+    parts = text.rsplit("-", 1)
+    if len(parts) == 2 and len(parts[1]) == 8 and parts[1].isdigit():
+        text = parts[0]
+    return text[:14]
+
+
+def info_line(file: object, model: str | None) -> str:
+    """The Classic card's dim second line: ``qt_app.py · fable-5`` while a turn has
+    a working file, the model tag alone otherwise, empty when neither is known."""
+    parts = [p for p in (file_basename(file), model_label(model)) if p]
+    return " · ".join(parts)
+
+
 def _hex(rgb: tuple[int, int, int]) -> str:
     """An ``#rrggbb`` string for an (r, g, b) triple. Clamps + rounds so a lerped
     (float) color hexes cleanly too."""
@@ -224,6 +243,13 @@ class SessionView:
     bars: tuple[tuple[str, float, str], ...]
     usage_stale: bool
     ring: tuple[float, str] | None
+    # Info facts (#105). ``model_tag`` is the short model label; ``info`` is the
+    # Classic card's composed dim line (file · model, model alone, or the reset time
+    # while tombstoned); ``subagent_count`` is the live sub-agent count (the card
+    # caps it into a badge row, the compact row shows it as an xN tally).
+    model_tag: str
+    info: str
+    subagent_count: int
 
 
 class SessionPresenter:
@@ -332,6 +358,11 @@ class SessionPresenter:
         contested = is_dead or draw_raw == "waiting"
         chrome_level, effort_fill, effort_bg_kind = _effort_chrome(
             effort_level, contested=contested)
+        # The dim info line: the reset time while tombstoned (a usage-exhausted
+        # session carries one), else the file · model composition.
+        info = ("resets " + time.strftime("%H:%M", time.localtime(reset_at))
+                if reset_at is not None
+                else info_line(state.get("file"), state.get("model")))
         return SessionView(
             effective=effective,
             face=face,
@@ -351,6 +382,9 @@ class SessionPresenter:
             bars=usage_bars(self._usage, now),
             usage_stale=usage.is_stale(self._usage, now),
             ring=_ring(self._context_pct),
+            model_tag=model_label(state.get("model")),
+            info=info,
+            subagent_count=len(state.get("subagents") or []),
         )
 
 

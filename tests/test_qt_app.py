@@ -469,13 +469,8 @@ def test_garbage_size_and_stage_apply_nothing(app, tmp_path, monkeypatch):
     mgr._quit()
 
 
-# --- the file · model info line (#85) -------------------------------------------
-def test_info_line_joins_file_basename_and_model_tag():
-    assert qt_card.info_line(r"C:\repo\mascot\qt_app.py",
-                             "claude-fable-5") == "qt_app.py · fable-5"
-    assert qt_card.info_line("", "claude-opus-4-8") == "opus-4-8"   # idle: model alone
-    assert qt_card.info_line("hooks/emit.py", None) == "emit.py"
-    assert qt_card.info_line(None, None) == ""
+# The dim info line (file · model / model / reset time) is a SessionView fact now
+# (#105) — its composition is covered at that seam in tests/test_session_view.py.
 
 
 # --- the usage-driven tombstone (#91) --------------------------------------------

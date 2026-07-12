@@ -20,11 +20,11 @@ the Classic card's caption reads, so a row and a card can never disagree. The ro
 therefore inherit the whole ladder now (the #52 pending-permission promotion, but
 also the stall watchdog and dozing), not just the promotion they used to.
 
-Every other row fact — the dim flag, the dot color, and the effort chrome (flat
-tint + animated marker) — is a :class:`~mascot.presenter.SessionView` fact too, so
-it is tested at that seam without painting; only :func:`~mascot.qt_card.model_label`
-remains a local helper. The window itself paints directly (no child widgets) behind
-a repaint-guard frame like the card's panel. A drag anywhere moves the panel; the tray's
+Every other row fact — the dim flag, the dot color, the effort chrome (flat tint +
+animated marker), the model tag, the sub-agent count, and the context ring — is a
+:class:`~mascot.presenter.SessionView` fact too, so it is tested at that seam without
+painting. The window itself paints directly (no child widgets) behind a repaint-guard
+frame like the card's panel. A drag anywhere moves the panel; the tray's
 show/hide and Quit cover it (wired in ``qt_app``). The pet layer is
 orthogonal: PetService keeps earning and the tray "Pet…" window works — only
 the card-side pet expressions have no home here.
@@ -59,7 +59,6 @@ from .qt_card import (
     USAGE_PCT_FG,
     USAGE_TRACK,
     _anchor_xy,
-    model_label,
 )
 
 # --- geometry -----------------------------------------------------------------
@@ -306,8 +305,8 @@ class CompactWindow(QWidget):
                 view.dot_color, view.dim,
                 view.effort_fill,
                 bg_marker(view.effort_bg_kind, t),
-                model_label(st.get("model")),
-                len(st.get("subagents") or []),
+                view.model_tag,
+                view.subagent_count,
                 view.ring)
 
     # --- drag anywhere ---------------------------------------------------------------

@@ -36,17 +36,9 @@ def _state(sid="s", st="idle", **over):
     return base
 
 
-# --- model_label ---------------------------------------------------------------
-def test_model_label_strips_prefix_and_date():
-    assert qt_compact.model_label("claude-opus-4-8") == "opus-4-8"
-    assert qt_compact.model_label("claude-haiku-4-5-20251001") == "haiku-4-5"
-    assert qt_compact.model_label("") == ""
-    assert qt_compact.model_label("weird") == "weird"
-
-
-# The row's state text (row_text) moved onto the presenter as status_line — its
-# behaviour is covered at that seam in tests/test_session_view.py. What remains
-# here is the row chrome the compact panel still decides from the raw dict.
+# The row content — state text, dot, dim, effort chrome, model tag, sub-agent
+# count, context ring — is all SessionView facts now, covered at that seam in
+# tests/test_session_view.py. What remains here exercises the window itself.
 def test_shadow_lives_on_a_child_panel_not_the_translucent_top_level(app):
     # #88: a QGraphicsDropShadowEffect on a translucent TOP-LEVEL renders once
     # into its cache and then ignores update() on real compositors — the frozen

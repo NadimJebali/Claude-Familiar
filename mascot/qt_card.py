@@ -83,15 +83,14 @@ from .presenter import (
     SessionPresenter,
     _hex,
     bg_marker,
-    file_basename,
 )
 from .qt_popups import QtBubble, QtStatsTooltip
 from .sprite_qt import SpriteRenderer, SpriteSpec
 
-# ``PERMISSION_WAIT_S`` / ``WORKING_STALL_S`` / ``file_basename`` are re-exported
-# from the presenter here so the Compact theme and the tests can keep importing
-# them from ``qt_card`` while the decision itself now lives in ``mascot.presenter``.
-__all__ = ["PERMISSION_WAIT_S", "WORKING_STALL_S", "QtCard", "file_basename"]
+# ``PERMISSION_WAIT_S`` / ``WORKING_STALL_S`` are re-exported from the presenter
+# here so the tests can keep importing them from ``qt_card`` while the decision
+# itself now lives in ``mascot.presenter``.
+__all__ = ["PERMISSION_WAIT_S", "WORKING_STALL_S", "QtCard"]
 
 # --- card geometry (mirrors the Tk card's authored "small" size) ------------
 CARD_W = 158
@@ -278,26 +277,6 @@ def _paw_pixmap(px: int) -> QPixmap:
 # working file, the model tag alone otherwise.
 INFO_FG = "#9aa0ba"
 INFO_Y = 149                        # below the caption (132+text), above the badges (176)
-
-
-def model_label(model: str | None) -> str:
-    """A short model tag: the ``claude-`` prefix and a trailing ``-YYYYMMDD``
-    date stamp dropped, budgeted to 14 chars. Lives here (not qt_compact) since
-    #85 puts it on the Classic card too — the import direction is compact → card."""
-    text = model or ""
-    if text.startswith("claude-"):
-        text = text[len("claude-"):]
-    parts = text.rsplit("-", 1)
-    if len(parts) == 2 and len(parts[1]) == 8 and parts[1].isdigit():
-        text = parts[0]
-    return text[:14]
-
-
-def info_line(file: object, model: str | None) -> str:
-    """The card's dim second line: ``qt_app.py · fable-5`` while a turn has a
-    working file, the model tag alone otherwise, empty when neither is known."""
-    parts = [p for p in (file_basename(file), model_label(model)) if p]
-    return " · ".join(parts)
 
 
 class _CardPanel(QWidget):
@@ -720,16 +699,14 @@ class QtCard(QWidget):
     def _render(self, now: float) -> None:
         # The presenter owns the whole decision now: the pending-tool promotion, the
         # usage-death override, the raw clocks, the ladder, the display face + caption,
-        # the accent, the effort chrome, the usage bars and the context ring. The card
-        # reads its SessionView and paints. (Only the dim info line still composes
-        # inline below — #105 moves it onto the view.) The pet look is card-side: the
-        # sprite's stage/hat and the mood that tints the idle face.
+        # the accent, the effort chrome, the usage bars, the context ring, and the dim
+        # info line. The card reads its SessionView and paints. The pet look is
+        # card-side: the sprite's stage/hat and the mood that tints the idle face.
         pet_look = self._effective_pet_view()
         sv = self._presenter.view(now, mood=pet_look.mood,
                                   effort_fallback=effort.settings_effort())
         draw_raw = sv.draw_raw
         self._draw_raw = draw_raw
-        self._dead_until = sv.reset_at
         eff = sv.effective
         self._eff = eff
         face = sv.face
@@ -754,7 +731,7 @@ class QtCard(QWidget):
             1.0, (now - self._fade_start) / CROSSFADE_S)
         if fade >= 1.0:
             self._prev_pixmap = None
-        count = min(len(self._state.get("subagents") or []), MAX_BADGES)
+        count = min(sv.subagent_count, MAX_BADGES)
         badge = self._badge_pixmap() if count else None
 
         # Effort-reactive chrome: the presenter decides the level (uncontested — a
@@ -767,16 +744,13 @@ class QtCard(QWidget):
         panel_bg: tuple = bg_marker(sv.effort_bg_kind, t)
         accent = effort.border_accent(sv.chrome_level, t)
         border = _hex(accent) if accent is not None else PANEL_EDGE
-        info = info_line(self._state.get("file"), self._state.get("model"))
-        if self._dead_until is not None:     # the reset time replaces file · model
-            info = "resets " + time.strftime("%H:%M", time.localtime(self._dead_until))
 
         self._panel.show_art(self._pixmap, sv.caption, bob,
                              prev=self._prev_pixmap, fade=fade, scale=self._scale_now(now),
                              badge=badge, badge_count=count,
                              panel_fill=panel_fill, border=border, bars=sv.bars,
                              usage_stale=sv.usage_stale,
-                             ring=sv.ring, panel_bg=panel_bg, info=info)
+                             ring=sv.ring, panel_bg=panel_bg, info=sv.info)
 
     def _adopt_pixmap(self, pixmap: QPixmap, stage: str, now: float) -> None:
         """Swap in a new creature pixmap with the right transition: a stage change

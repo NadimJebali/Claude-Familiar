@@ -328,6 +328,44 @@ def test_view_ring_is_the_per_session_context_gauge():
     assert p.view(T0).ring is None
 
 
+# --- info facts: model tag, dim info line, sub-agent count (#105) ---------------
+def test_model_label_strips_prefix_and_date():
+    assert presenter.model_label("claude-opus-4-8") == "opus-4-8"
+    assert presenter.model_label("claude-haiku-4-5-20251001") == "haiku-4-5"
+    assert presenter.model_label("") == ""
+    assert presenter.model_label("weird") == "weird"
+
+
+def test_view_model_tag_is_the_short_label():
+    assert _present("working", model="claude-fable-5").view(T0).model_tag == "fable-5"
+
+
+def test_info_line_joins_file_basename_and_model_tag():
+    assert presenter.info_line(r"C:\repo\mascot\qt_app.py",
+                               "claude-fable-5") == "qt_app.py · fable-5"
+    assert presenter.info_line("", "claude-opus-4-8") == "opus-4-8"   # idle: model alone
+    assert presenter.info_line("hooks/emit.py", None) == "emit.py"
+    assert presenter.info_line(None, None) == ""
+
+
+def test_view_info_is_file_model_or_the_reset_time():
+    assert _present("working", file=r"C:\x\a.py",
+                    model="claude-fable-5").view(T0).info == "a.py · fable-5"
+    assert _present("idle", model="claude-opus-4-8").view(T0).info == "opus-4-8"
+    # A tombstoned session's reset time replaces the file · model line.
+    p = _present("working", file="C:/x/a.py", model="claude-fable-5")
+    p.adopt_usage({"ts": T0, "five_hour": {"used_percentage": 100.0,
+                                           "resets_at": T0 + 3600}})
+    assert p.view(T0).info.startswith("resets ")
+
+
+def test_subagent_count_is_the_raw_live_count():
+    subs = [{"id": "a", "type": "t", "description": ""},
+            {"id": "b", "type": "t", "description": ""}]
+    assert _present("working", subagents=subs).view(T0).subagent_count == 2
+    assert _present("working").view(T0).subagent_count == 0
+
+
 # --- status_line: the Compact row's rich text (composed from the view) ----------
 def _status(st="idle", *, now=T0, chars=34, mood="content", **over):
     return presenter.status_line(_present(st, now=now, **over).view(now, mood=mood),
