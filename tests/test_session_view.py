@@ -304,6 +304,9 @@ def test_usage_bars_derives_label_percent_and_traffic_light_color():
     assert bars == (("5h", 76.0, _hex(usage.bar_color(76.0))),
                     ("7d", 93.0, _hex(usage.bar_color(93.0))))
     assert presenter.usage_bars(None, now) == ()   # no snapshot -> no bars
+    # A window past its reset reads 0 (reset decay), not its stale percentage.
+    past = {"ts": now, "five_hour": {"used_percentage": 80.0, "resets_at": now - 1}}
+    assert presenter.usage_bars(past, now) == (("5h", 0.0, _hex(usage.bar_color(0.0))),)
 
 
 def test_view_carries_the_bars_and_staleness():

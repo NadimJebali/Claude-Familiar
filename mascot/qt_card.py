@@ -474,10 +474,10 @@ class _CardPanel(QWidget):
         """The context gauge (#73): a faint circular track at the panel's top-right
         with a traffic-light arc filling clockwise from 12 o'clock as the session's
         context window fills. Nothing at all before the first tailer result."""
-        ring = self._view.ring if self._view is not None else None
-        if ring is None:
+        assert self._view is not None       # paintEvent guards this
+        if self._view.ring is None:
             return
-        pct, color = ring
+        pct, color = self._view.ring
         rect = QRectF(CARD_W - RING_MARGIN - RING_DIAMETER, RING_MARGIN,
                       RING_DIAMETER, RING_DIAMETER)
         pen = p.pen()

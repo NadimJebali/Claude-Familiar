@@ -556,15 +556,28 @@ def test_paw_button_scales_with_the_widget_size(app, monkeypatch):
     _state("s", "dead"),
 ])
 def test_both_themes_derive_one_session_view(app, monkeypatch, st):
-    # A Classic card and a Compact row, fed the same session, must derive the SAME
-    # SessionView — if either theme quietly re-derived a fact from the raw state
-    # instead of reading the view, the two would diverge and this fails.
+    # Drift guard (#107): a Classic card and a Compact row, fed the same session,
+    # must render every fact FROM one SessionView — if either theme re-derived a
+    # fact locally instead of reading the view, this fails.
     monkeypatch.setattr(qt_card.effort, "settings_effort", lambda *a, **k: "")
     st = {**st, "ts": time.time()}                    # fresh -> time-stable in the test
     card = qt_card.QtCard("s", st, 0, QtPixmapRenderer(), pet_enabled=False)
     win = qt_compact.CompactWindow()
     win.set_sessions({"s": st})
-    assert card._panel._view == win._session_view("s", st, time.time())
+    now = time.time()
+    view = win._session_view("s", st, now)
+
+    # The card paints only off its stored SessionView (the panel holds no separate
+    # fact fields), so an equal view means the card renders from the seam.
+    assert card._panel._view == view
+
+    # The compact row's rendered fields must all trace back to the view — re-deriving
+    # any of them (dot / dim / effort tint / model / count / ring / text) fails here.
+    _sid, text, dot, dim, effort_fill, _bg, model, subs, ring = win._row("s", st, now, 0.0)
+    assert (dot, dim, effort_fill, model, subs, ring) == (
+        view.dot_color, view.dim, view.effort_fill, view.model_tag,
+        view.subagent_count, view.ring)
+    assert text == qt_compact.status_line(view, notify_max_chars=qt_compact.NOTIFY_MAX_CHARS)
     card.close()
     win.close()
 

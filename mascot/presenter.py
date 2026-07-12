@@ -119,6 +119,12 @@ def info_line(file: object, model: str | None) -> str:
     return " · ".join(parts)
 
 
+def _reset_hhmm(reset_at: float) -> str:
+    """The local ``HH:MM`` an exhausted account resets at. One definition, so the
+    card's dim line and the compact row can't drift on the time format."""
+    return time.strftime("%H:%M", time.localtime(reset_at))
+
+
 def _hex(rgb: tuple[int, int, int]) -> str:
     """An ``#rrggbb`` string for an (r, g, b) triple. Clamps + rounds so a lerped
     (float) color hexes cleanly too."""
@@ -220,9 +226,10 @@ class SessionView:
     (``reset_at``), the pending attention message, the active tool, and the
     working file's display name.
 
-    The view has grown a fact group per ticket: #101 the state text, #102 the
+    The view grew a fact group per ticket: #101 the state text, #102 the
     visual-identity trio (accent, dot color, dim), #103 the effort chrome, #104 the
-    usage bars + staleness + context ring. The info line is added by a later ticket.
+    usage bars + staleness + context ring, #105 the info facts (model tag, dim info
+    line, sub-agent count). It now carries every per-session fact both themes paint.
     """
     effective: str
     face: str
@@ -336,18 +343,21 @@ class SessionPresenter:
         or tombstoned (dead) — don't cheer over a "needs you" or a gravestone. The
         theme adds its own pet-enabled gate on top."""
         return (not self._overlay.is_dizzy(now)
-                and self._promoted_raw(now) not in ("waiting", "dead"))
+                and self._promoted_raw(now)[0] not in ("waiting", "dead"))
 
-    def _promoted_raw(self, now: float) -> str:
-        """The raw the session acts on this instant: the pending-tool promotion plus
-        the usage-death override. Pure — unlike :meth:`view`, it runs no clock side
-        effect (no note_raw), so gate queries can call it freely."""
+    def _promoted_raw(self, now: float) -> tuple[str, float | None]:
+        """The raw the session acts on this instant plus the account's reset time:
+        the pending-tool promotion, then the usage-death override (a full window ->
+        ``dead``, carrying its ``resets_at``). Pure — unlike :meth:`view` it runs no
+        clock side effect (no note_raw), so gate queries can call it freely, and both
+        callers share the single ``exhausted_until`` read."""
         state = self._state
         draw_raw = self._overlay.promote(
             self._raw, now, ts=state.get("ts"), tool=state.get("tool"))
-        if usage.exhausted_until(self._usage, now) is not None:
+        reset_at = usage.exhausted_until(self._usage, now)
+        if reset_at is not None:
             draw_raw = "dead"
-        return draw_raw
+        return draw_raw, reset_at
 
     # --- the single read --------------------------------------------------
     def view(self, now: float, *, mood: str = "content",
@@ -367,10 +377,9 @@ class SessionPresenter:
         state = self._state
         ts = state.get("ts")
         # Promote a pending permission prompt and apply the usage-death override
-        # (shared with the gate query), then drive the clocks + ladder off this
-        # promoted raw so the normal waiting machinery still engages.
-        draw_raw = self._promoted_raw(now)
-        reset_at = usage.exhausted_until(self._usage, now)
+        # (shared with the gate query — one exhausted_until read), then drive the
+        # clocks + ladder off this promoted raw so the waiting machinery engages.
+        draw_raw, reset_at = self._promoted_raw(now)
         self._overlay.note_raw(draw_raw, now)
         effective = self._overlay.effective(draw_raw, now, ts=ts, mood=mood)
         stumbled_recent = (bool(state.get("stumbled")) and ts is not None
@@ -388,8 +397,7 @@ class SessionPresenter:
             effort_level, contested=contested)
         # The dim info line: the reset time while tombstoned (a usage-exhausted
         # session carries one), else the file · model composition.
-        info = ("resets " + time.strftime("%H:%M", time.localtime(reset_at))
-                if reset_at is not None
+        info = ("resets " + _reset_hhmm(reset_at) if reset_at is not None
                 else info_line(state.get("file"), state.get("model")))
         return SessionView(
             effective=effective,
@@ -426,8 +434,7 @@ def status_line(view: SessionView, *, notify_max_chars: int) -> str:
     """
     if view.is_dead:
         if view.reset_at is not None:
-            return "out of usage · resets " + time.strftime(
-                "%H:%M", time.localtime(view.reset_at))
+            return "out of usage · resets " + _reset_hhmm(view.reset_at)
         return "out of usage"
     if view.face in _WAITING_FACES:
         message = view.notify_message
