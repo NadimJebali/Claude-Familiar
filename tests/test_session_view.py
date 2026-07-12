@@ -366,6 +366,31 @@ def test_subagent_count_is_the_raw_live_count():
     assert _present("working").view(T0).subagent_count == 0
 
 
+# --- interaction gates + mood emotes (#106) -------------------------------------
+def test_can_pet_gates_on_state_and_dizzy():
+    assert _present("idle").can_pet(T0) is True
+    assert _present("working").can_pet(T0) is True
+    # Don't cheer over a "needs you" or a gravestone.
+    assert _present("waiting").can_pet(T0) is False
+    assert _present("dead").can_pet(T0) is False
+    # A pending-promoted (waiting) session blocks petting too.
+    pending = _present("working", tool="Bash", ts=T0 - _CFG.permission_wait_s - 5)
+    assert pending.can_pet(T0) is False
+    # Dizzy blocks it until it wears off.
+    p = _present("idle")
+    p.note_dizzy(T0)
+    assert p.can_pet(T0) is False
+    assert p.can_pet(T0 + _CFG.dizzy_duration_s + 0.1) is True
+
+
+def test_emote_for_maps_moods_to_emotes():
+    assert presenter.emote_for("idle_hungry") == "food"
+    assert presenter.emote_for("idle_tired") == "zzz"
+    assert presenter.emote_for("sleeping") == "zzz"
+    assert presenter.emote_for("idle") is None
+    assert presenter.emote_for("working") is None
+
+
 # --- status_line: the Compact row's rich text (composed from the view) ----------
 def _status(st="idle", *, now=T0, chars=34, mood="content", **over):
     return presenter.status_line(_present(st, now=now, **over).view(now, mood=mood),

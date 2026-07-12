@@ -83,6 +83,7 @@ from .presenter import (
     SessionPresenter,
     _hex,
     bg_marker,
+    emote_for,
 )
 from .qt_popups import QtBubble, QtStatsTooltip
 from .sprite_qt import SpriteRenderer, SpriteSpec
@@ -215,8 +216,6 @@ EMOTE_LIFETIME_S = 1.4
 EMOTE_MIN_GAP_S = 3.0
 EMOTE_MAX_GAP_S = 5.0
 _ZZZ_FADE_RGB = (247, 243, 238)   # the "Z" starts near-white and fades to the panel
-# Which mood emote (if any) to pop for an effective state.
-_EMOTE_FOR_STATE = {"idle_hungry": "food", "idle_tired": "zzz", "sleeping": "zzz"}
 
 _PARTICLE_KINDS = {
     "heart": particles.ParticleKind(
@@ -840,12 +839,11 @@ class QtCard(QWidget):
         if event.button() == Qt.MouseButton.LeftButton and self._press_pos is not None:
             moved = (event.globalPosition().toPoint() - self._press_pos).manhattanLength()
             now = time.time()
-            # A tap (no drag) pets the mascot. Gated like the Tk card: dead in simple
-            # mode (a read-only indicator), and never while dizzy, or while the card is
-            # waiting/dead (don't cheer over a "needs you" or a gravestone).
+            # A tap (no drag) pets the mascot. Simple mode is a read-only indicator
+            # (no pet); the presenter gates the rest — never while dizzy, waiting, or
+            # tombstoned (don't cheer over a "needs you" or a gravestone).
             if (self._pet_enabled and moved <= PET_TAP_MAX_DIST
-                    and not self._presenter.is_dizzy(now)
-                    and self._draw_raw not in ("waiting", "dead")):
+                    and self._presenter.can_pet(now)):
                 self._presenter.note_celebrate(now)   # a happy hop
                 self._emit_hearts(now)              # rising pixel hearts
                 self.petted.emit(self.session_id)
@@ -977,8 +975,9 @@ class QtCard(QWidget):
 
     def _schedule_emote(self, now: float) -> None:
         """Pop a mood emote (food when hungry, a drifting Z when tired/asleep) every
-        few seconds while in that mood — the kind follows the effective state."""
-        kind = _EMOTE_FOR_STATE.get(self._eff)
+        few seconds while in that mood — the presenter picks the kind from the
+        effective state, so the emote and the face always agree."""
+        kind = emote_for(self._eff)
         if kind is None:
             self._next_emote = 0.0
             return

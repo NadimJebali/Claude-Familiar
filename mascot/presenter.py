@@ -141,6 +141,17 @@ def usage_bars(snapshot: Any, now: float) -> tuple[tuple[str, float, str], ...]:
                  for bar in usage.usage_view(snapshot, now))
 
 
+# Which mood emote (if any) a Classic card pops for an effective state — food while
+# hungry, a drifting Z while tired or asleep. The compact rows are emote-free.
+_EMOTE_FOR_STATE = {"idle_hungry": "food", "idle_tired": "zzz", "sleeping": "zzz"}
+
+
+def emote_for(effective: str) -> str | None:
+    """The mood emote to pop for an effective state, or ``None``. The Classic card
+    schedules it off the displayed effective state, so the emote and the face agree."""
+    return _EMOTE_FOR_STATE.get(effective)
+
+
 def _ring(context_pct: float | None) -> tuple[float, str] | None:
     """The per-session context gauge: ``(percent, traffic-light color)`` or ``None``
     until the transcript tailer has a first result for the session."""
@@ -319,6 +330,25 @@ class SessionPresenter:
         (the card's attention-shake ramp)."""
         return self._overlay.waiting_elapsed(now)
 
+    def can_pet(self, now: float) -> bool:
+        """Whether a pet tap should register right now: not while the mascot is
+        dizzy, nor while it's demanding attention (waiting — real or pending-promoted)
+        or tombstoned (dead) — don't cheer over a "needs you" or a gravestone. The
+        theme adds its own pet-enabled gate on top."""
+        return (not self._overlay.is_dizzy(now)
+                and self._promoted_raw(now) not in ("waiting", "dead"))
+
+    def _promoted_raw(self, now: float) -> str:
+        """The raw the session acts on this instant: the pending-tool promotion plus
+        the usage-death override. Pure — unlike :meth:`view`, it runs no clock side
+        effect (no note_raw), so gate queries can call it freely."""
+        state = self._state
+        draw_raw = self._overlay.promote(
+            self._raw, now, ts=state.get("ts"), tool=state.get("tool"))
+        if usage.exhausted_until(self._usage, now) is not None:
+            draw_raw = "dead"
+        return draw_raw
+
     # --- the single read --------------------------------------------------
     def view(self, now: float, *, mood: str = "content",
              effort_fallback: str = "") -> SessionView:
@@ -336,13 +366,11 @@ class SessionPresenter:
         one answer."""
         state = self._state
         ts = state.get("ts")
-        # Promote a pending permission prompt off the *original* raw, then let a
-        # full usage window tombstone every state. Drive the clocks + ladder off
-        # this promoted raw so the normal waiting machinery still engages.
-        draw_raw = self._overlay.promote(self._raw, now, ts=ts, tool=state.get("tool"))
+        # Promote a pending permission prompt and apply the usage-death override
+        # (shared with the gate query), then drive the clocks + ladder off this
+        # promoted raw so the normal waiting machinery still engages.
+        draw_raw = self._promoted_raw(now)
         reset_at = usage.exhausted_until(self._usage, now)
-        if reset_at is not None:
-            draw_raw = "dead"
         self._overlay.note_raw(draw_raw, now)
         effective = self._overlay.effective(draw_raw, now, ts=ts, mood=mood)
         stumbled_recent = (bool(state.get("stumbled")) and ts is not None
