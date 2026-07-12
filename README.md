@@ -78,12 +78,12 @@ baby / teen / adult) in **Settings → Appearance → Mascot Look**.
   clockwise as the session's **context window** fills (read by tailing the
   session transcript — works in the VS Code extension too), turning amber at 70%
   and red at 90%: compaction is coming. It appears once the session has its first
-  assistant turn. The window size is inferred from the evidence: 200k until a
-  session's tokens prove a **1M** window, then the gauge snaps (and sticks) to 1M
-  for that session. Inference has a blind spot — a `[1m]` session *below* 200k
-  reads against 200k (nothing Claude Code writes exposes the real window) — so
-  **Settings → Context gauge** can pin the window to **200k** or **1M** outright;
-  a Save corrects the ring live.
+  assistant turn. The gauge ships measuring against the **1M** window of current
+  Claude Code plans; **Settings → Context gauge** can pin it to **200k** instead,
+  or set it to **auto** — infer the window from the evidence (200k until a
+  session's tokens prove 1M, then snap and stick to 1M). Auto's blind spot is why
+  it isn't the default: a `[1m]` session *below* 200k reads against 200k (nothing
+  Claude Code writes exposes the real window). A Save corrects the ring live.
 - **Expressive faces.** While working, the eyes match the tool — reading
   (Read/Grep), editing (Edit/Write), running commands (Bash, gritted teeth), or
   browsing the web. In **plan mode** it wears a pondering *planning…* face. When
@@ -237,7 +237,15 @@ python install.py          # or double-click install.bat
 This installs Claude Familiar as a real desktop app: it installs the Claude Code
 hooks, adds **application-menu and desktop shortcuts** (Start-menu `.lnk` files on
 Windows, freedesktop `.desktop` entries on Linux — so you can launch it with the
-mascot icon, just like any other app), and opens the **settings panel**. There you can pick the mascot art, choose the
+mascot icon, just like any other app), and opens the **settings panel**.
+
+On Linux the system Python usually refuses `pip install` (PEP 668, *externally
+managed* — any recent Debian/Ubuntu/Fedora): the installer then provisions a
+project venv at `.venv/` automatically and finishes the install under it, so
+every shortcut and hook records an interpreter that provably runs the app. If
+even a venv can't be created, it stops with the exact commands to run
+(typically `sudo apt install python3-venv` first) — it never installs
+launchers that would die silently. There you can pick the mascot art, choose the
 **widget size** (small / medium / large), toggle the transparent floating card,
 enable or disable the Tamagotchi pet (off = a simple hook visualiser),
 add/remove the app shortcuts, enable run-at-login, and launch the widget.
@@ -492,6 +500,13 @@ Static typing is [mypy](https://mypy.readthedocs.io/) (config in `mypy.ini`);
   desktop has no tray host, the widget runs exactly the same, just without an icon.
   Open settings with `python -m mascot.qt_control_panel` and quit the widget from
   its launcher/process.
+- **Cards can't be dragged / ignore their corner (Linux + Wayland).** Wayland
+  doesn't let an app position its own windows, and the cards are nothing *but*
+  positioned windows — drag, the bottom-right stack, the attention shake and the
+  popup anchoring all move windows to screen coordinates. The widget therefore
+  runs on XWayland (`xcb`) when the session provides one, which restores all of
+  it. Set `QT_QPA_PLATFORM` yourself to override (e.g. `wayland` to force the
+  native backend, positioning caveats and all).
 - **Only one widget runs at a time.** Launching the widget again (e.g. autostart
   plus a manual launch) is a no-op — a single-instance guard makes the second one
   exit cleanly, so cards never appear doubled.
