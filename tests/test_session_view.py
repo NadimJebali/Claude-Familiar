@@ -272,9 +272,10 @@ def test_effort_fill_is_the_quiet_tint_only():
     # Animated levels paint their own background, so they carry no flat tint.
     assert _present("working").view(T0, effort_fallback="max").effort_fill is None
     assert _present("working").view(T0, effort_fallback="xhigh").effort_fill is None
-    # No effort, or a contested (waiting) session -> no tint.
+    # No effort, or a contested session (waiting or tombstoned) -> no tint.
     assert _present("working").view(T0, effort_fallback="").effort_fill is None
     assert _present("waiting").view(T0, effort_fallback="high").effort_fill is None
+    assert _present("dead").view(T0, effort_fallback="max").effort_fill is None
 
 
 def test_effort_bg_kind_marks_the_animated_levels_uncontested():

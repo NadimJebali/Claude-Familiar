@@ -81,6 +81,7 @@ from .presenter import (
     PERMISSION_WAIT_S,
     WORKING_STALL_S,
     SessionPresenter,
+    SessionView,
     _hex,
     bg_marker,
     emote_for,
@@ -298,9 +299,11 @@ class _CardPanel(QWidget):
         self._prev: QPixmap | None = None     # the fading-out face during a crossfade
         self._fade = 1.0                      # 0..1 — how much the new face is shown
         self._scale = 1.0                     # evolution scale-up (1.0 = settled)
-        self._caption = ""
-        self._info = ""                       # the dim file · model line (#85)
         self._bob = 0.0                       # sub-pixel float offset
+        # The session facts to paint (#107): caption, dim info line, usage bars +
+        # staleness, and the context ring all read off this one SessionView, so a
+        # new rendered fact is added to the view, not threaded through show_art.
+        self._view: SessionView | None = None
         # The sub-agent badges: one shared mini-mascot pixmap, drawn ``_badge_count``
         # times in a centered row (all badges are identical, so a count is enough).
         self._badge: QPixmap | None = None
@@ -308,38 +311,29 @@ class _CardPanel(QWidget):
         self._frame: tuple = ()               # last-shown art tuple (repaint guard)
         # Rising particles to paint this frame: (grid, char->color, cx, cy, px).
         self._particles: list[tuple[list[str], dict[str, str], float, float, int]] = []
-        # Effort-reactive chrome + the usage bars, pushed by the card each render.
-        self._panel_fill = PANEL_FILL         # solid base / quiet-level tint
-        self._border = PANEL_EDGE             # accent border for the animated levels
-        self._bars: tuple[tuple[str, float, str], ...] = ()   # (label, pct, color)
-        self._stale = False                   # aged snapshot -> dim bars + "stale" (#69)
-        self._ring: tuple[float, str] | None = None   # context gauge: (pct, color) (#73)
-        # The animated background over the base fill: ("solid",) for the quiet levels,
-        # ("rainbow", t) for max's pixel wash, ("ripple", t) for xhigh's radiating rings.
+        # The adapter-computed animation the card supplies each frame (over the
+        # view's static facts): the accent border color and the animated background
+        # marker — both driven by the card's animation clock.
+        self._border = PANEL_EDGE
         self._panel_bg: tuple = ("solid",)
 
-    def show_art(self, pixmap: QPixmap | None, caption: str, bob: float, *,
+    def show_art(self, view: SessionView, *, pixmap: QPixmap | None,
                  prev: QPixmap | None = None, fade: float = 1.0, scale: float = 1.0,
-                 badge: QPixmap | None = None, badge_count: int = 0,
-                 panel_fill: str = PANEL_FILL, border: str = PANEL_EDGE,
-                 bars: tuple[tuple[str, float, str], ...] = (),
-                 usage_stale: bool = False,
-                 ring: tuple[float, str] | None = None,
-                 panel_bg: tuple = ("solid",),
-                 info: str = "") -> None:
-        frame = (pixmap, caption, bob, prev, fade, scale, badge, badge_count,
-                 panel_fill, border, bars, usage_stale, ring, panel_bg, info)
+                 bob: float = 0.0, badge: QPixmap | None = None, badge_count: int = 0,
+                 border: str = PANEL_EDGE, panel_bg: tuple = ("solid",)) -> None:
+        """Adopt the frame to paint: the session ``view`` (the static facts) plus the
+        card's per-frame animation — the creature pixmap and its crossfade/scale/bob,
+        the sub-agent badges, and the animated border + background marker."""
+        frame = (view, pixmap, prev, fade, scale, bob, badge, badge_count,
+                 border, panel_bg)
         if frame == self._frame:          # nothing changed this tick — skip the repaint
             return
         self._frame = frame
-        self._pixmap, self._caption, self._bob = pixmap, caption, bob
-        self._info = info
+        self._view = view
+        self._pixmap, self._bob = pixmap, bob
         self._prev, self._fade, self._scale = prev, fade, scale
         self._badge, self._badge_count = badge, badge_count
-        self._panel_fill, self._border, self._bars = panel_fill, border, bars
-        self._stale = usage_stale
-        self._ring = ring
-        self._panel_bg = panel_bg
+        self._border, self._panel_bg = border, panel_bg
         self.update()
 
     def set_particles(self, cells: list[tuple[list[str], dict[str, str],
@@ -350,6 +344,8 @@ class _CardPanel(QWidget):
         self.update()
 
     def paintEvent(self, _event) -> None:
+        if self._view is None:            # not painted before the card's first render
+            return
         p = QPainter(self)
         try:
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -357,7 +353,7 @@ class _CardPanel(QWidget):
             panel = QRectF(0.5, 0.5, CARD_W - 1, CARD_H - 1)
             path = QPainterPath()
             path.addRoundedRect(panel, PANEL_RADIUS, PANEL_RADIUS)
-            p.fillPath(path, QColor(self._panel_fill))
+            p.fillPath(path, QColor(self._view.effort_fill or PANEL_FILL))
             if self._panel_bg[0] != "solid":     # max wash / xhigh rings, clipped to the panel
                 p.save()
                 p.setClipPath(path)
@@ -372,13 +368,13 @@ class _CardPanel(QWidget):
             p.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
             p.drawText(QRectF(0, CAPTION_Y, CARD_W, 22),
                        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
-                       self._caption)
-            if self._info:
+                       self._view.caption)
+            if self._view.info:
                 p.setPen(QColor(INFO_FG))
                 p.setFont(QFont("Segoe UI", 7))
                 p.drawText(QRectF(0, INFO_Y, CARD_W, 14),
                            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
-                           self._info)
+                           self._view.info)
 
             self._paint_badges(p)
             self._paint_usage(p)
@@ -446,10 +442,12 @@ class _CardPanel(QWidget):
         label, a track, a traffic-light fill, and a NN% readout. An aged snapshot
         (#69) draws dimmed with a small "stale" caption over the block — the numbers
         still show (reset decay keeps them honest) but read as old news."""
+        assert self._view is not None       # paintEvent guards this
+        bars, stale = self._view.bars, self._view.usage_stale
         p.setFont(QFont("Segoe UI", 6))
-        if self._stale and self._bars:
+        if stale and bars:
             p.setOpacity(0.45)
-        for i, (label, pct, color) in enumerate(self._bars):
+        for i, (label, pct, color) in enumerate(bars):
             top = USAGE_ROW_TOP + i * (USAGE_BAR_H + USAGE_BAR_GAP)
             row = QRectF(0, top - 4, CARD_W, USAGE_BAR_H + 8)   # vertically centers the text
             p.setPen(QColor(USAGE_LABEL_FG))
@@ -465,9 +463,9 @@ class _CardPanel(QWidget):
             p.drawText(QRectF(USAGE_PCT_X - 40, row.y(), 40, row.height()),
                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                        f"{round(pct)}%")
-        if self._stale and self._bars:
+        if stale and bars:
             p.setOpacity(1.0)
-            block_h = len(self._bars) * (USAGE_BAR_H + USAGE_BAR_GAP) - USAGE_BAR_GAP
+            block_h = len(bars) * (USAGE_BAR_H + USAGE_BAR_GAP) - USAGE_BAR_GAP
             p.setPen(QColor(USAGE_LABEL_FG))
             p.drawText(QRectF(0, USAGE_ROW_TOP - 4, CARD_W, block_h + 8),
                        Qt.AlignmentFlag.AlignCenter, "stale")
@@ -476,9 +474,10 @@ class _CardPanel(QWidget):
         """The context gauge (#73): a faint circular track at the panel's top-right
         with a traffic-light arc filling clockwise from 12 o'clock as the session's
         context window fills. Nothing at all before the first tailer result."""
-        if self._ring is None:
+        ring = self._view.ring if self._view is not None else None
+        if ring is None:
             return
-        pct, color = self._ring
+        pct, color = ring
         rect = QRectF(CARD_W - RING_MARGIN - RING_DIAMETER, RING_MARGIN,
                       RING_DIAMETER, RING_DIAMETER)
         pen = p.pen()
@@ -733,23 +732,19 @@ class QtCard(QWidget):
         count = min(sv.subagent_count, MAX_BADGES)
         badge = self._badge_pixmap() if count else None
 
-        # Effort-reactive chrome: the presenter decides the level (uncontested — a
-        # waiting/dead panel stays sombre so it doesn't fight the attention shake or
-        # the gravestone), the quiet tint, and the animated marker; the card supplies
-        # the clock and paints. The border color is per-frame animation, so it's
-        # derived here from the (already uncontested) chrome level.
+        # Effort-reactive chrome animation: the presenter already decided the level
+        # (uncontested) and the quiet tint (which the panel reads off the view); the
+        # card supplies the clock and paints the two per-frame animations — the
+        # background marker and the accent-border color, both from the chrome level.
         t = now - self._anim_t0
-        panel_fill = sv.effort_fill or PANEL_FILL
         panel_bg: tuple = bg_marker(sv.effort_bg_kind, t)
         accent = effort.border_accent(sv.chrome_level, t)
         border = _hex(accent) if accent is not None else PANEL_EDGE
 
-        self._panel.show_art(self._pixmap, sv.caption, bob,
-                             prev=self._prev_pixmap, fade=fade, scale=self._scale_now(now),
+        self._panel.show_art(sv, pixmap=self._pixmap, prev=self._prev_pixmap,
+                             fade=fade, scale=self._scale_now(now), bob=bob,
                              badge=badge, badge_count=count,
-                             panel_fill=panel_fill, border=border, bars=sv.bars,
-                             usage_stale=sv.usage_stale,
-                             ring=sv.ring, panel_bg=panel_bg, info=sv.info)
+                             border=border, panel_bg=panel_bg)
 
     def _adopt_pixmap(self, pixmap: QPixmap, stage: str, now: float) -> None:
         """Swap in a new creature pixmap with the right transition: a stage change

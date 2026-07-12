@@ -22,7 +22,7 @@ from PySide6.QtCore import QEvent, QPointF, Qt, QThreadPool
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
 
-from mascot import config, effort, pet_service, qt_app, qt_card, qt_ingest, qt_popups, usage
+from mascot import config, effort, pet_service, qt_app, qt_card, qt_compact, qt_ingest, qt_popups
 from mascot.sprite_qt import QtPixmapRenderer, SpriteSpec
 
 
@@ -483,8 +483,8 @@ def test_card_tombstones_when_usage_is_exhausted_and_revives(app):
                                              "resets_at": now + 3600}})
     card._render(time.time())
     assert card._draw_raw == "dead"
-    assert card._panel._caption == "out of usage"
-    assert card._panel._info.startswith("resets ")   # the reset time on the dim line
+    assert card._panel._view.caption == "out of usage"
+    assert card._panel._view.info.startswith("resets ")   # the reset time on the dim line
 
     card.set_usage({"ts": now, "five_hour": {"used_percentage": 100.0,
                                              "resets_at": now - 60}})
@@ -543,6 +543,30 @@ def test_paw_button_scales_with_the_widget_size(app, monkeypatch):
     assert card._paw is not None
     assert card._paw.iconSize().width() == paw_px * 12  # the paw grid is 12 cells
     card.close()
+
+
+# --- drift guard (#107): both themes derive ONE session view ---------------------
+@pytest.mark.parametrize("st", [
+    _state("s", "idle"),
+    {**_state("s", "working"), "tool": "Edit", "effort": "high",
+     "file": "C:/x/a.py", "model": "claude-fable-5",
+     "subagents": [{"id": "a", "type": "t", "description": ""}]},
+    {**_state("s", "waiting"), "effort": "max",
+     "notify": {"message": "Approve?", "type": "q"}},
+    _state("s", "dead"),
+])
+def test_both_themes_derive_one_session_view(app, monkeypatch, st):
+    # A Classic card and a Compact row, fed the same session, must derive the SAME
+    # SessionView — if either theme quietly re-derived a fact from the raw state
+    # instead of reading the view, the two would diverge and this fails.
+    monkeypatch.setattr(qt_card.effort, "settings_effort", lambda *a, **k: "")
+    st = {**st, "ts": time.time()}                    # fresh -> time-stable in the test
+    card = qt_card.QtCard("s", st, 0, QtPixmapRenderer(), pet_enabled=False)
+    win = qt_compact.CompactWindow()
+    win.set_sessions({"s": st})
+    assert card._panel._view == win._session_view("s", st, time.time())
+    card.close()
+    win.close()
 
 
 # --- QtCard: constructs and swaps state without error ------------------------
@@ -1030,90 +1054,15 @@ def test_pet_enabled_card_before_first_push_is_a_bare_baby(app):
 
 
 # --- QtCard: effort-reactive panel + usage bars (main's effort/usage feature, ported) ---
-def _usage_snapshot(five=76.0, week=93.0, *, future=True):
-    """A usage snapshot with both windows; resets far in the future so neither
-    window decays to 0 during the test (or already past, to test reset decay)."""
-    reset = time.time() + 10_000 if future else time.time() - 1
-    return {"five_hour": {"used_percentage": five, "resets_at": reset},
-            "seven_day": {"used_percentage": week, "resets_at": reset}}
-
-
-def test_card_draws_usage_bars_from_the_snapshot(app):
-    card = qt_card.QtCard("s", _state("s", "working"), 0, QtPixmapRenderer())
-    card.set_usage(_usage_snapshot(76.0, 93.0))
-    bars = card._panel._bars
-    assert [(label, round(pct)) for label, pct, _ in bars] == [("5h", 76), ("7d", 93)]
-    # traffic-light colors: 76% -> warning amber, 93% -> alarm red.
-    assert bars[0][2] == qt_card._hex(usage.WARN)
-    assert bars[1][2] == qt_card._hex(usage.ALARM)
-    card.close()
-
-
-def test_card_without_usage_draws_no_bars(app):
-    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer())
-    assert card._panel._bars == ()               # nothing pushed -> an empty row
-    card.close()
-
-
-def test_usage_window_past_its_reset_reads_zero(app):
-    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer())
-    card.set_usage(_usage_snapshot(80.0, 90.0, future=False))   # both already reset
-    assert [round(pct) for _, pct, _ in card._panel._bars] == [0, 0]
-    card.close()
-
-
-def test_context_ring_absent_until_data_then_traffic_lit(app):
-    # The ring gauge (#73): nothing before the first tailer result; then a
-    # top-right arc colored by the usage thresholds (calm / amber / red).
-    card = qt_card.QtCard("s", _state("s", "working"), 0, QtPixmapRenderer())
-    assert card._panel._ring is None                  # no data -> no ring at all
-
-    card.set_context(50.0)
-    assert card._panel._ring == (50.0, qt_card._hex(usage.CALM))
-    card.set_context(76.0)
-    assert card._panel._ring == (76.0, qt_card._hex(usage.WARN))
-    card.set_context(93.0)
-    assert card._panel._ring == (93.0, qt_card._hex(usage.ALARM))
-
-    card.set_context(None)                            # session's % unknown again
-    assert card._panel._ring is None
-    card.close()
-
-
+# The bars, staleness, context ring, and quiet-tint DECISIONS are SessionView facts
+# now (#104, #103) — their derivation is covered at the presenter seam in
+# tests/test_session_view.py. What stays here exercises the card's own painting: the
+# animated background markers (still stored on the panel) and paint smokes.
 def test_context_ring_shows_frozen_on_a_gravestone_and_paints(app):
     card = qt_card.QtCard("s", _state("s", "dead"), 0, QtPixmapRenderer())
     card.set_context(64.0)
-    assert card._panel._ring is not None              # frozen at last value, not hidden
+    assert card._panel._view.ring is not None         # frozen at last value, not hidden
     card._panel.repaint()                             # smoke: the arc math paints clean
-    card.close()
-
-
-def test_stale_usage_flags_the_panel_and_fresh_clears_it(app):
-    # The stale label (#69): an aged snapshot dims the bars + shows "stale"; a
-    # fresh one shows plain bars. The flag rides the repaint-guard frame.
-    card = qt_card.QtCard("s", _state("s", "idle"), 0, QtPixmapRenderer())
-    card.set_usage({**_usage_snapshot(50.0, 60.0), "ts": time.time()})
-    assert card._panel._stale is False
-    card.set_usage({**_usage_snapshot(50.0, 60.0),
-                    "ts": time.time() - usage.STALE_AFTER_S - 5})
-    assert card._panel._stale is True
-    card.close()
-
-
-def test_effort_tints_the_panel(app, monkeypatch):
-    monkeypatch.setattr(qt_card.effort, "settings_effort", lambda *a, **k: "")
-    st = {**_state("s", "working"), "effort": "high"}
-    card = qt_card.QtCard("s", st, 0, QtPixmapRenderer())
-    expected = qt_card._hex(effort.panel_fill("high", qt_card._PANEL_FILL_RGB, 0.0))
-    assert card._panel._panel_fill == expected
-    assert card._panel._panel_fill != qt_card.PANEL_FILL     # actually tinted
-    card.close()
-
-
-def test_no_effort_keeps_the_default_panel(app, monkeypatch):
-    monkeypatch.setattr(qt_card.effort, "settings_effort", lambda *a, **k: "")
-    card = qt_card.QtCard("s", _state("s", "working"), 0, QtPixmapRenderer())
-    assert card._panel._panel_fill == qt_card.PANEL_FILL     # unknown effort -> default
     card.close()
 
 
@@ -1133,7 +1082,7 @@ def test_xhigh_effort_radiates_a_ripple(app, monkeypatch):
     st = {**_state("s", "working"), "effort": "xhigh"}
     card = qt_card.QtCard("s", st, 0, QtPixmapRenderer())
     assert card._panel._panel_bg[0] == "ripple"              # purple rings from the mascot
-    assert card._panel._panel_fill == qt_card.PANEL_FILL     # rings ride over the dark base
+    assert card._panel._view.effort_fill is None             # rings ride over the dark base
     card.close()
 
 
@@ -1144,14 +1093,6 @@ def test_quiet_levels_use_a_solid_background(app, monkeypatch):
                               QtPixmapRenderer())
         assert card._panel._panel_bg == ("solid",)           # a flat tint, no pixel field
         card.close()
-
-
-def test_dead_suppresses_the_effort_tint(app, monkeypatch):
-    monkeypatch.setattr(qt_card.effort, "settings_effort", lambda *a, **k: "")
-    st = {**_state("s", "dead"), "effort": "max"}
-    card = qt_card.QtCard("s", st, 0, QtPixmapRenderer())
-    assert card._panel._panel_fill == qt_card.PANEL_FILL     # a finished session stays sombre
-    card.close()
 
 
 def test_effort_prefers_the_session_level_over_the_settings_fallback(app, monkeypatch):
@@ -1185,6 +1126,6 @@ def test_app_pushes_usage_to_every_card_each_poll(app, tmp_path, monkeypatch):
     mgr = qt_app.QtMascotApp(tmp_path, service=_svc(tmp_path))
     mgr._on_sessions({"s1": _state("s1", "working")})
     card = mgr.cards["s1"]
-    assert card._usage == snap                                    # pushed to the card
-    assert [label for label, *_ in card._panel._bars] == ["5h"]   # rendered as one bar
-    mgr._on_sessions({})                                          # tidy up the card
+    assert card._usage == snap                                          # pushed to the card
+    assert [label for label, *_ in card._panel._view.bars] == ["5h"]    # rendered as one bar
+    mgr._on_sessions({})                                                # tidy up the card
