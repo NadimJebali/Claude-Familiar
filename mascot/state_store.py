@@ -74,10 +74,54 @@ def is_session_live(
     return not is_stale(state, now, timeout)
 
 
+def _heartbeat_key(state: dict[str, Any]) -> tuple[float, float, str]:
+    """Freshness ordering for same-owner files: heartbeat, then birth, then id.
+
+    Coerces defensively — a reader never raises on a malformed file (see
+    mascot/schema.py), and a garbage `ts` simply sorts as oldest.
+    """
+    def _num(key: str) -> float:
+        try:
+            return float(state.get(key, 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+    return (_num("ts"), _num("started"), str(state.get("session_id", "")))
+
+
+def _prune_owner_ghosts(
+    live: dict[str, dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    """Keep at most one session per owning claude process: the freshest heartbeat.
+
+    A claude process hosts one live session at a time, but a session id can be
+    abandoned without a `SessionEnd` — observed with `/login`, which re-keys the
+    session under a fresh id in the same process, stranding the pre-login file
+    (written once, by the auth_success Notification). That ghost shares its alive
+    `owner_pid` with the successor session, so per-file liveness keeps it forever
+    and the widget over-counts. The successor always heartbeats after the
+    abandoned id's last event, so freshest-`ts`-wins never hides a real session.
+    Ownerless files share only ignorance, never a process — left untouched.
+    """
+    by_owner: dict[int, list[str]] = {}
+    for sid, state in live.items():
+        if _has_trackable_owner(state):
+            by_owner.setdefault(int(state["owner_pid"]), []).append(sid)
+    ghosts: set[str] = set()
+    for sids in by_owner.values():
+        if len(sids) > 1:
+            sids.sort(key=lambda sid: _heartbeat_key(live[sid]))
+            ghosts.update(sids[:-1])
+    return {sid: state for sid, state in live.items() if sid not in ghosts}
+
+
 def load_states(
     state_dir: Path, now: float, timeout: float = config.STALE_TIMEOUT_S
 ) -> dict[str, dict[str, Any]]:
-    """Return {session_id: state} for every session whose card should be shown."""
+    """Return {session_id: state} for every session whose card should be shown.
+
+    Per-file liveness (`is_session_live`) first, then the cross-file rule: one
+    card per owning claude process (`_prune_owner_ghosts`).
+    """
     live: dict[str, dict[str, Any]] = {}
     if not state_dir.exists():
         return live
@@ -90,7 +134,7 @@ def load_states(
         sid = state.get("session_id") or path.stem
         if is_session_live(state, now, timeout):
             live[sid] = state
-    return live
+    return _prune_owner_ghosts(live)
 
 
 def _sweep_stale_tmp(state_dir: Path, now: float) -> None:
