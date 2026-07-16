@@ -437,6 +437,51 @@ def test_dead_owner_grace_is_tighter_than_the_ownerless_backstop():
     assert 0 < config.DEAD_OWNER_GRACE_S < config.STALE_TIMEOUT_S
 
 
+def _write_state_file(state_dir, state):
+    (state_dir / f"{state['session_id']}.json").write_text(
+        json.dumps(state), encoding="utf-8")
+
+
+def test_login_ghost_sharing_a_live_owner_shows_only_the_freshest_session(
+        tmp_path, monkeypatch):
+    # Observed live: `/login` restarts the session with a FRESH id in the SAME
+    # claude process and never fires SessionEnd for the old id. The pre-login id's
+    # file (written once, by the auth_success Notification) then shares its alive
+    # owner_pid with the real session forever — a third mascot with two claudes.
+    # One claude process hosts one live session at a time, so among files claiming
+    # the same owner only the freshest heartbeat is real; the rest are ghosts of
+    # abandoned session ids.
+    from mascot import state_store
+    monkeypatch.setattr(state_store, "pid_alive", lambda pid: True)
+    ghost = {"session_id": "pre-login", "state": "waiting",
+             "owner_pid": 9344, "ts": 100.0, "started": 100.0}
+    real = {"session_id": "post-login", "state": "working",
+            "owner_pid": 9344, "ts": 130.0, "started": 121.0}
+    other = {"session_id": "elsewhere", "state": "idle",
+             "owner_pid": 2800, "ts": 90.0, "started": 50.0}
+    for state in (ghost, real, other):
+        _write_state_file(tmp_path, state)
+
+    live = state_store.load_states(tmp_path, now=1_000.0)
+
+    assert set(live) == {"post-login", "elsewhere"}
+
+
+def test_ownerless_files_are_never_deduped_against_each_other(tmp_path):
+    # Dedup keys on a trackable owner PID. Two files that never learned an owner
+    # (psutil missing / lookup failed) share only *ignorance*, not a process —
+    # both must keep their cards while their heartbeats are fresh.
+    from mascot import state_store
+    now = 1_000.0
+    for sid in ("unknown-a", "unknown-b"):
+        _write_state_file(tmp_path, {"session_id": sid, "state": "idle",
+                                     "owner_pid": None, "ts": now - 5.0})
+
+    live = state_store.load_states(tmp_path, now=now)
+
+    assert set(live) == {"unknown-a", "unknown-b"}
+
+
 def test_emit_restamps_a_dead_owner_pid(tmp_path, monkeypatch):
     # #83 (hook side): a stamped-but-dead PID is re-detected on the next event so
     # the widget's instant dead-owner prune tracks the real host process.

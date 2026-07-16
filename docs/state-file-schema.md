@@ -14,6 +14,12 @@ without reverse-engineering the widget.
   file, `~/.claude/mascot/pet.json`, and is not covered here.)
 - **Deletion:** the `SessionEnd` hook deletes the file. A widget also stops
   showing a session once its `owner_pid` is confirmed dead (see below).
+- **Ghost ids:** a session id can be abandoned *without* a `SessionEnd` — e.g.
+  `/login` re-keys the session under a fresh id in the same `claude` process,
+  stranding the pre-login id's file (its `owner_pid` stays alive as long as the
+  successor session runs). One process hosts one live session at a time, so a
+  reader should show at most one session per living `owner_pid`, keeping the
+  freshest `ts` (reference: `_prune_owner_ghosts` in `mascot/state_store.py`).
 
 ## Version marker
 
